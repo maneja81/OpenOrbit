@@ -3,5 +3,9 @@
 # otherwise git records it as a gitlink/submodule.
 /wiki/
 
+# Agent working state — per-machine scratch, not project config.
+/0-cowork/
+/MEMORY.md
+
 # macOS
 .DS_Store
