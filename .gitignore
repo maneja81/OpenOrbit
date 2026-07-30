@@ -1,0 +1,7 @@
+# GitHub wiki, cloned locally for editing.
+# It is a separate repo (OpenOrbit.wiki.git) — never track it here,
+# otherwise git records it as a gitlink/submodule.
+/wiki/
+
+# macOS
+.DS_Store
