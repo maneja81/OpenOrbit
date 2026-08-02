@@ -146,7 +146,7 @@ export const SETTING_DEFAULTS: { [K in SettingKey]: SettingValue<K> } = {
   voiceTranscriptionModel: "whisper-1",
   voiceOutputEnabled: true,
   soundFxEnabled: true,
-  voiceTtsModel: "tts-1",
+  voiceTtsModel: "gpt-4o-mini-tts",
   locationEnabled: false,
   remoteImagesAutoLoad: false,
   bgMusicEnabled: false,

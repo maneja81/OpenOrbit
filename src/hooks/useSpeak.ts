@@ -6,6 +6,15 @@ interface SpeakCallbacks {
   onEnd?: () => void;
 }
 
+// Mirrors into userData/debug.log (via the main process) in addition to the browser
+// console — see electron/main/devLog.ts. Without this, a synthesis failure (bad Voice
+// API key, wrong voiceApiUrl for the provider, unsupported model) falls back to browser
+// speechSynthesis with zero trace, which reads as "the voice setting doesn't do anything."
+function devLog(...args: unknown[]): void {
+  console.log(...args);
+  if (hasAgentsAPI()) window.agentsAPI.dev.log(...args);
+}
+
 /** Speaks replies via the configured AI TTS model (OpenRouter /audio/speech, see
  * synthesizeSpeech in electron/main/ai/provider.ts), falling back to the browser's
  * speechSynthesis if synthesis is unavailable or the request fails — mirrors the
@@ -67,11 +76,15 @@ export function useSpeak() {
           el.onerror = () => {
             setSpeaking(false);
             audioRef.current = null;
+            devLog("[speak] audio playback failed, falling back to browser TTS");
             speakWithBrowserTts(text, callbacks);
           };
           void el.play();
         })
-        .catch(() => speakWithBrowserTts(text, callbacks));
+        .catch((error: unknown) => {
+          devLog("[speak] synth failed, falling back to browser TTS", error instanceof Error ? error.message : String(error));
+          speakWithBrowserTts(text, callbacks);
+        });
     },
     [speakWithBrowserTts]
   );
