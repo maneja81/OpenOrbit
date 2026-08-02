@@ -2,6 +2,7 @@ import { MCPServerStdio } from "@openai/agents";
 import { getDb } from "../db";
 import { encryptSecret, decryptSecret } from "../security/secretStorage";
 import { devLog } from "../devLog";
+import { parseIdList, parseStringMap } from "../db/jsonColumn";
 
 export interface McpServerRow {
   id: string;
@@ -67,7 +68,7 @@ function encryptEnv(env: Record<string, string>): string {
 }
 
 function decryptEnv(envJson: string): Record<string, string> {
-  const stored = JSON.parse(envJson) as Record<string, string>;
+  const stored = parseStringMap("mcp_servers.env", envJson);
   const decrypted: Record<string, string> = {};
   for (const [key, value] of Object.entries(stored)) {
     decrypted[key] = decryptSecret(value);
@@ -135,7 +136,7 @@ export function deleteMcpServer(id: string): void {
   // dangling id in an agent's mcp_server_ids and silently fails to connect on the next run.
   const agents = db.prepare("SELECT id, mcp_server_ids FROM agents").all() as { id: string; mcp_server_ids: string }[];
   for (const agent of agents) {
-    const ids = JSON.parse(agent.mcp_server_ids) as string[];
+    const ids = parseIdList(`agents ${agent.id}/mcp_server_ids`, agent.mcp_server_ids);
     if (!ids.includes(id)) continue;
     db.prepare("UPDATE agents SET mcp_server_ids = ? WHERE id = ?").run(
       JSON.stringify(ids.filter((existingId) => existingId !== id)),
@@ -148,7 +149,7 @@ function buildStdioServer(row: McpServerRow): MCPServerStdio {
   return new MCPServerStdio({
     name: row.name,
     command: row.command,
-    args: JSON.parse(row.args) as string[],
+    args: parseIdList(`mcp_servers ${row.id}/args`, row.args),
     env: decryptEnv(row.env),
   });
 }

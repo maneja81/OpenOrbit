@@ -1,5 +1,6 @@
 import { getDb } from "./index";
 import { encryptSecret, decryptSecret } from "../security/secretStorage";
+import { UNPARSEABLE, parseIdList, parseJsonColumn } from "./jsonColumn";
 
 export interface ConnectorCredentials {
   accessToken: string;
@@ -43,7 +44,10 @@ export function getDecryptedCredentials(id: string): ConnectorCredentials | null
     | { credentials: string | null }
     | undefined;
   if (!row || !row.credentials) return null;
-  return JSON.parse(decryptSecret(row.credentials)) as ConnectorCredentials;
+  const parsed = parseJsonColumn(`connectors ${id}/credentials`, decryptSecret(row.credentials));
+  // null is already how this says "not configured", and every caller handles it — so a row that
+  // cannot be read reports the same thing rather than taking the connector surface down.
+  return parsed === UNPARSEABLE ? null : (parsed as ConnectorCredentials);
 }
 
 /** Persists a connector as connected — inserts the row if this is the first time this
@@ -79,7 +83,8 @@ export function getDecryptedSettings(id: string): Record<string, string> | null 
     | { settings: string | null }
     | undefined;
   if (!row || !row.settings) return null;
-  return JSON.parse(decryptSecret(row.settings)) as Record<string, string>;
+  const parsed = parseJsonColumn(`connectors ${id}/settings`, decryptSecret(row.settings));
+  return parsed === UNPARSEABLE ? null : (parsed as Record<string, string>);
 }
 
 /** Persists a connector's user-entered settings (client id/secret/etc.), independent of
@@ -111,7 +116,7 @@ export function disconnectConnector(id: string): void {
 
   const agents = db.prepare("SELECT id, connector_ids FROM agents").all() as { id: string; connector_ids: string }[];
   for (const agent of agents) {
-    const ids = JSON.parse(agent.connector_ids) as string[];
+    const ids = parseIdList(`agents ${agent.id}/connector_ids`, agent.connector_ids);
     if (!ids.includes(id)) continue;
     db.prepare("UPDATE agents SET connector_ids = ? WHERE id = ?").run(
       JSON.stringify(ids.filter((existingId) => existingId !== id)),

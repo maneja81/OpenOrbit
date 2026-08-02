@@ -47,6 +47,7 @@ import {
   saveConnectorCredentials,
   disconnectConnector,
 } from "../db/connectorsStore";
+import { parseIdList } from "../db/jsonColumn";
 
 // Derived rather than re-declared: this used to be a fourth hand-maintained copy of the same
 // string. Still exported because ipc/settings.ts uses it as the "blank means default" fallback
@@ -563,7 +564,7 @@ const attachConnectorToAgentTool = tool({
     }
     const updated = patchAgentConnectorIds(agentId, (ids) => (ids.includes(connectorId) ? ids : [...ids, connectorId]));
     devLog(`[attach_connector_to_agent] attached ${connectorId} to ${agentId}`);
-    return { id: updated.id, name: updated.name, connectorIds: JSON.parse(updated.connector_ids) };
+    return { id: updated.id, name: updated.name, connectorIds: parseIdList(`agents ${updated.id}/connector_ids`, updated.connector_ids) };
   },
 });
 
@@ -574,7 +575,7 @@ const detachConnectorFromAgentTool = tool({
   execute: async ({ agentId, connectorId }) => {
     const updated = patchAgentConnectorIds(agentId, (ids) => ids.filter((id) => id !== connectorId));
     devLog(`[detach_connector_from_agent] detached ${connectorId} from ${agentId}`);
-    return { id: updated.id, name: updated.name, connectorIds: JSON.parse(updated.connector_ids) };
+    return { id: updated.id, name: updated.name, connectorIds: parseIdList(`agents ${updated.id}/connector_ids`, updated.connector_ids) };
   },
 });
 
