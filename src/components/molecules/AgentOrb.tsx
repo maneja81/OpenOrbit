@@ -38,9 +38,23 @@ export default function AgentOrb({ agent, status, side, orbRef }: AgentOrbProps)
           <motion.div
             className="agent-node-snap"
             style={{ x, y }}
+            role="button"
+            tabIndex={0}
+            // Named explicitly: the only text inside is the status dot's own label, which
+            // would otherwise become this button's name and read as "status" rather than
+            // "opens agent details".
+            aria-label={`${agent.name} details`}
             onClick={(e) => {
               onClick(e);
               setInfoOpen(true);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                // No snap on the keyboard path — useSnapOnClick aims the nudge at the
+                // pointer, and a key event has no coordinates to aim at.
+                setInfoOpen(true);
+              }
             }}
           >
             <TablerIcon name={agent.icon} className="agent-node-icon" />
