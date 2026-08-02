@@ -129,6 +129,47 @@ describe("validateSettingValue", () => {
     });
   });
 
+  describe("provider URLs", () => {
+    it("accepts an https URL and trims it", () => {
+      expect(accepted("chatApiUrl", "  https://api.openai.com/v1  ")).toBe("https://api.openai.com/v1");
+    });
+
+    it("accepts plain http, which self-hosted providers need", () => {
+      // The app explicitly invites pointing this at Ollama or another local server, and those
+      // are http. Refusing http outright would break a documented setup.
+      expect(accepted("chatApiUrl", "http://localhost:11434/v1")).toBe("http://localhost:11434/v1");
+      expect(accepted("voiceApiUrl", "http://127.0.0.1:8080/v1")).toBe("http://127.0.0.1:8080/v1");
+    });
+
+    it("keeps empty, which means use the provider default", () => {
+      expect(accepted("chatApiUrl", "")).toBe("");
+    });
+
+    it("refuses something that isn't a URL at all", () => {
+      // Stored verbatim before this, then failed at the first real call with an opaque error.
+      expect(rejection("chatApiUrl", "not a url at all")).toContain("http:// or https:// URL");
+      expect(rejection("chatApiUrl", "api.openai.com/v1")).toContain("http:// or https:// URL");
+    });
+
+    it("refuses schemes that have no business receiving an API key", () => {
+      // Every provider call attaches `Authorization: Bearer <key>` to whatever is configured
+      // here, so anything that isn't a page URL is refused outright.
+      for (const bad of ["ftp://example.com/v1", "file:///etc/passwd", "javascript:alert(1)"]) {
+        expect(rejection("chatApiUrl", bad)).toContain("http:// or https:// URL");
+      }
+    });
+
+    it("is not fooled by whitespace before the scheme", () => {
+      // `new URL` normalises the leading tab/newline WHATWG strips, which a `^https?:` regex
+      // would not — the same reasoning security/externalUrl.ts documents.
+      expect(rejection("chatApiUrl", "\tjavascript:alert(1)")).toContain("http:// or https:// URL");
+    });
+
+    it("refuses a non-string", () => {
+      expect(rejection("chatApiUrl", 42)).toBe("must be a string");
+    });
+  });
+
   describe("string arrays", () => {
     it("accepts an array of strings, including empty", () => {
       expect(accepted("orchestratorMcpServerIds", [])).toEqual([]);
