@@ -217,8 +217,13 @@ const agentsAPI = {
 
   mcp: {
     list: (): Promise<McpServerRow[]> => ipcRenderer.invoke("mcp:list"),
-    create: (input: { name: string; command: string; args?: string[]; env?: Record<string, string> }): Promise<McpServerRow> =>
-      ipcRenderer.invoke("mcp:create", input),
+    create: (input: {
+      name: string;
+      command: string;
+      args?: string[];
+      env?: Record<string, string>;
+      enabled?: boolean;
+    }): Promise<McpServerRow> => ipcRenderer.invoke("mcp:create", input),
     update: (
       id: string,
       patch: { name?: string; command?: string; args?: string[]; env?: Record<string, string>; enabled?: boolean }

@@ -20,6 +20,9 @@ export interface McpServerInput {
   command: string;
   args?: string[];
   env?: Record<string, string>;
+  /** Defaults to enabled when omitted, which is what the manual Add form wants. Registry installs
+   * pass `false` so a third-party command is never briefly live between two writes. */
+  enabled?: boolean;
 }
 
 export interface McpServerUpdatePatch {
@@ -37,9 +40,40 @@ export interface McpSearchResult {
   command: string;
   args: string[];
   env: Record<string, string>;
+  /** Names of env vars the registry marks `isRequired`. Surfaced in the search results so an
+   * install that will fail without a key says so up front, rather than at connect time. */
+  requiredEnv: string[];
 }
 
 const MCP_REGISTRY_BASE_URL = "https://registry.modelcontextprotocol.io";
+const MCP_REGISTRY_TIMEOUT_MS = 15_000;
+const REGISTRY_OFFICIAL_META = "io.modelcontextprotocol.registry/official";
+
+interface RegistryArgument {
+  value?: string;
+}
+
+interface RegistryPackage {
+  registryType?: string;
+  identifier?: string;
+  runtimeHint?: string;
+  transport?: { type?: string };
+  runtimeArguments?: RegistryArgument[];
+  packageArguments?: RegistryArgument[];
+  environmentVariables?: { name?: string; description?: string; isRequired?: boolean }[];
+}
+
+/** One element of the registry's `servers` array. The server's own fields sit nested under
+ * `server`, not on this wrapper — reading them off the wrapper is what made every entry fail
+ * the identifier/name check and silently return zero results for every query. */
+interface RegistryEntry {
+  server?: {
+    name?: string;
+    description?: string;
+    packages?: RegistryPackage[];
+  };
+  _meta?: Record<string, { isLatest?: boolean } | undefined>;
+}
 
 function slugify(name: string): string {
   const slug = name
@@ -107,7 +141,7 @@ export function createMcpServer(input: McpServerInput): McpServerRow {
   const env = encryptEnv(input.env ?? {});
   db.prepare(
     "INSERT INTO mcp_servers (id, name, command, args, env, enabled) VALUES (?, ?, ?, ?, ?, ?)"
-  ).run(id, name, command, args, env, 1);
+  ).run(id, name, command, args, env, input.enabled === false ? 0 : 1);
   return db.prepare("SELECT * FROM mcp_servers WHERE id = ?").get(id) as McpServerRow;
 }
 
@@ -204,36 +238,72 @@ export async function testMcpServer(input: McpServerInput): Promise<{ tools: str
 /** Proxies the official MCP Registry (registry.modelcontextprotocol.io) server-side —
  * avoids a renderer-side fetch (CORS) and keeps the registry's response shape isolated
  * to this one place. Returns only stdio-installable candidates (command-based); remote/
- * URL-based servers are out of scope for this pass. */
+ * URL-based servers are out of scope for this pass.
+ *
+ * Verified against the live API (2026-08-02):
+ * - Every element of `servers` is a `{ server, _meta }` wrapper; the name/description/packages
+ *   live under `server`. Reading them off the wrapper returns **zero results for every query**,
+ *   which is what this function did before.
+ * - `?version=latest` is honoured server-side and is what keeps one server from filling the
+ *   page: `search=filesystem` returns 30 rows without it — 14 of them the same server — and 10
+ *   unique names with it, `nextCursor: null`.
+ * - `runtimeHint` is absent on most npm entries, so `npx` stays the fallback.
+ * - Non-npm packages (pypi/oci/nuget) are dropped: there is no runtime here that can start them.
+ */
 export async function searchMcpRegistry(query: string): Promise<McpSearchResult[]> {
-  const url = `${MCP_REGISTRY_BASE_URL}/v0/servers${query ? `?search=${encodeURIComponent(query)}` : ""}`;
-  const response = await fetch(url);
+  const params = new URLSearchParams({ version: "latest" });
+  if (query) params.set("search", query);
+  const response = await fetch(`${MCP_REGISTRY_BASE_URL}/v0/servers?${params.toString()}`, {
+    signal: AbortSignal.timeout(MCP_REGISTRY_TIMEOUT_MS),
+  });
   if (!response.ok) {
     throw new Error(`MCP registry search failed (${response.status}): ${response.statusText}`);
   }
-  const data = (await response.json()) as {
-    servers?: {
-      name?: string;
-      description?: string;
-      packages?: { registryType?: string; identifier?: string; runtimeArguments?: { value?: string }[]; environmentVariables?: { name?: string; description?: string }[] }[];
-    }[];
-  };
+  const data = (await response.json()) as { servers?: RegistryEntry[] };
 
   const results: McpSearchResult[] = [];
   for (const entry of data.servers ?? []) {
-    const npmPackage = entry.packages?.find((pkg) => pkg.registryType === "npm");
-    if (!npmPackage?.identifier || !entry.name) continue;
+    const server = entry.server;
+    if (!server?.name) continue;
+    // Belt and braces for the `version=latest` param above: if the registry ever stops honouring
+    // it, this still collapses the list to one row per server. Tested `=== false` rather than
+    // `!== true` so an entry carrying no `_meta` at all is kept rather than silently dropped.
+    if (entry._meta?.[REGISTRY_OFFICIAL_META]?.isLatest === false) continue;
+
+    // A package can be npm-published and still speak a remote transport; `MCPServerStdio` is the
+    // only runtime here, so anything that isn't stdio would be installed and then fail to start.
+    // Missing `transport` is treated as stdio — that is the registry's own default.
+    const npmPackage = server.packages?.find(
+      (pkg) => pkg.registryType === "npm" && (pkg.transport?.type ?? "stdio") === "stdio"
+    );
+    if (!npmPackage?.identifier) continue;
+
+    // runtimeArguments are the *runtime's* flags (npx's `-y`); packageArguments are the server's
+    // own. They sit on opposite sides of the package identifier. Appending both after it, as this
+    // did before, produced `npx -y remote-filesystem-mcp-server -y`.
+    const runtimeArgs = (npmPackage.runtimeArguments ?? []).map((a) => a.value ?? "").filter(Boolean);
+    const packageArgs = (npmPackage.packageArguments ?? []).map((a) => a.value ?? "").filter(Boolean);
+    const command = npmPackage.runtimeHint ?? "npx";
+    // Without `-y`, npx stops to prompt for install confirmation and the server never starts.
+    // Only added when the registry didn't already supply it, so it can never appear twice.
+    if (command === "npx" && !runtimeArgs.includes("-y")) runtimeArgs.unshift("-y");
+
     const env: Record<string, string> = {};
+    const requiredEnv: string[] = [];
     for (const envVar of npmPackage.environmentVariables ?? []) {
-      if (envVar.name) env[envVar.name] = "";
+      if (!envVar.name) continue;
+      env[envVar.name] = "";
+      if (envVar.isRequired) requiredEnv.push(envVar.name);
     }
+
     results.push({
-      id: entry.name,
-      name: entry.name,
-      description: entry.description ?? "",
-      command: "npx",
-      args: ["-y", npmPackage.identifier, ...(npmPackage.runtimeArguments ?? []).map((a) => a.value ?? "").filter(Boolean)],
+      id: server.name,
+      name: server.name,
+      description: server.description ?? "",
+      command,
+      args: [...runtimeArgs, npmPackage.identifier, ...packageArgs],
       env,
+      requiredEnv,
     });
   }
   return results;
