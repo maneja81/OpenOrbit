@@ -39,9 +39,22 @@ export default function OrchestratorOrb({
         <motion.div
           className="orchestrator-snap"
           style={{ x, y }}
+          role="button"
+          tabIndex={0}
+          // Named explicitly rather than from its own text: cognitiveState and sessionStats
+          // change on every run, so the derived name would keep shifting under the user.
+          aria-label={`${name} details`}
           onClick={(e) => {
             onClick(e);
             setInfoOpen(true);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              // No snap on the keyboard path — useSnapOnClick aims the nudge at the
+              // pointer, and a key event has no coordinates to aim at.
+              setInfoOpen(true);
+            }
           }}
         >
           <div id="ap" className={speaking ? "speaking" : undefined} />

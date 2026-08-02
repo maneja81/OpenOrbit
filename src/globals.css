@@ -167,6 +167,18 @@ svg#oc {
   justify-content: center;
   width: 100%;
   height: 100%;
+  /* A square box filling a round orb — a radius keeps the focus outline on the orb's
+     own shape instead of drawing a box around it. */
+  border-radius: 50%;
+}
+
+/* Both orbs sit on a dark nebula inside a transformed scene, where the app-wide ring
+   (1.5px at 0.55 alpha) is not readable. Brighter and further out, still outline-only so
+   the orb's own box-shadow — the status glow and the delegation ripple — survives. */
+.agent-node-snap:focus-visible,
+.orchestrator-snap:focus-visible {
+  outline: 2.5px solid rgba(150, 215, 255, 0.95);
+  outline-offset: 5px;
 }
 
 .agent-node-circle.active {
@@ -388,6 +400,8 @@ svg#oc {
   width: 100%;
   height: 100%;
   cursor: pointer;
+  /* Square box filling the round orchestrator — see .agent-node-snap. */
+  border-radius: 50%;
 }
 
 #orchestrator {
