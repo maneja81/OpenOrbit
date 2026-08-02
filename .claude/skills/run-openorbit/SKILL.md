@@ -32,6 +32,20 @@ npm install          # once per worktree — node_modules is not shared
 npm run build        # main is dist-electron/main/index.js; the driver checks it exists
 ```
 
+⚠ **Check the Electron binary after installing — the install lies.** `npm ci` / `npm install` in a
+fresh worktree regularly exits 0 having left no usable Electron. Two variants seen: the binary
+missing entirely (`dist` and `path.txt` both absent), and a half-extracted app (`failed to create
+directory …/Electron.app/Contents/Resources/kn.lproj: File exists`). The driver then can't launch,
+and vitest quietly loses `electron/main/ai/agents.test.ts` — 45 tests.
+
+```bash
+ls node_modules/electron/path.txt node_modules/electron/dist    # both must exist
+# repair:
+rm -rf node_modules/electron/dist node_modules/electron/path.txt && node node_modules/electron/install.js
+```
+
+`path.txt` should read `Electron.app/Contents/MacOS/Electron`.
+
 ## Run
 
 ```bash
@@ -123,6 +137,13 @@ settings                     # agentName absent; everything else intact
   tells you rather than hanging for 60s.
 - **`node_modules` is per-worktree** and untracked, so a fresh worktree needs `npm install`
   (~minutes: it builds `better-sqlite3` natively and runs `electron-builder install-app-deps`).
+  Verify the Electron binary afterwards — see the Build section; a successful-looking install
+  routinely leaves none.
+- **A worktree cut from `main` contains no app.** `main` is a README-only "idea phase" commit —
+  four files, no `src/` or `electron/`. Branch worktrees from `develop`
+  (`git worktree add -b <branch> .claude/worktrees/<name> develop`), and if you inherit one,
+  confirm the base with `git log --oneline <branch> ^develop` before concluding anything about
+  what is or isn't in the tree.
 - **Wait for `window.agentsAPI`, not a fixed sleep.** The renderer renders nothing until settings
   have loaded, so the bridge appearing is the real ready signal.
 - **`[aria-label*="Close"]` quits the app** — it matches the window's X before any modal's close
