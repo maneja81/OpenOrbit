@@ -197,9 +197,45 @@ export function modelForAgent(row: { model?: string | null; provider_id?: string
   }
 
   const client = clientFor(resolved);
-  return resolved.api === "chat_completions"
-    ? new OpenAIChatCompletionsModel(client, modelId)
-    : new OpenAIResponsesModel(client, modelId);
+  return withModelId(
+    resolved.api === "chat_completions"
+      ? new OpenAIChatCompletionsModel(client, modelId)
+      : new OpenAIResponsesModel(client, modelId),
+    modelId,
+    providerId
+  );
+}
+
+/**
+ * Makes a Model instance stringify to its model id.
+ *
+ * The SDK's model classes keep the id private and do not override toString(), while
+ * ipc/agent.ts records `String(agent.model)` into token_usage.model. That was fine while every
+ * agent carried a plain string; the moment an agent could carry a Model instance it started
+ * writing "[object Object]" — seen in a real run.
+ *
+ * The wrong column value is the visible half. The costly half is that
+ * estimateGenerationCost prices by model id, so a pinned agent silently lost its cost as well.
+ */
+function withModelId<T extends object>(model: T, modelId: string, providerId: string): T {
+  Object.defineProperty(model, "toString", { value: () => modelId, enumerable: false });
+  // Which provider actually served the call, so cost is priced against that host rather than
+  // whatever the Chat slot happens to be. Without it an agent pinned to Claude was reported as
+  // free purely because Chat was pointed at a local server.
+  Object.defineProperty(model, PROVIDER_ID_TAG, { value: providerId, enumerable: false });
+  return model;
+}
+
+/** Non-enumerable marker read back by ipc/agent.ts when attributing cost. */
+export const PROVIDER_ID_TAG = "__orbitProviderId";
+
+/** The provider that served a call, given whatever `Agent.model` held. A plain string means the
+ * agent inherited the Chat slot, which is exactly what the setting records. */
+export function providerIdForModel(model: unknown): string {
+  if (model && typeof model === "object" && PROVIDER_ID_TAG in model) {
+    return String((model as Record<string, unknown>)[PROVIDER_ID_TAG]);
+  }
+  return readAppSetting("chatProviderId");
 }
 
 export function getDecryptedChatApiKey(): string {
@@ -245,13 +281,22 @@ async function getOpenRouterGenerationCost(generationId: string): Promise<number
 
 // Static USD-per-million-token pricing for models we know for certain, used only when the
 // Chat section isn't pointed at OpenRouter (which has a real post-hoc cost API instead —
-// see getOpenRouterGenerationCost above). OpenAI has no equivalent "confirm actual billed
-// cost" endpoint, so this is the standard estimate-from-published-rates approach. Deliberately
-// small and conservative: an unlisted model returns null (no cost shown) rather than a
-// guessed number, since a wrong number is worse than none. Source: OpenAI's published API
-// pricing as of early 2026 — must be kept in sync by hand if OpenAI changes it.
-const MODEL_PRICING_USD_PER_MILLION_TOKENS: Record<string, { input: number; output: number }> = {
+// see getOpenRouterGenerationCost above). Neither OpenAI nor Anthropic exposes a "confirm the
+// actually-billed cost" endpoint, so this is the standard estimate-from-published-rates
+// approach. Deliberately small: an unlisted model returns null (tokens show, no price) rather
+// than a guessed number, since a wrong number is worse than none.
+//
+// Scope rule: only models this app ships as a provider default belong here. That bounds the
+// hand-maintenance to what we actually choose for people, and providersParity.test.ts fails if
+// a shipped default has no entry — so adding a provider cannot quietly ship without a price.
+//
+// Both figures were cross-checked against two independent sources before being written down:
+// each provider's published rates, and OpenRouter's own /models catalogue, which reports
+// $0.40/$1.60 for gpt-4.1-mini and $1.00/$5.00 for claude-haiku-4.5 — matching list price
+// rather than carrying a markup. Verified 2026-08-03; re-check if a provider changes pricing.
+export const MODEL_PRICING_USD_PER_MILLION_TOKENS: Record<string, { input: number; output: number }> = {
   "gpt-4.1-mini": { input: 0.4, output: 1.6 },
+  "claude-haiku-4-5-20251001": { input: 1.0, output: 5.0 },
 };
 
 function estimateCostFromStaticPricing(model: string, inputTokens: number, outputTokens: number): number | null {
@@ -269,9 +314,24 @@ export async function estimateGenerationCost(
   generationId: string | null,
   model: string,
   inputTokens: number,
-  outputTokens: number
+  outputTokens: number,
+  /** The provider that served this call. Defaults to the Chat slot, which is what an agent
+   * inheriting it runs on; a pinned agent passes its own. */
+  providerId: string = readAppSetting("chatProviderId")
 ): Promise<number | null> {
-  if (getConfiguredChatUrl().startsWith(OPENROUTER_BASE_URL) && generationId) {
+  // A model on the user's own hardware costs nothing per token. That is a fact rather than an
+  // estimate, and worth distinguishing from "we could not price this" — a blank cost reads as
+  // unknown, which is the wrong answer for a local server.
+  //
+  // Keyed to the provider that actually served the call, not the Chat slot: an agent pinned to
+  // Claude costs real money even when Chat is pointed at Ollama, and reporting it as free was
+  // exactly the bug this parameter fixes.
+  if (providerId === "local") return 0;
+
+  // The legacy slot has no provider id, so the URL is still the only signal there.
+  const viaOpenRouter =
+    providerId === "openrouter" || (providerId === "" && getConfiguredChatUrl().startsWith(OPENROUTER_BASE_URL));
+  if (viaOpenRouter && generationId) {
     const real = await getOpenRouterGenerationCost(generationId);
     if (real !== null) return real;
   }

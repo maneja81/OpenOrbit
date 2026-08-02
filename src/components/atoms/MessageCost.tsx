@@ -19,7 +19,16 @@ export default function MessageCost({ usage, id }: MessageCostProps) {
     <div id={id} className="message-cost">
       {/* costUsd is null until the async OpenRouter lookup lands, so tokens show first and
           the price appears a beat later rather than the row flickering in wholesale. */}
-      {usage.costUsd !== null && <span className="message-cost-price">{formatCost(usage.costUsd)}</span>}
+      {usage.costUsd !== null && (
+        // A local model costs nothing per token, and that is recorded as a real 0 rather than
+        // left null. "$0.0000" reads as a price so small it rounded away; the true answer is that
+        // there is no price, so say so. Deliberately not inside formatCost: the session total
+        // sums with COALESCE(...,0), so a run where nothing could be priced also totals zero and
+        // must not claim to have been free.
+        <span className="message-cost-price">
+          {usage.costUsd === 0 ? "Free" : formatCost(usage.costUsd)}
+        </span>
+      )}
       <span className="message-cost-tokens">{tokens}</span>
       {usage.calls > 1 && <span className="message-cost-calls">{usage.calls} calls</span>}
     </div>

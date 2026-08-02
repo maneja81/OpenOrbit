@@ -317,7 +317,7 @@ const SENSITIVE_SETTING_KEYS = ["chatApiKey", "voiceApiKey"];
 const getSettingsTool = tool({
   name: "get_settings",
   description:
-    "View the app's current settings: voiceInputEnabled, typeAnywhereEnabled, locationEnabled, bgMusicEnabled, soundFxEnabled, voiceOutputEnabled, agentName, agentDescription, userName, orchestratorModel, voiceTranscriptionModel, voiceTtsModel, chatApiUrl, voiceApiUrl, whether the Chat/Voice API keys are set (the key values themselves are never exposed), and the HTTP-tool approval policy (httpToolApprovalPost, httpToolApprovalPutPatch, httpToolApprovalDelete, toolApprovalDisplay).",
+    "View the app's current settings: voiceInputEnabled, typeAnywhereEnabled, locationEnabled, bgMusicEnabled, soundFxEnabled, voiceOutputEnabled, agentName, agentDescription, userName, orchestratorModel, voiceTranscriptionModel, voiceTtsModel, chatProviderId and voiceProviderId (which AI provider each slot uses — openrouter, openai, anthropic for Claude, or local), chatApiUrl, voiceApiUrl, whether the Chat/Voice API keys are set (the key values themselves are never exposed), and the HTTP-tool approval policy (httpToolApprovalPost, httpToolApprovalPutPatch, httpToolApprovalDelete, toolApprovalDisplay).",
   parameters: z.object({}),
   execute: async () => {
     devLog("[get_settings] called");
@@ -335,6 +335,11 @@ const getSettingsTool = tool({
     const voiceTtsModel = readAppSetting("voiceTtsModel");
     const chatApiUrl = readAppSetting("chatApiUrl");
     const voiceApiUrl = readAppSetting("voiceApiUrl");
+    // Reported but not writable — see PROTECTED_SETTING_KEYS. Being able to *say* which provider
+    // is in use is the difference between an agent that can answer "what model am I?" and one
+    // that invents an answer, which is exactly what a small local model did in testing.
+    const chatProviderId = readAppSetting("chatProviderId");
+    const voiceProviderId = readAppSetting("voiceProviderId");
     const chatApiKey = readAppSetting("chatApiKey");
     const voiceApiKey = readAppSetting("voiceApiKey");
     const httpToolApprovalPost = readAppSetting("httpToolApprovalPost");
@@ -360,6 +365,8 @@ const getSettingsTool = tool({
       voiceTtsModel,
       chatApiUrl,
       voiceApiUrl,
+      chatProviderId,
+      voiceProviderId,
       chatApiKeySet: Boolean(chatApiKey),
       voiceApiKeySet: Boolean(voiceApiKey),
     };
@@ -369,7 +376,7 @@ const getSettingsTool = tool({
 const updateSettingTool = tool({
   name: "update_setting",
   description:
-    "Update one of the app's settings: voiceInputEnabled, typeAnywhereEnabled, bgMusicEnabled, soundFxEnabled, voiceOutputEnabled, chatApiKey, voiceApiKey, voiceTranscriptionModel, voiceTtsModel, agentName, agentDescription, userName, orchestratorModel. The approval settings (httpToolApprovalPost/PutPatch/Delete, toolApprovalDisplay), locationEnabled, and the provider URLs (chatApiUrl, voiceApiUrl) are safety settings and cannot be changed here — only the user can change those, in Settings.",
+    "Update one of the app's settings: voiceInputEnabled, typeAnywhereEnabled, bgMusicEnabled, soundFxEnabled, voiceOutputEnabled, chatApiKey, voiceApiKey, voiceTranscriptionModel, voiceTtsModel, agentName, agentDescription, userName, orchestratorModel. The approval settings (httpToolApprovalPost/PutPatch/Delete, toolApprovalDisplay), locationEnabled, the provider URLs (chatApiUrl, voiceApiUrl) and the provider selectors (chatProviderId, voiceProviderId) are safety settings and cannot be changed here — they decide which host the user's API key is sent to, so only the user can change them, in Settings → AI Models.",
   parameters: z.object({
     // Protected keys stay nameable so a request to change one gets a real answer pointing at
     // Settings. Dropping them from the enum instead would surface as a schema error, which
@@ -472,7 +479,7 @@ export function buildUpdateAgentPatch(args: UpdateAgentToolArgs): AgentUpdatePat
 const updateAgentTool = tool({
   name: "update_agent",
   description:
-    "Update an existing agent's name, tagline, description, prompt, model, enabled state, connected MCP servers, or connected connectors (e.g. Gmail). Only call this after confirming the specific change(s) with the user in plain language. Use list_agents first if you need to find the agent's id or see its current fields. Note: system agents cannot be disabled.",
+    "Update an existing agent's name, tagline, description, prompt, model, enabled state, connected MCP servers, or connected connectors (e.g. Gmail). Only call this after confirming the specific change(s) with the user in plain language. Use list_agents first if you need to find the agent's id or see its current fields. Note: system agents cannot be disabled, and which AI provider an agent runs on cannot be changed here — that decides where its API key is sent, so the user sets it in Settings → Agents.",
   parameters: z.object({
     id: z.string(),
     name: z.string().nullable(),

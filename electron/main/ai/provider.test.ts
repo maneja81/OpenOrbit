@@ -44,11 +44,14 @@ vi.mock("../db/providersStore", () => ({
 }));
 
 import { OpenAIChatCompletionsModel, OpenAIResponsesModel } from "@openai/agents";
+import { AI_PROVIDERS } from "./providers";
 import {
+  MODEL_PRICING_USD_PER_MILLION_TOKENS,
   transcribeAudio,
   synthesizeSpeech,
   estimateGenerationCost,
   modelForAgent,
+  providerIdForModel,
   configureChatClient,
 } from "./provider";
 
@@ -348,5 +351,85 @@ describe("configureChatClient", () => {
     providerCredentials.set("openrouter", { apiUrl: "https://openrouter.ai/api/v1", apiKey: "sk-or" });
     configureChatClient();
     expect(sdkCalls.clients.at(-1)?.baseURL).toBe("https://openrouter.ai/api/v1");
+  });
+});
+
+describe("the shipped defaults are all priceable", () => {
+  it("has a static price for every default this app chooses for people", () => {
+    // The scope rule for MODEL_PRICING_USD_PER_MILLION_TOKENS: only models we ship as a provider
+    // default belong in it, and every one of them must be there. Adding a provider without a
+    // price would silently ship a default whose per-message cost never appears — which is how
+    // Claude shipped in this very branch before this test existed.
+    //
+    // Two providers are exempt, for opposite reasons: OpenRouter reports the real billed figure
+    // from its own API so a static guess would be strictly worse, and a local server is free.
+    const needsStaticPrice = AI_PROVIDERS.filter(
+      (provider) => provider.defaultChatModel !== "" && provider.id !== "openrouter" && provider.id !== "local"
+    );
+    expect(needsStaticPrice.length).toBeGreaterThan(0);
+    for (const provider of needsStaticPrice) {
+      expect(MODEL_PRICING_USD_PER_MILLION_TOKENS[provider.defaultChatModel], provider.id).toBeDefined();
+    }
+  });
+
+  it("prices only what it can defend, not every model it has heard of", () => {
+    // Deliberately small. Each entry is hand-maintained and will drift, so the table earns its
+    // keep by staying at the defaults rather than becoming a half-remembered price list.
+    expect(Object.keys(MODEL_PRICING_USD_PER_MILLION_TOKENS).length).toBeLessThanOrEqual(4);
+  });
+});
+
+describe("a pinned agent's model still reports its id", () => {
+  // ipc/agent.ts records String(agent.model) into token_usage.model and prices by that id. The
+  // SDK's model classes keep the id private and do not override toString(), so a pinned agent
+  // wrote "[object Object]" and lost its cost with it — both seen in a real run.
+  it("stringifies to the model id, not [object Object]", () => {
+    providerCredentials.set("anthropic", { apiUrl: "https://api.anthropic.com/v1", apiKey: "sk-ant" });
+    const model = modelForAgent({ model: "claude-haiku-4-5-20251001", provider_id: "anthropic" });
+    expect(String(model)).toBe("claude-haiku-4-5-20251001");
+  });
+
+  it("does the same for a Responses-API provider", () => {
+    providerCredentials.set("openai", { apiUrl: "https://api.openai.com/v1", apiKey: "sk-x" });
+    expect(String(modelForAgent({ model: "gpt-4.1-mini", provider_id: "openai" }))).toBe("gpt-4.1-mini");
+  });
+
+  it("leaves the inherited case alone, which was always a plain string", () => {
+    expect(String(modelForAgent({ model: "gpt-4.1-mini", provider_id: "" }))).toBe("gpt-4.1-mini");
+  });
+});
+
+describe("attributing cost to the provider that served the call", () => {
+  beforeEach(() => {
+    providerCredentials.clear();
+    chatProviderId = "";
+  });
+
+  it("reads a pinned agent's provider off its model", () => {
+    providerCredentials.set("anthropic", { apiUrl: "https://api.anthropic.com/v1", apiKey: "sk-ant" });
+    const model = modelForAgent({ model: "claude-haiku-4-5-20251001", provider_id: "anthropic" });
+    expect(providerIdForModel(model)).toBe("anthropic");
+  });
+
+  it("falls back to the Chat slot for an agent that inherits it", () => {
+    chatProviderId = "local";
+    // A plain string is what an inheriting agent carries, and the Chat slot is what it runs on.
+    expect(providerIdForModel("gpt-4.1-mini")).toBe("local");
+  });
+
+  it("does not report a Claude-pinned agent as free just because Chat is local", async () => {
+    chatProviderId = "local";
+    providerCredentials.set("anthropic", { apiUrl: "https://api.anthropic.com/v1", apiKey: "sk-ant" });
+    // The exact bug this parameter exists for: seen in a real run as cost_usd 0 on a Claude call.
+    const cost = await estimateGenerationCost(null, "claude-haiku-4-5-20251001", 1_000_000, 1_000_000, "anthropic");
+    expect(cost).toBeCloseTo(6.0, 5);
+  });
+
+  it("still reports a genuinely local call as free", async () => {
+    expect(await estimateGenerationCost(null, "llama3.2:3b", 1_000_000, 1_000_000, "local")).toBe(0);
+  });
+
+  it("returns null rather than a guess for an unpriced model", async () => {
+    expect(await estimateGenerationCost(null, "some/unknown-model", 1000, 1000, "openai")).toBeNull();
   });
 });
