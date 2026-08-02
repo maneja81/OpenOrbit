@@ -87,8 +87,13 @@ const PROVIDER_ID_KIND: SettingKind = { type: "enum", values: ["", ...PROVIDER_I
  * Without this character the app's own default for that provider could not be persisted through
  * either write path — the value would be silently refused by `settings:update` and land as a
  * `[settings:update] refused` line in debug.log. Anchored to the start rather than added to the
- * character classes, so it stays a prefix marker and cannot appear mid-id. */
-export const MODEL_ID_PATTERN = /^~?[a-z0-9._-]+(\/[a-z0-9._:-]+)?$/i;
+ * character classes, so it stays a prefix marker and cannot appear mid-id.
+ *
+ * `:` is allowed in the first segment as well as after a `/`. Restricting it to the second was an
+ * OpenRouter-shaped assumption: Ollama names models `name:tag` with no vendor prefix at all
+ * (`llama3.2:3b`, `qwen2.5:7b`), which is the normal convention there, so without this the Local
+ * AI provider could not be pointed at most of the models a user actually has installed. */
+export const MODEL_ID_PATTERN = /^~?[a-z0-9._:-]+(\/[a-z0-9._:-]+)?$/i;
 
 /** Bounds here are the ones the Settings UI already claims via `min` on its number inputs.
  * `min` constrains a spinner and nothing else — typed and pasted values sail straight past it,

@@ -92,6 +92,15 @@ describe("every default model the registry ships", () => {
     }
   });
 
+  it("accepts an Ollama name:tag id", () => {
+    // Ollama's normal convention has no vendor prefix, so the tag colon lands in the first
+    // segment. Restricting `:` to after a `/` made most locally-installed models unsavable —
+    // found the moment a real Ollama server was available to test against.
+    for (const id of ["llama3.2:3b", "qwen2.5:7b"]) {
+      expect(MODEL_ID_PATTERN.test(id), id).toBe(true);
+    }
+  });
+
   it("accepts OpenRouter's tilde-prefixed floating alias", () => {
     // Named explicitly because it is the specific id that forced MODEL_ID_PATTERN to widen. The
     // `~` is OpenRouter's own syntax, not a typo: this form is listed by their /models and
