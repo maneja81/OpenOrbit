@@ -1,5 +1,7 @@
 import TablerIcon from "@/components/atoms/TablerIcon";
 import { humanizeToolName } from "@/lib/humanizeToolName";
+import { formatRemaining } from "@/lib/approvalCountdown";
+import { useApprovalCountdown } from "@/hooks/useApprovalCountdown";
 import type { PendingToolApproval } from "@/components/molecules/HttpToolApprovalModal";
 
 interface ToolApprovalCardProps {
@@ -30,6 +32,9 @@ function formatArgs(args: string | undefined): string | null {
  */
 export default function ToolApprovalCard({ approval, onRespond }: ToolApprovalCardProps) {
   const formattedArgs = formatArgs(approval.args);
+  // Same deadline as the modal's — toolApprovalDisplay only chooses which surface shows it,
+  // so a countdown on one and not the other would make the setting change the stakes.
+  const msLeft = useApprovalCountdown(approval.expiresAt);
 
   return (
     <div className="tool-approval-card" role="group" aria-label="Tool approval request">
@@ -41,6 +46,20 @@ export default function ToolApprovalCard({ approval, onRespond }: ToolApprovalCa
         </span>
       </div>
       {formattedArgs && <pre className="tool-approval-card-args">{formattedArgs}</pre>}
+      {msLeft !== null && (
+        <p
+          className={`tool-approval-card-expiry${msLeft <= 30_000 ? " tool-approval-card-expiry--soon" : ""}`}
+          aria-live="polite"
+        >
+          {msLeft > 0 ? (
+            <>
+              Declines automatically in <strong>{formatRemaining(msLeft)}</strong>
+            </>
+          ) : (
+            "Expired — declining…"
+          )}
+        </p>
+      )}
       <div className="tool-approval-card-actions">
         <button
           type="button"

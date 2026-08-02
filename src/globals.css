@@ -4824,6 +4824,33 @@ svg#oc {
   word-break: break-word;
 }
 
+/* The prompt answers itself when the deadline passes, so the deadline has to be visible.
+   Muted until the last 30s — this is information, not pressure, right up until it is. The
+   digits are tabular so a ticking clock doesn't reflow the line every second. */
+.http-approval-expiry,
+.tool-approval-card-expiry {
+  margin: 0;
+  font-size: 11.5px;
+  color: rgba(200, 230, 255, 0.55);
+}
+
+.http-approval-expiry strong,
+.tool-approval-card-expiry strong {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: rgba(200, 230, 255, 0.8);
+}
+
+.http-approval-expiry--soon,
+.tool-approval-card-expiry--soon {
+  color: #ffc97e;
+}
+
+.http-approval-expiry--soon strong,
+.tool-approval-card-expiry--soon strong {
+  color: #ffc97e;
+}
+
 .http-approval-actions {
   display: flex;
   justify-content: flex-end;
