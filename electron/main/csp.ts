@@ -14,6 +14,10 @@
  *
  * `style-src` needs 'unsafe-inline': ten components set style={{…}} for computed values
  * (orb geometry, meter widths), and React writes those as inline style attributes.
+ *
+ * `media-src` admits data: because useSpeak plays synthesized TTS audio via
+ * `new Audio('data:audio/mp3;base64,...')` — the bytes come from the Voice API over IPC,
+ * not a network fetch, so there's no bundled asset to point a `self` src at instead.
  */
 const DIRECTIVES = [
   "default-src 'none'",
@@ -21,7 +25,7 @@ const DIRECTIVES = [
   "style-src 'self' 'unsafe-inline'",
   "font-src 'self'",
   "img-src 'self' data: https:",
-  "media-src 'self'",
+  "media-src 'self' data:",
   "connect-src 'none'",
   "base-uri 'none'",
   "form-action 'none'",
