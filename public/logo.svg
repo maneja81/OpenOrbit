@@ -1,0 +1,54 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="42%" r="75%">
+      <stop offset="0%" stop-color="#12142B"/>
+      <stop offset="100%" stop-color="#0A0B18"/>
+    </radialGradient>
+    <radialGradient id="core" cx="42%" cy="38%" r="65%">
+      <stop offset="0%" stop-color="#B3A6FF"/>
+      <stop offset="45%" stop-color="#7C6CF0"/>
+      <stop offset="100%" stop-color="#5A47D6"/>
+    </radialGradient>
+    <radialGradient id="coreGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#7C6CF0" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#7C6CF0" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="node1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#C9C0FF"/>
+      <stop offset="100%" stop-color="#9686F2"/>
+    </linearGradient>
+    <linearGradient id="node2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#A79BF7"/>
+      <stop offset="100%" stop-color="#7663E8"/>
+    </linearGradient>
+    <linearGradient id="node3" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8F80EE"/>
+      <stop offset="100%" stop-color="#5E4CD6"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ground -->
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+
+  <!-- orbit rings, concentric, drawn as true circles at three radii -->
+  <g fill="none" stroke-linecap="round">
+    <circle cx="256" cy="256" r="96"  stroke="#4B4A78" stroke-opacity="0.55" stroke-width="1.4"/>
+    <circle cx="256" cy="256" r="150" stroke="#43436E" stroke-opacity="0.42" stroke-width="1.4"/>
+    <circle cx="256" cy="256" r="204" stroke="#3B3B62" stroke-opacity="0.30" stroke-width="1.4"/>
+  </g>
+
+  <!-- central orchestrator glow + core -->
+  <circle cx="256" cy="256" r="80" fill="url(#coreGlow)"/>
+  <circle cx="256" cy="256" r="40" fill="url(#core)"/>
+  <circle cx="256" cy="256" r="40" fill="none" stroke="#0A0B18" stroke-width="2" stroke-opacity="0.25"/>
+
+  <!-- four orbiting agent nodes, placed on the three rings by shared radius system -->
+  <!-- ring r=96, angle 200deg -->
+  <circle cx="165.8" cy="288.8" r="12" fill="url(#node1)"/>
+  <!-- ring r=150, angle -20deg -->
+  <circle cx="396.9" cy="204.7" r="15" fill="url(#node2)"/>
+  <!-- ring r=150, angle 100deg -->
+  <circle cx="230.0" cy="403.7" r="10" fill="url(#node1)"/>
+  <!-- ring r=204, angle 55deg -->
+  <circle cx="373.0" cy="88.9" r="13" fill="url(#node3)"/>
+</svg>

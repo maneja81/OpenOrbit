@@ -1,6 +1,6 @@
 # OpenOrbit
 
-<!-- TODO: logo goes here -->
+<img src="public/logo.png" alt="OpenOrbit logo" width="120" height="120">
 
 A desktop app that runs a team of AI agents on your own machine — a central orchestrator
 that delegates to specialist sub-agents, each with its own tools, connected to your files,
