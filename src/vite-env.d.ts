@@ -452,6 +452,9 @@ interface Window {
           args?: string;
         }) => void
       ) => () => void;
+      onToolApprovalSettled: (
+        callback: (payload: { approvalId: string; reason: "timeout" | "abandoned" }) => void
+      ) => () => void;
       respondToApproval: (approvalId: string, approved: boolean) => Promise<void>;
       list: () => Promise<AgentDisplayRow[]>;
       update: (
