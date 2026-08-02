@@ -14,7 +14,7 @@ import ConnectorsTab from "@/components/organisms/ConnectorsTab";
 import HttpToolsTab from "@/components/organisms/HttpToolsTab";
 import AboutTab from "@/components/organisms/AboutTab";
 import ErrorBoundary from "@/components/atoms/ErrorBoundary";
-import { AgentsSettings, SettingsView, VOICE_TTS_VOICE_OPTIONS, SOUND_FX_VARIANT_COUNT } from "@/lib/settings";
+import { DEFAULT_ORCHESTRATOR_MODEL, AgentsSettings, SettingsView, VOICE_TTS_VOICE_OPTIONS, SOUND_FX_VARIANT_COUNT } from "@/lib/settings";
 import { USER_CONTEXT_FIELDS } from "@/lib/userContext";
 import { hasAgentsAPI } from "@/lib/agentsApi";
 import { useMcpServers } from "@/hooks/useMcpServers";
@@ -385,7 +385,7 @@ export default function SettingsPanel({
                           type="text"
                           value={settings.orchestratorModel}
                           onChange={(e) => onUpdate({ orchestratorModel: e.target.value })}
-                          placeholder="gpt-4.1-mini"
+                          placeholder={DEFAULT_ORCHESTRATOR_MODEL}
                           autoComplete="off"
                         />
                       </label>

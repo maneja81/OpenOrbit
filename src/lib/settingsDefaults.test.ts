@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SETTINGS } from "./settings";
+import { DEFAULT_ORCHESTRATOR_MODEL, DEFAULT_SETTINGS } from "./settings";
 import { SETTING_DEFAULTS } from "../../electron/main/settingsSchema";
 
 /**
@@ -43,5 +43,16 @@ describe("settings defaults, renderer vs main", () => {
     expect(SETTING_DEFAULTS.httpToolApprovalPost).toBe(true);
     expect(SETTING_DEFAULTS.httpToolApprovalPutPatch).toBe(true);
     expect(SETTING_DEFAULTS.httpToolApprovalDelete).toBe(true);
+  });
+});
+
+describe("the orchestrator model default", () => {
+  it("is declared once per side and nowhere else", () => {
+    // Finding S7 was three hardcoded copies of this string drifting apart, and the comment on
+    // skillDistill.ts's copy described that having already happened once. Both sides now derive
+    // from a single constant; this asserts the two constants still agree, which is the only
+    // remaining way they could diverge.
+    expect(SETTING_DEFAULTS.orchestratorModel).toBe(DEFAULT_ORCHESTRATOR_MODEL);
+    expect(DEFAULT_SETTINGS.orchestratorModel).toBe(DEFAULT_ORCHESTRATOR_MODEL);
   });
 });
