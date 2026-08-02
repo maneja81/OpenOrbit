@@ -43,9 +43,11 @@ describe("contentSecurityPolicy", () => {
     expect(prod["img-src"]).toBe("'self' data: https:");
   });
 
-  it("keeps local fonts and the background video loadable", () => {
+  it("keeps local fonts, the background video, and synthesized TTS audio loadable", () => {
+    // TTS audio is played as `new Audio('data:audio/mp3;base64,...')` — the bytes come from
+    // the Voice API over IPC, so media-src needs data: alongside the bundled video's 'self'.
     expect(prod["font-src"]).toBe("'self'");
-    expect(prod["media-src"]).toBe("'self'");
+    expect(prod["media-src"]).toBe("'self' data:");
   });
 
   it("allows the inline styles React writes for computed values", () => {
