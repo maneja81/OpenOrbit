@@ -63,8 +63,16 @@ const STRING_ARRAY: SettingKind = { type: "stringArray" };
  *
  * Exported because agents.ts validates a sub-agent's `model` column against the same shape.
  * It lives here rather than there so there is one copy: this module has no heavy imports, so
- * agents.ts can depend on it, and not the other way round. */
-export const MODEL_ID_PATTERN = /^[a-z0-9._-]+(\/[a-z0-9._:-]+)?$/i;
+ * agents.ts can depend on it, and not the other way round.
+ *
+ * The optional leading `~` is OpenRouter's syntax for a floating "latest" alias
+ * (`~deepseek/deepseek-v4-flash-latest`), which is a real id: it is listed by their `/models`
+ * and returns 200, while the same id without the tilde is refused as "not a valid model ID".
+ * Without this character the app's own default for that provider could not be persisted through
+ * either write path — the value would be silently refused by `settings:update` and land as a
+ * `[settings:update] refused` line in debug.log. Anchored to the start rather than added to the
+ * character classes, so it stays a prefix marker and cannot appear mid-id. */
+export const MODEL_ID_PATTERN = /^~?[a-z0-9._-]+(\/[a-z0-9._:-]+)?$/i;
 
 /** Bounds here are the ones the Settings UI already claims via `min` on its number inputs.
  * `min` constrains a spinner and nothing else — typed and pasted values sail straight past it,
