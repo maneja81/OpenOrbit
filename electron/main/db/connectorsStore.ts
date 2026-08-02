@@ -1,6 +1,7 @@
 import { getDb } from "./index";
 import { encryptSecret, decryptSecret } from "../security/secretStorage";
 import { UNPARSEABLE, parseIdList, parseJsonColumn } from "./jsonColumn";
+import { detachFromOrchestrator } from "./orchestratorAttachments";
 
 export interface ConnectorCredentials {
   accessToken: string;
@@ -113,6 +114,7 @@ export function disconnectConnector(id: string): void {
   db.prepare(
     "UPDATE connectors SET status = 'disconnected', credentials = NULL, account_label = NULL, updated_at = datetime('now') WHERE id = ?"
   ).run(id);
+  detachFromOrchestrator("connector", id);
 
   const agents = db.prepare("SELECT id, connector_ids FROM agents").all() as { id: string; connector_ids: string }[];
   for (const agent of agents) {
