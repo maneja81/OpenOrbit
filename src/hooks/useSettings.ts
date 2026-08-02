@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { AgentsSettings, DEFAULT_SETTINGS, mergeWithDefaults } from "@/lib/settings";
+import { AgentsSettings, SettingsView, mergeWithDefaults } from "@/lib/settings";
 import { hasAgentsAPI } from "@/lib/agentsApi";
 
 // Mirrors into userData/debug.log (via the main process) in addition to the browser
@@ -11,25 +11,23 @@ function devLog(...args: unknown[]): void {
 }
 
 export function useSettings() {
-  const [settings, setSettings] = useState<AgentsSettings>(DEFAULT_SETTINGS);
+  const [settings, setSettings] = useState<SettingsView>(mergeWithDefaults({}));
   const [loaded, setLoaded] = useState(() => !hasAgentsAPI());
 
   const fetchSettings = useCallback(async () => {
     if (!hasAgentsAPI()) return;
     try {
       const raw = await window.agentsAPI.settings.get();
-      devLog("[settings] refreshed from main", {
-        ...raw,
-        chatApiKey: raw.chatApiKey ? "(set)" : "",
-        voiceApiKey: raw.voiceApiKey ? "(set)" : "",
-      });
+      // No redaction needed any more — settings:get returns chatApiKeySet/voiceApiKeySet
+      // booleans rather than the keys themselves.
+      devLog("[settings] refreshed from main", raw);
       setSettings(mergeWithDefaults(raw));
     } catch (e) {
       // settings:get can reject (e.g. OS-backed secret decryption failing) — the whole
       // app renders nothing until loaded=true, so we must still flip that even on
       // failure rather than leaving the app blank forever. Fall back to defaults.
       devLog("[settings] failed to load, falling back to defaults", e instanceof Error ? e.message : String(e));
-      setSettings(DEFAULT_SETTINGS);
+      setSettings(mergeWithDefaults({}));
     } finally {
       setLoaded(true);
     }
@@ -59,7 +57,7 @@ export function useSettings() {
       setSettings((prev) => ({ ...prev, ...patch }));
       return;
     }
-    let previous: AgentsSettings | undefined;
+    let previous: SettingsView | undefined;
     setSettings((prev) => {
       previous = prev;
       return { ...prev, ...patch };
@@ -85,7 +83,7 @@ export function useSettings() {
 
   const resetSettings = useCallback(async () => {
     if (hasAgentsAPI()) await window.agentsAPI.settings.reset();
-    setSettings(DEFAULT_SETTINGS);
+    setSettings(mergeWithDefaults({}));
   }, []);
 
   return { settings, updateSettings, resetSettings, loaded };

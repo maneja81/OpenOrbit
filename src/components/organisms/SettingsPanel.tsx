@@ -7,13 +7,14 @@ import SettingsSidebar, { SettingsNavGroup } from "@/components/molecules/Settin
 import AgentAccordion from "@/components/molecules/AgentAccordion";
 import SettingsAccordion from "@/components/molecules/SettingsAccordion";
 import AddAgentForm from "@/components/molecules/AddAgentForm";
+import ApiKeyField from "@/components/molecules/ApiKeyField";
 import FilesAppsTab from "@/components/organisms/FilesAppsTab";
 import McpServersTab from "@/components/organisms/McpServersTab";
 import ConnectorsTab from "@/components/organisms/ConnectorsTab";
 import HttpToolsTab from "@/components/organisms/HttpToolsTab";
 import AboutTab from "@/components/organisms/AboutTab";
 import ErrorBoundary from "@/components/atoms/ErrorBoundary";
-import { AgentsSettings, VOICE_TTS_VOICE_OPTIONS, SOUND_FX_VARIANT_COUNT } from "@/lib/settings";
+import { AgentsSettings, SettingsView, VOICE_TTS_VOICE_OPTIONS, SOUND_FX_VARIANT_COUNT } from "@/lib/settings";
 import { USER_CONTEXT_FIELDS } from "@/lib/userContext";
 import { hasAgentsAPI } from "@/lib/agentsApi";
 import { useMcpServers } from "@/hooks/useMcpServers";
@@ -29,7 +30,7 @@ interface SettingsPanelProps {
   onClose: () => void;
   /** Section to show when the panel opens; defaults to "models" if omitted. */
   initialSection?: SettingsSection;
-  settings: AgentsSettings;
+  settings: SettingsView;
   /** Session age from AgentsApp's existing once-a-minute interval, forwarded to the About
    * section. Timed there rather than here so no component reads the clock during render. */
   sessionElapsedMs: number;
@@ -363,16 +364,11 @@ export default function SettingsPanel({
                   </p>
                   <div className="group">
                     <div className="card">
-                      <label className="row-field">
-                        <span>API Key</span>
-                        <input
-                          type="password"
-                          value={settings.chatApiKey}
-                          onChange={(e) => onUpdate({ chatApiKey: e.target.value })}
-                          placeholder="sk-…"
-                          autoComplete="off"
-                        />
-                      </label>
+                      <ApiKeyField
+                        label="API Key"
+                        isSet={settings.chatApiKeySet}
+                        onSave={(key) => onUpdate({ chatApiKey: key })}
+                      />
                       <label className="row-field">
                         <span>API URL</span>
                         <input
@@ -427,16 +423,11 @@ export default function SettingsPanel({
                   </p>
                   <div className="group">
                     <div className="card">
-                      <label className="row-field">
-                        <span>API Key</span>
-                        <input
-                          type="password"
-                          value={settings.voiceApiKey}
-                          onChange={(e) => onUpdate({ voiceApiKey: e.target.value })}
-                          placeholder="sk-…"
-                          autoComplete="off"
-                        />
-                      </label>
+                      <ApiKeyField
+                        label="API Key"
+                        isSet={settings.voiceApiKeySet}
+                        onSave={(key) => onUpdate({ voiceApiKey: key })}
+                      />
                       <label className="row-field">
                         <span>API URL</span>
                         <input
