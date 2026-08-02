@@ -263,3 +263,46 @@ describe("Privacy & Safety", () => {
     expect(screen.queryByLabelText("Ask before DELETE requests")).toBeNull();
   });
 });
+
+describe("the orchestrator's enabled toggle", () => {
+  function renderAgentsTab() {
+    const onUpdate = vi.fn();
+    render(
+      <SettingsPanel
+        open
+        onClose={vi.fn()}
+        settings={mergeWithDefaults({})}
+        sessionElapsedMs={0}
+        onUpdate={onUpdate}
+        onReset={vi.fn()}
+        agents={[]}
+        onUpdateAgent={vi.fn()}
+        onCreateAgent={vi.fn()}
+        onDeleteAgent={vi.fn()}
+        onExportAgent={vi.fn()}
+        onExportAllAgents={vi.fn()}
+        onImportAgents={vi.fn()}
+      />
+    );
+    fireEvent.click(screen.getByRole("tab", { name: /^Agents$/i }));
+    const toggle = [...document.querySelectorAll('[role="switch"]')].find((t) =>
+      /Toggle Orbit/i.test(t.getAttribute("aria-label") ?? "")
+    );
+    return { onUpdate, toggle };
+  }
+
+  it("is disabled, because the orchestrator is singular", () => {
+    const { toggle } = renderAgentsTab();
+    expect(toggle).toBeTruthy();
+    expect(toggle).toBeDisabled();
+  });
+
+  it("writes nothing when clicked", () => {
+    // It used to call onUpdate({ orchestratorEnabled }), which ipc/settings.ts drops via
+    // LOCKED_KEYS and useSettings reconciles straight back — a live-looking write path for a
+    // value that can never change.
+    const { onUpdate, toggle } = renderAgentsTab();
+    fireEvent.click(toggle!);
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+});

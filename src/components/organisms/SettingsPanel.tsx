@@ -570,6 +570,10 @@ export default function SettingsPanel({
                     prompt={orchestratorPrompt}
                     promptLoading={orchestratorPromptLoading}
                     enabled={settings.orchestratorEnabled}
+                    // No onChangeEnabled: the orchestrator is singular and cannot be turned off.
+                    // ipc/settings.ts drops orchestratorEnabled via LOCKED_KEYS, so the handler
+                    // that used to be here was silently discarded and reconciled straight back —
+                    // a live-looking write path for a value that can never change.
                     enabledLocked
                     onChangeName={(name) => onUpdate({ agentName: name })}
                     onChangeDescription={(description) => onUpdate({ agentDescription: description })}
@@ -582,7 +586,6 @@ export default function SettingsPanel({
                         ? () => void resetOrchestratorPrompt()
                         : undefined
                     }
-                    onChangeEnabled={(enabled) => onUpdate({ orchestratorEnabled: enabled })}
                     availableMcpServers={mcpServers}
                     mcpServerIds={settings.orchestratorMcpServerIds}
                     onChangeMcpServerIds={(mcpServerIds) => onUpdate({ orchestratorMcpServerIds: mcpServerIds })}
