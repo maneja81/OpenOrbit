@@ -23,7 +23,7 @@
 /** How a setting's value is validated. `model` is a string with the loose "model" or
  * "provider/model" shape; `enum` restricts to a fixed set. */
 export type SettingKind =
-  | { type: "string" }
+  | { type: "string"; maxLength?: number; singleLine?: boolean; nonEmpty?: boolean }
   | { type: "model" }
   | { type: "url" }
   | { type: "boolean" }
@@ -32,6 +32,25 @@ export type SettingKind =
   | { type: "enum"; values: readonly string[] };
 
 const STRING: SettingKind = { type: "string" };
+
+/**
+ * A value that is interpolated into system prompts.
+ *
+ * `{{agentName}}` and `{{userName}}` land in the opening line of every prompt the app builds —
+ * thirteen places across five files — and all three of these are writable by ConfigAgent, which
+ * is a feature: renaming the orchestrator by chat is a thing people do.
+ *
+ * The risk is the value, not the permission. Unbounded and multi-line, injected text could set
+ * agentName to something that reads as a new prompt section and it would sit at the top of every
+ * system prompt from then on. A name is short and fits on one line, so saying so costs the user
+ * nothing and removes the room to write instructions.
+ */
+const promptField = (maxLength: number, nonEmpty = false): SettingKind => ({
+  type: "string",
+  maxLength,
+  singleLine: true,
+  nonEmpty,
+});
 const URL_KIND: SettingKind = { type: "url" };
 const BOOLEAN: SettingKind = { type: "boolean" };
 const MODEL: SettingKind = { type: "model" };
@@ -60,10 +79,10 @@ export const SETTINGS_SCHEMA = {
   typeAnywhereEnabled: BOOLEAN,
   onboardingDone: BOOLEAN,
   tourCompleted: BOOLEAN,
-  agentName: STRING,
-  agentDescription: STRING,
+  agentName: promptField(60, true),
+  agentDescription: promptField(200),
   orchestratorPromptOverride: STRING,
-  userName: STRING,
+  userName: promptField(60),
   orchestratorModel: MODEL,
   orchestratorEnabled: BOOLEAN,
   orchestratorMcpServerIds: STRING_ARRAY,
@@ -176,8 +195,14 @@ export type ValidationFailure = { key: string; reason: string };
 
 function describe(kind: SettingKind): string {
   switch (kind.type) {
-    case "string":
-      return "a string";
+    case "string": {
+      const limits = [
+        kind.nonEmpty ? "not be empty" : null,
+        kind.maxLength ? `be ${kind.maxLength} characters or fewer` : null,
+        kind.singleLine ? "be a single line" : null,
+      ].filter(Boolean);
+      return limits.length > 0 ? limits.join(", and ") : "a string";
+    }
     case "model":
       return 'look like a model id ("model" or "provider/model")';
     case "url":
@@ -210,8 +235,19 @@ export function validateSettingValue(key: string, value: unknown): { ok: true; v
   const kind: SettingKind = SETTINGS_SCHEMA[key];
 
   switch (kind.type) {
-    case "string":
-      return typeof value === "string" ? { ok: true, value: value.trim() } : { ok: false, reason: "must be a string" };
+    case "string": {
+      if (typeof value !== "string") return { ok: false, reason: "must be a string" };
+      const trimmed = value.trim();
+      if (kind.nonEmpty && trimmed.length === 0) return { ok: false, reason: "cannot be empty" };
+      if (kind.maxLength && trimmed.length > kind.maxLength) {
+        return { ok: false, reason: `must be ${kind.maxLength} characters or fewer` };
+      }
+      // Rejected rather than collapsed: a newline in one of these is either a mistake or an
+      // attempt to make the value read as a new section of the prompt it lands in. Silently
+      // rewriting it would hide both.
+      if (kind.singleLine && /[\r\n]/.test(trimmed)) return { ok: false, reason: "must be a single line" };
+      return { ok: true, value: trimmed };
+    }
 
     case "model": {
       if (typeof value !== "string") return { ok: false, reason: "must be a string" };
