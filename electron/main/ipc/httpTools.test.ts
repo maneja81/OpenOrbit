@@ -1,0 +1,110 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("electron", () => ({
+  ipcMain: { handle: vi.fn() },
+}));
+
+// The store reaches the real database and none of it is what these tests are about — only
+// the handler's own argument validation is.
+vi.mock("../db/httpToolsStore", () => ({
+  createHttpTool: vi.fn(),
+  createHttpToolCollection: vi.fn(),
+  deleteHttpTool: vi.fn(),
+  deleteHttpToolCollection: vi.fn(),
+  getDecryptedCollectionHeaders: vi.fn(),
+  getDecryptedToolHeaders: vi.fn(),
+  listHttpToolCollections: vi.fn(),
+  listHttpTools: vi.fn(),
+  updateHttpTool: vi.fn(),
+  updateHttpToolCollection: vi.fn(),
+  HTTP_METHODS: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+}));
+
+const buildHttpRequestMock = vi.hoisted(() => vi.fn());
+vi.mock("../ai/httpToolRequest", () => ({ buildHttpRequest: buildHttpRequestMock }));
+vi.mock("../net/urlSafety", () => ({ assertPublicHttpUrl: vi.fn() }));
+
+import { ipcMain } from "electron";
+import { registerHttpToolHandlers } from "./httpTools";
+
+type Handler = (event: unknown, ...args: unknown[]) => unknown;
+
+function handlerFor(channel: string): Handler {
+  registerHttpToolHandlers();
+  const call = vi.mocked(ipcMain.handle).mock.calls.find((c) => c[0] === channel);
+  if (!call) throw new Error(`${channel} was never registered`);
+  return call[1] as Handler;
+}
+
+function testTool(input: unknown): Promise<unknown> {
+  return handlerFor("httpTools:testTool")(null, input) as Promise<unknown>;
+}
+
+const VALID = {
+  baseUrl: "https://api.example.com",
+  path: "/things/{id}",
+  method: "GET",
+  params: [{ name: "id", description: "the id", type: "string", location: "path", required: true }],
+  args: { id: "1" },
+};
+
+describe("httpTools:testTool argument names", () => {
+  beforeEach(() => {
+    vi.mocked(ipcMain.handle).mockClear();
+    buildHttpRequestMock.mockReset();
+    buildHttpRequestMock.mockReturnValue({
+      url: "https://api.example.com/things/1",
+      method: "GET",
+      headers: {},
+      body: undefined,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, status: 200, statusText: "OK", text: async () => "{}" }))
+    );
+  });
+
+  it("names args when the sample values arrive under the wrong key", async () => {
+    // The whole finding: this used to reach buildHttpRequest with no args at all and fail
+    // with `Missing required parameter "id"`, blaming the param definition.
+    const { args, ...rest } = VALID;
+    void args;
+    await expect(testTool({ ...rest, values: { id: "1" } })).rejects.toThrow(
+      /does not accept "values".*accepted keys are .*\bargs\b/s
+    );
+    expect(buildHttpRequestMock).not.toHaveBeenCalled();
+  });
+
+  it("names every unrecognised key, not just the first", async () => {
+    await expect(testTool({ ...VALID, values: {}, timeout: 5 })).rejects.toThrow(
+      /does not accept "values", "timeout"/
+    );
+  });
+
+  it("accepts every documented key", async () => {
+    await testTool({
+      ...VALID,
+      headers: { authorization: "Bearer x" },
+      bodyTemplate: "",
+      allowPrivateHosts: false,
+    });
+    expect(buildHttpRequestMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("still accepts an input carrying only the required key", async () => {
+    await testTool({ baseUrl: "https://api.example.com" });
+    expect(buildHttpRequestMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a non-object input before looking at its keys", async () => {
+    await expect(testTool("https://api.example.com")).rejects.toThrow(
+      "httpTools:testTool requires a plain object input"
+    );
+  });
+
+  it("still reports a missing baseUrl as a missing baseUrl", async () => {
+    await expect(testTool({ path: "/things" })).rejects.toThrow(
+      "httpTools:testTool requires a non-empty baseUrl"
+    );
+  });
+});
