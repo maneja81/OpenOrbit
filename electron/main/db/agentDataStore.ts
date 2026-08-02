@@ -1,4 +1,5 @@
 import { getDb } from "./index";
+import { parseJsonColumn, UNPARSEABLE } from "./jsonColumn";
 
 /** Per-agent key/value store, scoped by agent_id — see migrations.ts v24 (agent_data table). */
 
@@ -8,7 +9,8 @@ export function getAgentData<T>(agentId: string, key: string, defaultValue: T): 
     | { value: string }
     | undefined;
   if (!row) return defaultValue;
-  return JSON.parse(row.value) as T;
+  const value = parseJsonColumn(`agent_data ${agentId}/${key}`, row.value);
+  return value === UNPARSEABLE ? defaultValue : (value as T);
 }
 
 export function setAgentData(agentId: string, key: string, value: unknown): void {
@@ -29,7 +31,11 @@ export function listAgentData(agentId: string): Record<string, unknown> {
   }[];
   const result: Record<string, unknown> = {};
   for (const row of rows) {
-    result[row.key] = JSON.parse(row.value);
+    const value = parseJsonColumn(`agent_data ${agentId}/${row.key}`, row.value);
+    // Omit rather than include-as-undefined, so a caller spreading this over its own defaults
+    // doesn't have the bad key override the default it should fall back to.
+    if (value === UNPARSEABLE) continue;
+    result[row.key] = value;
   }
   return result;
 }
