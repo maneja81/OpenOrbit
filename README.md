@@ -1,5 +1,7 @@
 # OpenOrbit
 
+[![CI](https://github.com/maneja81/OpenOrbit/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/maneja81/OpenOrbit/actions/workflows/ci.yml)
+
 <img src="public/openorbit-logo.svg" alt="OpenOrbit logo" width="120" height="120">
 
 A desktop app that runs a team of AI agents on your own machine — a central orchestrator
