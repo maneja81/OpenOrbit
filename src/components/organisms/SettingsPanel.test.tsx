@@ -306,3 +306,51 @@ describe("the orchestrator's enabled toggle", () => {
     expect(onUpdate).not.toHaveBeenCalled();
   });
 });
+
+describe("running onboarding again", () => {
+  function renderGeneral() {
+    const onUpdate = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <SettingsPanel
+        open
+        onClose={onClose}
+        settings={mergeWithDefaults({ onboardingDone: true })}
+        sessionElapsedMs={0}
+        onUpdate={onUpdate}
+        onReset={vi.fn()}
+        agents={[]}
+        onUpdateAgent={vi.fn()}
+        onCreateAgent={vi.fn()}
+        onDeleteAgent={vi.fn()}
+        onExportAgent={vi.fn()}
+        onExportAllAgents={vi.fn()}
+        onImportAgents={vi.fn()}
+      />
+    );
+    fireEvent.click(screen.getByRole("tab", { name: /^General$/i }));
+    const button = [...document.querySelectorAll("button")].find((b) => /^Start$/i.test(b.textContent?.trim() ?? ""));
+    return { onUpdate, onClose, button };
+  }
+
+  it("offers a way back into onboarding", () => {
+    // The tour has had a replay path since it shipped; onboarding's only route was a Danger Zone
+    // reset, which also destroys chat history, agents, memory and the knowledge base.
+    expect(renderGeneral().button).toBeTruthy();
+  });
+
+  it("clears the flag and gets out of the way", () => {
+    const { onUpdate, onClose, button } = renderGeneral();
+    fireEvent.click(button!);
+    expect(onUpdate).toHaveBeenCalledWith({ onboardingDone: false });
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("clears nothing else", () => {
+    // AgentsApp shows onboarding whenever onboardingDone is false; the stored answers stay put
+    // and become the starting point.
+    const { onUpdate, button } = renderGeneral();
+    fireEvent.click(button!);
+    expect(onUpdate).toHaveBeenCalledExactlyOnceWith({ onboardingDone: false });
+  });
+});
