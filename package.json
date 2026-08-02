@@ -20,9 +20,52 @@
     "build:web": "tsc -b && vite build",
     "preview": "electron-vite preview",
     "package": "npm run build && electron-builder",
+    "package:ci": "npm run build && electron-builder --publish never",
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest"
+  },
+  "build": {
+    "appId": "com.mohitaneja.openorbit",
+    "productName": "OpenOrbit",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist-electron/**",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "**/*.node"
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "category": "public.app-category.productivity",
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        }
+      ],
+      "category": "Utility"
+    }
   },
   "dependencies": {
     "@openai/agents": "^0.13.5",
