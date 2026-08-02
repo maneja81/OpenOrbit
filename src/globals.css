@@ -2238,6 +2238,16 @@ svg#oc {
   color: rgba(200, 230, 255, 0.65);
 }
 
+/* Same sub-label treatment the Models rows use (.group .card .row-field span small). Without the
+   block display it runs on inline and reads as "Model IDLeave blank to use gpt-4.1-mini". */
+.settings-field span small {
+  display: block;
+  font-size: 10.5px;
+  color: rgba(150, 190, 230, 0.55);
+  font-weight: 400;
+  margin-top: 2px;
+}
+
 /* The prompt label carries a "reset to default" control on its right when the prompt has been
    customised. Without this the button stacks under the label text, since .settings-field is a
    column and its spans are plain inline text everywhere else. */

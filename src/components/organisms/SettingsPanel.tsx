@@ -26,7 +26,7 @@ import { useHttpTools } from "@/hooks/useHttpTools";
 import { useUserContext } from "@/hooks/useUserContext";
 import { formatHumanizedError, humanizeError } from "@/lib/humanizeError";
 import { providerUrlWarning } from "@/lib/providerUrlWarning";
-import { AI_PROVIDERS, findProvider } from "@/lib/providers";
+import { AI_PROVIDERS, findProvider, modelBelongsToProvider } from "@/lib/providers";
 import { DEFAULT_SETTINGS_SECTION, sectionOnTransition } from "@/lib/settingsSection";
 import { SoundFxEvent, sfxPreviewSrc } from "@/hooks/useSoundFX";
 
@@ -290,7 +290,7 @@ export default function SettingsPanel({
    * agent must not take down a run it isn't part of. The cost is that the fallback is invisible,
    * so this is the surface that makes it visible where the user set it.
    */
-  const providerWarningFor = (providerId: string): string | undefined => {
+  const providerWarningFor = (providerId: string, model: string): string | undefined => {
     if (providerId === "") return undefined;
     const provider = findProvider(providerId);
     if (!provider) return `Unknown provider — this agent falls back to the Chat provider.`;
@@ -301,6 +301,12 @@ export default function SettingsPanel({
     }
     if (!row.apiUrl && !provider.baseUrl) {
       return `${provider.label} has no API URL — this agent falls back to the Chat provider.`;
+    }
+    // Credentials are fine, so the run reaches the provider — and is refused by it. Switching to
+    // a provider with no default model leaves the previous one's id in place (only the user knows
+    // which model they pulled onto a local server), and until now nothing said so.
+    if (!modelBelongsToProvider(providerId, model)) {
+      return `"${model}" doesn't look like a ${provider.label} model — this agent will likely fail on its first run.`;
     }
     return undefined;
   };
@@ -720,7 +726,13 @@ export default function SettingsPanel({
                           ...(nextModel ? { model: nextModel } : {}),
                         });
                       }}
-                      providerWarning={providerWarningFor(agent.provider_id)}
+                      providerWarning={providerWarningFor(agent.provider_id, agent.model)}
+                      // What a blank field would resolve to, so "leave it empty" is a stated
+                      // option rather than something the user has to discover. Mirrors
+                      // resolveAgentModel in electron/main/ai/agents.ts.
+                      modelPlaceholder={
+                        findProvider(agent.provider_id)?.defaultChatModel || settings.orchestratorModel
+                      }
                       onChangePrompt={(prompt) => onUpdateAgent(agent.id, { prompt })}
                       onChangeEnabled={(enabled) => onUpdateAgent(agent.id, { enabled })}
                       availableMcpServers={mcpServers}

@@ -181,6 +181,9 @@ export interface AgentCreateInput {
   tagline?: string;
   description?: string;
   model?: string;
+  /** Registry id this agent runs on, or "" / omitted to follow the Chat slot — the same meaning
+   * `provider_id` carries on the row and that updateAgent's patch uses. */
+  providerId?: string;
   prompt?: string;
 }
 
@@ -813,10 +816,17 @@ export function createAgent(input: AgentCreateInput): AgentRow {
   if (!name) {
     throw new Error("Agent name is required.");
   }
-  // A new agent follows the Chat slot, so a blank model means the model that slot is on right
-  // now — not the build's compile-time default, which is a different provider's id the moment
-  // the user has pointed Chat anywhere but OpenAI.
-  const model = input.model?.trim() || resolveAgentModel("");
+  // Empty means "follow the Chat slot"; anything else is checked against the registry, for the
+  // same reason updateAgent checks it — a row naming a provider this build has never heard of
+  // silently falls back at run time, so the refusal belongs at the write.
+  const providerId = input.providerId?.trim() ?? "";
+  if (providerId !== "" && !findProvider(providerId)) {
+    throw new Error(`"${providerId}" is not a provider this app knows about.`);
+  }
+  // A blank model means whatever this agent's own provider defaults to — the Chat slot's current
+  // model when it follows the slot, not the build's compile-time default, which is a different
+  // provider's id the moment the user has pointed Chat anywhere but OpenAI.
+  const model = input.model?.trim() || resolveAgentModel(providerId);
   if (!MODEL_ID_PATTERN.test(model)) {
     throw new Error(`"${model}" doesn't look like a valid model ID (expected "model" or "provider/model").`);
   }
@@ -828,8 +838,8 @@ export function createAgent(input: AgentCreateInput): AgentRow {
   const prompt = input.prompt?.trim() ?? "";
 
   db.prepare(
-    "INSERT INTO agents (id, name, icon, tagline, description, prompt, model, tools, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-  ).run(id, name, icon, tagline, description, prompt, model, "[]", 1);
+    "INSERT INTO agents (id, name, icon, tagline, description, prompt, model, tools, enabled, provider_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(id, name, icon, tagline, description, prompt, model, "[]", 1, providerId);
 
   return db.prepare("SELECT * FROM agents WHERE id = ?").get(id) as AgentRow;
 }

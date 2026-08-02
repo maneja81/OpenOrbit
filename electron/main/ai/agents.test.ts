@@ -280,6 +280,38 @@ describe("a blank model id resolves against the agent's own provider", () => {
     expect(createAgent({ name: "Researcher", prompt: "p" }).model).toBe("claude-haiku-4-5-20251001");
   });
 
+  // Before this, createAgent's INSERT omitted provider_id entirely, so every new agent started on
+  // "" no matter what was asked for — you had to create it, reopen it and switch, which then
+  // overwrote the model you had just typed.
+  it("pins a new agent to the provider it was created with, and takes that provider's model", () => {
+    const created = createAgent({ name: "Researcher", prompt: "p", providerId: "anthropic" });
+
+    expect(created.provider_id).toBe("anthropic");
+    expect(created.model).toBe("claude-haiku-4-5-20251001");
+  });
+
+  it("keeps an explicit model when one is given alongside the provider", () => {
+    const created = createAgent({
+      name: "Researcher",
+      prompt: "p",
+      providerId: "openrouter",
+      model: "anthropic/claude-3.5-sonnet",
+    });
+
+    expect(created.provider_id).toBe("openrouter");
+    expect(created.model).toBe("anthropic/claude-3.5-sonnet");
+  });
+
+  it("defaults to following the Chat slot when no provider is named", () => {
+    expect(createAgent({ name: "Researcher", prompt: "p" }).provider_id).toBe("");
+  });
+
+  it("refuses an unknown provider id at create, not just at update", () => {
+    expect(() => createAgent({ name: "Researcher", prompt: "p", providerId: "not-a-provider" })).toThrow(
+      /is not a provider this app knows about/
+    );
+  });
+
   it("still refuses an unknown provider id rather than falling back to a default", () => {
     const created = createAgent({ name: "Researcher", prompt: "p" });
     expect(() => updateAgent(created.id, { providerId: "not-a-provider", model: "" })).toThrow(
