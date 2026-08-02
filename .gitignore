@@ -9,7 +9,7 @@
 
 # Per-machine Claude Code settings. The shared config belongs in CLAUDE.md;
 # anything under .claude/ that ends in .local.json is one developer's only.
-.claude/settings.local.json
+.claude/*
 
 # Dependencies
 /node_modules/
