@@ -40,6 +40,9 @@ interface SettingsPanelProps {
    * section. Timed there rather than here so no component reads the clock during render. */
   sessionElapsedMs: number;
   onUpdate: (patch: Partial<AgentsSettings>) => void;
+  /** Surfaced from useAgents. Agent create/update/delete/import failures used to reject into
+   * nothing — this is the one place the user can see that the thing they clicked didn't work. */
+  agentsError?: string | null;
   onReset: () => Promise<void>;
   agents: AgentRow[];
   onUpdateAgent: (
@@ -224,6 +227,7 @@ export default function SettingsPanel({
   settings,
   sessionElapsedMs,
   onUpdate,
+  agentsError,
   onReset,
   agents,
   onUpdateAgent,
@@ -662,6 +666,9 @@ export default function SettingsPanel({
                     </button>
                   </div>
                 </div>
+                {/* Every other data tab renders its hook's error this way (McpServersTab:365).
+                    Agents had no error to render because useAgents never produced one. */}
+                {agentsError && <p className="settings-error">{agentsError}</p>}
                 <div className="agent-accordion-list">
                   <AgentAccordion
                     icon="ti-sparkles"
