@@ -26,7 +26,7 @@ import {
 } from "../ai/agents";
 import { closeMcpServers } from "../ai/mcp";
 import { extractApprovalMeta, extractRunItemMeta } from "../ai/runItemMeta";
-import { configureChatClient, estimateGenerationCost } from "../ai/provider";
+import { configureChatClient, estimateGenerationCost, providerIdForModel } from "../ai/provider";
 import { insertTokenUsage, updateTokenUsageCost } from "../db/tokenUsageStore";
 import { getRecentMessages, appendMessage, ChatMessageRecord } from "./chatHistory";
 import { readAppSetting } from "../appSettings";
@@ -158,6 +158,9 @@ function logTokenUsage(result: RunResultLike, traceId: string): void {
       const agent = turnAgents.length === rawResponses.length ? turnAgents[index] : fallbackAgent;
       const agentId = agent?.name ?? null;
       const model = agent?.model ? String(agent.model) : "unknown";
+      // A pinned agent carries its provider on the model object; an inherited one resolves to
+      // the Chat slot. Without this, cost is priced against whatever Chat happens to be.
+      const servingProviderId = providerIdForModel(agent?.model);
       const generationId = response.responseId ?? null;
 
       const id = insertTokenUsage({
@@ -171,7 +174,13 @@ function logTokenUsage(result: RunResultLike, traceId: string): void {
       });
       broadcastTokenUsageUpdate();
 
-      estimateGenerationCost(generationId, model, response.usage.inputTokens, response.usage.outputTokens)
+      estimateGenerationCost(
+        generationId,
+        model,
+        response.usage.inputTokens,
+        response.usage.outputTokens,
+        servingProviderId
+      )
         .then((costUsd) => {
           if (costUsd !== null) {
             updateTokenUsageCost(id, costUsd);
@@ -578,7 +587,7 @@ export function registerAgentHandlers() {
     if (typeof patch !== "object" || patch === null || Array.isArray(patch)) {
       throw new Error("agent:update requires a plain object patch");
     }
-    const stringFields: (keyof AgentUpdatePatch)[] = ["name", "tagline", "description", "model", "prompt"];
+    const stringFields: (keyof AgentUpdatePatch)[] = ["name", "tagline", "description", "model", "prompt", "providerId"];
     for (const field of stringFields) {
       if (patch[field] !== undefined && typeof patch[field] !== "string") {
         throw new Error(`agent:update patch.${field} must be a string`);

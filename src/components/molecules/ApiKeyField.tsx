@@ -5,6 +5,15 @@ interface ApiKeyFieldProps {
   /** Whether a key is already stored. The value itself never reaches the renderer. */
   isSet: boolean;
   onSave: (key: string) => void;
+  /**
+   * Removes the stored key. Optional so a caller with nowhere to route it can omit the control.
+   *
+   * Until this existed the comment below promised "clearing is done from the Danger Zone", and
+   * the Danger Zone offered exactly one thing: wiping the whole database — settings, chat
+   * history, agents, memory and the knowledge base. The write boundary has always accepted an
+   * empty string to clear a key; there was simply no way to send one.
+   */
+  onClear?: () => void;
 }
 
 /**
@@ -23,14 +32,14 @@ interface ApiKeyFieldProps {
  * Committing on blur also means one encrypted write per key entered rather than one per
  * character — pasting a 164-character key used to be 164 OS-keychain round trips.
  */
-export default function ApiKeyField({ label, isSet, onSave }: ApiKeyFieldProps) {
+export default function ApiKeyField({ label, isSet, onSave, onClear }: ApiKeyFieldProps) {
   const [draft, setDraft] = useState("");
   const [justSaved, setJustSaved] = useState(false);
 
   const commit = () => {
     const trimmed = draft.trim();
     // Blurring an untouched field must not clear a stored key — an empty draft means
-    // "unchanged", not "remove it". Clearing is done from the Danger Zone.
+    // "unchanged", not "remove it". Removing is the explicit control below.
     if (trimmed.length === 0) return;
     onSave(trimmed);
     setDraft("");
@@ -44,6 +53,23 @@ export default function ApiKeyField({ label, isSet, onSave }: ApiKeyFieldProps) 
       <span>
         {label}
         {stored && <small>A key is saved — type a new one to replace it</small>}
+        {stored && onClear && (
+          <button
+            type="button"
+            className="settings-action-btn-sm settings-action-btn-ghost"
+            // Not inside the <label>'s implicit focus target by accident: a bare <button> in a
+            // label would steal the click meant for the input, so this sits in the text column
+            // where the hint already is.
+            onClick={(e) => {
+              e.preventDefault();
+              setDraft("");
+              setJustSaved(false);
+              onClear();
+            }}
+          >
+            Remove
+          </button>
+        )}
       </span>
       <input
         type="password"

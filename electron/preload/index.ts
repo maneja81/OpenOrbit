@@ -74,6 +74,38 @@ const agentsAPI = {
     get: (): Promise<LocationData | null> => ipcRenderer.invoke("location:get"),
   },
 
+  providers: {
+    /** Registry + which providers have credentials. Key values never cross this boundary. */
+    list: (): Promise<{
+      catalog: {
+        id: string;
+        label: string;
+        baseUrl: string;
+        defaultChatModel: string;
+        api: string;
+        modelsAuth: string;
+        keyRequired: boolean;
+        supportsVoice: boolean;
+        defaultTranscriptionModel: string;
+        defaultTtsModel: string;
+      }[];
+      configured: { id: string; apiUrl: string; keySet: boolean }[];
+    }> => ipcRenderer.invoke("providers:list"),
+    /** Credentials for a provider that is not the Chat slot — otherwise an agent could be
+     * pinned to one that could never be given a key. */
+    save: (input: { providerId: string; apiUrl?: string; apiKey?: string }): Promise<
+      { id: string; apiUrl: string; keySet: boolean }[]
+    > => ipcRenderer.invoke("providers:save", input),
+    /** One call on purpose: saving credentials, pointing the Chat slot and re-aligning the agents
+     * that follow it are a single change — see electron/main/ai/selectProvider.ts. */
+    selectChat: (selection: {
+      providerId: string;
+      apiUrl?: string;
+      apiKey?: string;
+      model?: string;
+    }): Promise<{ providerId: string; model: string; updatedAgents: number }> =>
+      ipcRenderer.invoke("providers:selectChat", selection),
+  },
   settings: {
     get: (): Promise<Record<string, unknown>> => ipcRenderer.invoke("settings:get"),
     update: (patch: Record<string, unknown>): Promise<Record<string, unknown>> =>
@@ -178,6 +210,7 @@ const agentsAPI = {
         tagline?: string;
         description?: string;
         model?: string;
+        providerId?: string;
         prompt?: string;
         enabled?: boolean;
         mcpServerIds?: string[];
@@ -191,6 +224,7 @@ const agentsAPI = {
       tagline?: string;
       description?: string;
       model?: string;
+        providerId?: string;
       prompt?: string;
     }): Promise<AgentRow> => ipcRenderer.invoke("agent:create", input),
     orchestratorPrompt: (): Promise<string> => ipcRenderer.invoke("agent:orchestratorPrompt"),

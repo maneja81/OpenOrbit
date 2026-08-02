@@ -116,6 +116,8 @@ interface AgentRow {
   connector_ids: string;
   /** JSON array of http_tool_collections.id attached to this agent. */
   http_tool_collection_ids: string;
+  /** Registry id from lib/providers, or "" to follow the Chat slot. */
+  provider_id: string;
 }
 
 /** AgentRow plus derived, non-persisted fields computed by listAgentsForDisplay()
@@ -403,6 +405,32 @@ interface Window {
       refresh: () => Promise<LocationData | null>;
       get: () => Promise<LocationData | null>;
     };
+    providers: {
+      list: () => Promise<{
+        catalog: {
+          id: string;
+          label: string;
+          baseUrl: string;
+          defaultChatModel: string;
+          api: string;
+          modelsAuth: string;
+          keyRequired: boolean;
+          supportsVoice: boolean;
+          defaultTranscriptionModel: string;
+          defaultTtsModel: string;
+        }[];
+        configured: { id: string; apiUrl: string; keySet: boolean }[];
+      }>;
+      save: (input: { providerId: string; apiUrl?: string; apiKey?: string }) => Promise<
+        { id: string; apiUrl: string; keySet: boolean }[]
+      >;
+      selectChat: (selection: {
+        providerId: string;
+        apiUrl?: string;
+        apiKey?: string;
+        model?: string;
+      }) => Promise<{ providerId: string; model: string; updatedAgents: number }>;
+    };
     settings: {
       get: () => Promise<Record<string, unknown>>;
       update: (patch: Record<string, unknown>) => Promise<Record<string, unknown>>;
@@ -469,6 +497,7 @@ interface Window {
           tagline?: string;
           description?: string;
           model?: string;
+        providerId?: string;
           prompt?: string;
           enabled?: boolean;
           mcpServerIds?: string[];
@@ -482,6 +511,7 @@ interface Window {
         tagline?: string;
         description?: string;
         model?: string;
+        providerId?: string;
         prompt?: string;
       }) => Promise<AgentRow>;
       orchestratorPrompt: () => Promise<string>;

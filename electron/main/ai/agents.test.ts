@@ -48,6 +48,10 @@ describe("settings ConfigAgent may write (backs Cipher's update_setting tool)", 
     // the destination is the problem, not the transport.
     "chatApiUrl",
     "voiceApiUrl",
+    // And the provider selectors, one step earlier in the same chain: choosing a provider chooses
+    // the URL, so writing one of these redirects the key just as effectively as writing the URL.
+    "chatProviderId",
+    "voiceProviderId",
   ];
 
   it.each(SAFETY_KEYS)("does not let an agent write %s", (key) => {
@@ -60,6 +64,25 @@ describe("settings ConfigAgent may write (backs Cipher's update_setting tool)", 
     // Guards the other direction too: over-protecting silently removes the agent's ability to
     // do things the user legitimately asks for, which is the bug this list previously had.
     expect([...PROTECTED_SETTING_KEYS].sort()).toEqual([...SAFETY_KEYS].sort());
+  });
+
+  it("does not let an agent choose another agent's provider", () => {
+    // buildUpdateAgentPatch backs Cipher's update_agent tool. providerId is deliberately absent
+    // from it: choosing a provider chooses the host a request and its key are sent to, which is
+    // the same exposure that keeps chatApiUrl and chatProviderId out of the agent's reach.
+    // "Point the research agent at https://attacker/v1" is a sentence that can arrive in a web
+    // page, a document, or a tool result.
+    const patch = buildUpdateAgentPatch({
+      name: null,
+      tagline: null,
+      description: null,
+      prompt: null,
+      model: null,
+      enabled: null,
+      mcpServerIds: null,
+      connectorIds: null,
+    } as Parameters<typeof buildUpdateAgentPatch>[0]);
+    expect(patch).not.toHaveProperty("providerId");
   });
 
   it("keeps the two lists disjoint", () => {

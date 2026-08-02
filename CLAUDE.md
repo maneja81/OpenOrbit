@@ -76,7 +76,8 @@ Four built-in sub-agents ship seeded from `electron/main/ai/defaultAgents.json`:
 - **Schema**: `electron/main/db/migrations.ts` — append-only, ledger-based
 - **DB bootstrap**: `electron/main/db/index.ts` — `getDb()`, WAL, FK pragma, legacy renames
 - **Agents**: `electron/main/ai/agents.ts` + `ai/defaultAgents.json` + `ai/prompts/*.md`
-- **Provider/credentials**: `electron/main/ai/provider.ts` — chat and voice slots
+- **Providers**: `electron/main/ai/providers.ts` is the registry (id, label, base URL, default model, which HTTP surface it answers on, whether it can serve voice), mirrored in `src/lib/providers.ts` with `providersParity.test.ts` holding the two in step. Credentials live one row per provider in the `providers` table (`db/providersStore.ts`), keyed by registry id — not per agent, so one key serves every agent pointed at it. `ai/selectProvider.ts` is the single operation that moves the Chat slot: credentials, the slot, and the models of every agent that follows it change together, because doing them separately leaves agents naming a model the new host has never heard of.
+- **Provider/credentials (per-slot)**: `electron/main/ai/provider.ts` — chat and voice slots
 - **App storage**: `electron/main/appDirs.ts` — every app-owned userData directory
 
 ## Build & Run
@@ -88,7 +89,19 @@ Four built-in sub-agents ship seeded from `electron/main/ai/defaultAgents.json`:
 - **Lint**: `npm run lint`
 - **Drive the running app** (screenshots, clicking through the UI, confirming a change works for real rather than only in vitest): the `run-openorbit` skill — `.claude/skills/run-openorbit/SKILL.md`, a Playwright REPL over the built app.
 - ⚠ **Never launch the app from a worktree without `--user-data-dir`.** `app.getPath("userData")` resolves to the same `~/Library/Application Support/OpenOrbit` from *every* checkout and worktree, so an exploratory launch writes into the real database — settings, chat history, agents, encrypted API keys. The `run-openorbit` driver sandboxes it and aborts if the isolation doesn't take; use it rather than launching by hand.
-- **Env required**: none at runtime. Credentials are entered in-app and stored encrypted in SQLite — chat/voice API key + base URL under `appSettings.*` (`ai/provider.ts`), per-connector OAuth client id/secret in the `connectors` table (`connectors/registry.ts`, migration 26). Optional at build time: `GITHUB_RELEASE_REPO` (`scripts/releaseInfo.ts`); `PORT` overrides the dev renderer port.
+- **Env required**: none at runtime. Credentials are entered in-app and stored encrypted in SQLite — one row per provider in the `providers` table, with the pre-registry `appSettings.chatApiKey`/`chatApiUrl` pair still read when `chatProviderId` is `""` so installs predating the registry keep working (`ai/provider.ts`), per-connector OAuth client id/secret in the `connectors` table (`connectors/registry.ts`, migration 26). Optional at build time: `GITHUB_RELEASE_REPO` (`scripts/releaseInfo.ts`); `PORT` overrides the dev renderer port.
+
+## Providers — things that bite
+
+- **`@openai/agents` defaults to the Responses API** (`DEFAULT_OPENAI_API = 'responses'`), and the app only calls `setOpenAIAPI` from `configureChatClient`. OpenAI and OpenRouter serve `/responses`; **Anthropic's compatible surface 404s it and Ollama has no such endpoint**, so those run through `OpenAIChatCompletionsModel` instead. That is what the registry's `api` field decides.
+- **An agent inheriting the Chat slot gets a plain model-id string**, which resolves through the process-wide default client. Only an agent pinned to its own provider gets a `Model` instance. Keep it that way — returning a `Model` for the inherited case re-routes every agent in the app.
+- **A pinned provider that cannot be resolved falls back to the Chat slot and logs**, rather than throwing. `buildOrchestrator` constructs every agent before a run starts, so throwing there fails the whole app over one misconfigured agent that the run may not even involve.
+- **Anthropic's `/v1/models` rejects a bearer token** (401) and wants `x-api-key` + `anthropic-version`, even though chat traffic through the same host accepts one. That is the only reason `modelsAuth` exists.
+- **Model ids are not all `vendor/model`.** OpenRouter uses a leading `~` for floating aliases (`~deepseek/deepseek-v4-flash-latest`); Ollama uses `name:tag` with no vendor at all (`llama3.2:3b`). `MODEL_ID_PATTERN` admits both — it was written for `vendor/model` and silently refused each of them in turn.
+- **Only OpenAI serves `/audio/*`.** Voice *output* falls back to the browser's own speech synthesis so it works everywhere; voice *input* has no fallback, which is why onboarding switches it off when the chosen provider cannot transcribe.
+- **`selectChatProvider` writes with `setSetting`**, bypassing the `settings:update` handler — so `ipc/providers.ts` broadcasts afterwards. Without it the Settings panel renders the previous provider while the app already runs on the new one.
+- **The static price table covers shipped defaults only.** OpenRouter reports a real billed figure from its own API, a local model is free, and everything else shows tokens with no price rather than a guess.
+- **`chatProviderId` / `voiceProviderId` / an agent's `provider_id` are not agent-writable.** Choosing a provider chooses the host a key is sent to, the same exposure that keeps `chatApiUrl` out of ConfigAgent's reach.
 
 ## Worktrees
 
@@ -142,7 +155,7 @@ Four built-in sub-agents ship seeded from `electron/main/ai/defaultAgents.json`:
 - Icons are Tabler webfont class strings (e.g. `"ti-robot"`) — there is no per-service image icon system.
 - Per-agent attachment, never global: MCP servers, connectors, and HTTP tool collections are all attached to individual agents via JSON id arrays on the `agents` row.
 - Everything local: chat history, memory, knowledge, and tasks live in SQLite under Electron's `userData`.
-- Bring-your-own API key against any OpenAI-compatible host (OpenAI by default; OpenRouter and Ollama both supported paths).
+- Bring-your-own API key against any OpenAI-compatible host. Four providers ship as choices — OpenRouter, OpenAI, Claude (Anthropic's OpenAI-compatible surface) and Local AI (Ollama or similar) — picked during onboarding and changeable per agent in Settings → Agents.
 
 ## Design & Planning Rules
 

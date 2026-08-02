@@ -26,6 +26,8 @@ import {
   listTasksTool,
   updateTaskTool,
 } from "./tools/taskAgentTools";
+import { modelForAgent } from "./provider";
+import { findProvider } from "./providers";
 import { formatUserInfoForPrompt, readUserInfoFacts } from "./userInfoStore";
 import defaultAgentsConfig from "./defaultAgents.json";
 import { getDb } from "../db";
@@ -127,10 +129,22 @@ export interface AgentRow {
   mcp_server_ids: string;
   connector_ids: string;
   http_tool_collection_ids: string;
+  /** Registry id from ./providers, or "" to follow the Chat slot. */
+  provider_id: string;
 }
 
 export interface AgentUpdatePatch {
   name?: string;
+  /**
+   * Which provider this agent runs on; "" means "follow the Chat slot".
+   *
+   * Deliberately absent from buildUpdateAgentPatch, so ConfigAgent's update_agent tool cannot
+   * set it. Choosing a provider chooses the host a request and its key are sent to, which is the
+   * same reasoning that keeps chatApiUrl and chatProviderId out of the agent's reach: a reply is
+   * assembled from text this app did not author, and "point the research agent at
+   * https://attacker/v1" is a sentence that can appear in it.
+   */
+  providerId?: string;
   tagline?: string;
   description?: string;
   model?: string;
@@ -185,7 +199,16 @@ function ensureDefaultAgentsSeeded(db: Database.Database): void {
       entry.tagline,
       entry.description,
       prompt,
-      entry.model,
+      // The orchestrator's configured model rather than the one baked into defaultAgents.json.
+      //
+      // Those entries all say "gpt-4.1-mini", which was harmless while OpenAI was the only
+      // provider and is broken now: seed onto Claude or a local Ollama and all four system agents
+      // ask that host for an OpenAI model. Observed live — `404 model 'gpt-4.1-mini' not found`
+      // from Ollama, for agents the user never touched.
+      //
+      // The JSON value stays as the fallback for a database with no setting yet. On a legacy
+      // install readAppSetting returns the same "gpt-4.1-mini" default, so this is a no-op there.
+      readAppSetting("orchestratorModel") || entry.model,
       JSON.stringify(entry.tools),
       entry.system ? 1 : 0
     );
@@ -255,6 +278,11 @@ export const PROTECTED_SETTING_KEYS = [
   // of these values; the exfiltration path was the more serious half.
   "chatApiUrl",
   "voiceApiUrl",
+  // Same reasoning one step earlier in the chain: picking a provider picks the URL its requests
+  // go to, so an agent able to write these can redirect the user's key just as surely as if it
+  // had written the URL itself.
+  "chatProviderId",
+  "voiceProviderId",
 ] as const;
 
 /** Where each protected setting actually lives, so the refusal can point somewhere useful
@@ -267,6 +295,8 @@ const PROTECTED_SETTING_LOCATION: Record<(typeof PROTECTED_SETTING_KEYS)[number]
   locationEnabled: "Settings → General",
   chatApiUrl: "Settings → AI Models",
   voiceApiUrl: "Settings → AI Models",
+  chatProviderId: "Settings → AI Models",
+  voiceProviderId: "Settings → AI Models",
 };
 
 /** The refusal message for a protected key, or null if the key is freely writable. Exported
@@ -287,7 +317,7 @@ const SENSITIVE_SETTING_KEYS = ["chatApiKey", "voiceApiKey"];
 const getSettingsTool = tool({
   name: "get_settings",
   description:
-    "View the app's current settings: voiceInputEnabled, typeAnywhereEnabled, locationEnabled, bgMusicEnabled, soundFxEnabled, voiceOutputEnabled, agentName, agentDescription, userName, orchestratorModel, voiceTranscriptionModel, voiceTtsModel, chatApiUrl, voiceApiUrl, whether the Chat/Voice API keys are set (the key values themselves are never exposed), and the HTTP-tool approval policy (httpToolApprovalPost, httpToolApprovalPutPatch, httpToolApprovalDelete, toolApprovalDisplay).",
+    "View the app's current settings: voiceInputEnabled, typeAnywhereEnabled, locationEnabled, bgMusicEnabled, soundFxEnabled, voiceOutputEnabled, agentName, agentDescription, userName, orchestratorModel, voiceTranscriptionModel, voiceTtsModel, chatProviderId and voiceProviderId (which AI provider each slot uses — openrouter, openai, anthropic for Claude, or local), chatApiUrl, voiceApiUrl, whether the Chat/Voice API keys are set (the key values themselves are never exposed), and the HTTP-tool approval policy (httpToolApprovalPost, httpToolApprovalPutPatch, httpToolApprovalDelete, toolApprovalDisplay).",
   parameters: z.object({}),
   execute: async () => {
     devLog("[get_settings] called");
@@ -305,6 +335,11 @@ const getSettingsTool = tool({
     const voiceTtsModel = readAppSetting("voiceTtsModel");
     const chatApiUrl = readAppSetting("chatApiUrl");
     const voiceApiUrl = readAppSetting("voiceApiUrl");
+    // Reported but not writable — see PROTECTED_SETTING_KEYS. Being able to *say* which provider
+    // is in use is the difference between an agent that can answer "what model am I?" and one
+    // that invents an answer, which is exactly what a small local model did in testing.
+    const chatProviderId = readAppSetting("chatProviderId");
+    const voiceProviderId = readAppSetting("voiceProviderId");
     const chatApiKey = readAppSetting("chatApiKey");
     const voiceApiKey = readAppSetting("voiceApiKey");
     const httpToolApprovalPost = readAppSetting("httpToolApprovalPost");
@@ -330,6 +365,8 @@ const getSettingsTool = tool({
       voiceTtsModel,
       chatApiUrl,
       voiceApiUrl,
+      chatProviderId,
+      voiceProviderId,
       chatApiKeySet: Boolean(chatApiKey),
       voiceApiKeySet: Boolean(voiceApiKey),
     };
@@ -339,7 +376,7 @@ const getSettingsTool = tool({
 const updateSettingTool = tool({
   name: "update_setting",
   description:
-    "Update one of the app's settings: voiceInputEnabled, typeAnywhereEnabled, bgMusicEnabled, soundFxEnabled, voiceOutputEnabled, chatApiKey, voiceApiKey, voiceTranscriptionModel, voiceTtsModel, agentName, agentDescription, userName, orchestratorModel. The approval settings (httpToolApprovalPost/PutPatch/Delete, toolApprovalDisplay), locationEnabled, and the provider URLs (chatApiUrl, voiceApiUrl) are safety settings and cannot be changed here — only the user can change those, in Settings.",
+    "Update one of the app's settings: voiceInputEnabled, typeAnywhereEnabled, bgMusicEnabled, soundFxEnabled, voiceOutputEnabled, chatApiKey, voiceApiKey, voiceTranscriptionModel, voiceTtsModel, agentName, agentDescription, userName, orchestratorModel. The approval settings (httpToolApprovalPost/PutPatch/Delete, toolApprovalDisplay), locationEnabled, the provider URLs (chatApiUrl, voiceApiUrl) and the provider selectors (chatProviderId, voiceProviderId) are safety settings and cannot be changed here — they decide which host the user's API key is sent to, so only the user can change them, in Settings → AI Models.",
   parameters: z.object({
     // Protected keys stay nameable so a request to change one gets a real answer pointing at
     // Settings. Dropping them from the enum instead would surface as a schema error, which
@@ -442,7 +479,7 @@ export function buildUpdateAgentPatch(args: UpdateAgentToolArgs): AgentUpdatePat
 const updateAgentTool = tool({
   name: "update_agent",
   description:
-    "Update an existing agent's name, tagline, description, prompt, model, enabled state, connected MCP servers, or connected connectors (e.g. Gmail). Only call this after confirming the specific change(s) with the user in plain language. Use list_agents first if you need to find the agent's id or see its current fields. Note: system agents cannot be disabled.",
+    "Update an existing agent's name, tagline, description, prompt, model, enabled state, connected MCP servers, or connected connectors (e.g. Gmail). Only call this after confirming the specific change(s) with the user in plain language. Use list_agents first if you need to find the agent's id or see its current fields. Note: system agents cannot be disabled, and which AI provider an agent runs on cannot be changed here — that decides where its API key is sent, so the user sets it in Settings → Agents.",
   parameters: z.object({
     id: z.string(),
     name: z.string().nullable(),
@@ -672,6 +709,14 @@ export function updateAgent(id: string, patch: AgentUpdatePatch): AgentRow {
   if (patch.name !== undefined && patch.name.trim().length === 0) {
     throw new Error("Agent name cannot be blank.");
   }
+  // Empty is a real value here — "follow the Chat slot" — so only a non-empty id is checked
+  // against the registry. An unknown one is refused rather than stored, because a row naming a
+  // provider this build has never heard of silently falls back at run time.
+  const nextProviderId = patch.providerId === undefined ? existing.provider_id : patch.providerId.trim();
+  if (nextProviderId !== "" && !findProvider(nextProviderId)) {
+    throw new Error(`"${nextProviderId}" is not a provider this app knows about.`);
+  }
+
   const next = {
     name: patch.name === undefined ? existing.name : patch.name.trim(),
     tagline: patch.tagline === undefined ? existing.tagline : patch.tagline.trim(),
@@ -685,9 +730,10 @@ export function updateAgent(id: string, patch: AgentUpdatePatch): AgentRow {
       patch.httpToolCollectionIds === undefined
         ? existing.http_tool_collection_ids
         : JSON.stringify(patch.httpToolCollectionIds),
+    provider_id: nextProviderId,
   };
   db.prepare(
-    "UPDATE agents SET name = ?, tagline = ?, description = ?, prompt = ?, model = ?, enabled = ?, mcp_server_ids = ?, connector_ids = ?, http_tool_collection_ids = ? WHERE id = ?"
+    "UPDATE agents SET name = ?, tagline = ?, description = ?, prompt = ?, model = ?, enabled = ?, mcp_server_ids = ?, connector_ids = ?, http_tool_collection_ids = ?, provider_id = ? WHERE id = ?"
   ).run(
     next.name,
     next.tagline,
@@ -698,6 +744,7 @@ export function updateAgent(id: string, patch: AgentUpdatePatch): AgentRow {
     next.mcp_server_ids,
     next.connector_ids,
     next.http_tool_collection_ids,
+    next.provider_id,
     id
   );
   return db.prepare("SELECT * FROM agents WHERE id = ?").get(id) as AgentRow;
@@ -1005,7 +1052,7 @@ export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
     instructions: renderPrompt(configAgentRow.prompt, promptVars) + httpToolsPromptForRow(configAgentRow) + userInfoBlock,
     handoffDescription:
       "Manages app configuration: onboarding, settings (agent names, models, API keys, toggles) — including reading/checking a setting's current value, not just changing it — and creating new custom agents.",
-    model: configAgentRow.model || DEFAULT_MODEL,
+    model: modelForAgent(configAgentRow),
     tools: [
       getSettingsTool,
       updateSettingTool,
@@ -1032,7 +1079,7 @@ export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
       renderPrompt(knowledgeAgentRow.prompt, promptVars) + httpToolsPromptForRow(knowledgeAgentRow) + userInfoBlock,
     handoffDescription:
       "Reads and searches the user's knowledge base documents (resumes, notes, reference material) for anything a personal document might answer, and browses/reads the local folders the user has granted via the Folders widget.",
-    model: knowledgeAgentRow.model || DEFAULT_MODEL,
+    model: modelForAgent(knowledgeAgentRow),
     tools: [
       listKnowledgebaseFilesTool,
       readKnowledgebaseFileTool,
@@ -1053,7 +1100,7 @@ export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
       renderPrompt(explorerAgentRow.prompt, promptVars) + httpToolsPromptForRow(explorerAgentRow) + userInfoBlock,
     handoffDescription:
       "Searches the live web for current information: news, comparisons, products, or anything about the outside world that needs up-to-date data rather than the user's own documents.",
-    model: explorerAgentRow.model || DEFAULT_MODEL,
+    model: modelForAgent(explorerAgentRow),
     tools: [
       webSearchTool,
       fetchWebContentTool,
@@ -1082,7 +1129,7 @@ export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
     instructions: renderPrompt(taskAgentRow.prompt, promptVars) + httpToolsPromptForRow(taskAgentRow) + userInfoBlock,
     handoffDescription:
       "Manages reminders and prompt tasks — one-shot or recurring, with dynamic parameters substituted at run time — and notifies the user when they're due.",
-    model: taskAgentRow.model || DEFAULT_MODEL,
+    model: modelForAgent(taskAgentRow),
     tools: [
       createTaskTool,
       listTasksTool,
@@ -1114,7 +1161,7 @@ export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
           httpToolsPromptForRow(row) +
           userInfoBlock,
         handoffDescription: row.description || row.tagline || `Handles requests related to ${row.name}.`,
-        model: row.model || DEFAULT_MODEL,
+        model: modelForAgent(row),
         tools: [
           createSaveUserInfoTool(row.name),
           createSaveAgentDataTool(row.id),
@@ -1138,7 +1185,7 @@ export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
       renderPrompt(getOrchestratorPromptTemplate(), promptVars) +
       buildHttpToolsPromptBlock(orchestratorHttpToolCollectionIds) +
       userInfoBlock,
-    model: orchestratorModel,
+    model: modelForAgent({ model: orchestratorModel, provider_id: "" }),
     tools: [
       searchHistoryTool,
       getCurrentLocationTool,

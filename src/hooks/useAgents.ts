@@ -33,6 +33,7 @@ export function useAgents() {
         tagline?: string;
         description?: string;
         model?: string;
+        providerId?: string;
         prompt?: string;
         enabled?: boolean;
         mcpServerIds?: string[];
@@ -59,6 +60,7 @@ export function useAgents() {
       tagline?: string;
       description?: string;
       model?: string;
+        providerId?: string;
       prompt?: string;
     }) => {
       if (!hasAgentsAPI()) return;

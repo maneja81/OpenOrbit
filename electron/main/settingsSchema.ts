@@ -20,6 +20,8 @@
  * setting that never reaches here fails loudly rather than being silently unwritable.
  */
 
+import { PROVIDER_IDS } from "./ai/providers";
+
 /** How a setting's value is validated. `model` is a string with the loose "model" or
  * "provider/model" shape; `enum` restricts to a fixed set. */
 export type SettingKind =
@@ -56,6 +58,20 @@ const BOOLEAN: SettingKind = { type: "boolean" };
 const MODEL: SettingKind = { type: "model" };
 const STRING_ARRAY: SettingKind = { type: "stringArray" };
 
+/**
+ * Which provider a credential slot is pointed at.
+ *
+ * `""` is a real, meaningful value and the default: it means "this slot has not been moved to
+ * the provider registry yet — read the legacy chatApiKey/chatApiUrl pair instead". That is what
+ * keeps every install predating the registry behaving exactly as it did, and why this is an enum
+ * over the ids *plus* empty rather than a plain string.
+ *
+ * Imported from ai/providers.ts rather than restated so a provider added there is immediately
+ * writable here; that module is pure data with no imports of its own, which is the same property
+ * that lets this one stay dependency-free enough for the renderer's parity test to load it.
+ */
+const PROVIDER_ID_KIND: SettingKind = { type: "enum", values: ["", ...PROVIDER_IDS] };
+
 /** Same loose shape ConfigAgent's update_setting has always applied to model ids: "model" or
  * "provider/model". Deliberately permissive — the catalogue depends on whichever
  * OpenAI-compatible host the user pointed at, so this only rejects things that cannot be a
@@ -63,8 +79,21 @@ const STRING_ARRAY: SettingKind = { type: "stringArray" };
  *
  * Exported because agents.ts validates a sub-agent's `model` column against the same shape.
  * It lives here rather than there so there is one copy: this module has no heavy imports, so
- * agents.ts can depend on it, and not the other way round. */
-export const MODEL_ID_PATTERN = /^[a-z0-9._-]+(\/[a-z0-9._:-]+)?$/i;
+ * agents.ts can depend on it, and not the other way round.
+ *
+ * The optional leading `~` is OpenRouter's syntax for a floating "latest" alias
+ * (`~deepseek/deepseek-v4-flash-latest`), which is a real id: it is listed by their `/models`
+ * and returns 200, while the same id without the tilde is refused as "not a valid model ID".
+ * Without this character the app's own default for that provider could not be persisted through
+ * either write path — the value would be silently refused by `settings:update` and land as a
+ * `[settings:update] refused` line in debug.log. Anchored to the start rather than added to the
+ * character classes, so it stays a prefix marker and cannot appear mid-id.
+ *
+ * `:` is allowed in the first segment as well as after a `/`. Restricting it to the second was an
+ * OpenRouter-shaped assumption: Ollama names models `name:tag` with no vendor prefix at all
+ * (`llama3.2:3b`, `qwen2.5:7b`), which is the normal convention there, so without this the Local
+ * AI provider could not be pointed at most of the models a user actually has installed. */
+export const MODEL_ID_PATTERN = /^~?[a-z0-9._:-]+(\/[a-z0-9._:-]+)?$/i;
 
 /** Bounds here are the ones the Settings UI already claims via `min` on its number inputs.
  * `min` constrains a spinner and nothing else — typed and pasted values sail straight past it,
@@ -75,6 +104,8 @@ export const SETTINGS_SCHEMA = {
   chatApiUrl: URL_KIND,
   voiceApiKey: STRING,
   voiceApiUrl: URL_KIND,
+  chatProviderId: PROVIDER_ID_KIND,
+  voiceProviderId: PROVIDER_ID_KIND,
   voiceInputEnabled: BOOLEAN,
   typeAnywhereEnabled: BOOLEAN,
   onboardingDone: BOOLEAN,
@@ -147,6 +178,8 @@ export const SETTING_DEFAULTS: { [K in SettingKey]: SettingValue<K> } = {
   chatApiUrl: "",
   voiceApiKey: "",
   voiceApiUrl: "",
+  chatProviderId: "",
+  voiceProviderId: "",
   voiceInputEnabled: true,
   typeAnywhereEnabled: true,
   onboardingDone: false,

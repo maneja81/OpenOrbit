@@ -19,12 +19,14 @@ import ErrorBoundary from "@/components/atoms/ErrorBoundary";
 import { SETTING_BOUNDS, ToolApprovalDisplay, DEFAULT_ORCHESTRATOR_MODEL, AgentsSettings, SettingsView, VOICE_TTS_VOICE_OPTIONS, SOUND_FX_VARIANT_COUNT } from "@/lib/settings";
 import { USER_CONTEXT_FIELDS } from "@/lib/userContext";
 import { hasAgentsAPI } from "@/lib/agentsApi";
+import { useProviders } from "@/hooks/useProviders";
 import { useMcpServers } from "@/hooks/useMcpServers";
 import { useConnectors } from "@/hooks/useConnectors";
 import { useHttpTools } from "@/hooks/useHttpTools";
 import { useUserContext } from "@/hooks/useUserContext";
 import { formatHumanizedError, humanizeError } from "@/lib/humanizeError";
 import { providerUrlWarning } from "@/lib/providerUrlWarning";
+import { AI_PROVIDERS, findProvider } from "@/lib/providers";
 import { DEFAULT_SETTINGS_SECTION, sectionOnTransition } from "@/lib/settingsSection";
 import { SoundFxEvent, sfxPreviewSrc } from "@/hooks/useSoundFX";
 
@@ -47,6 +49,7 @@ interface SettingsPanelProps {
       tagline?: string;
       description?: string;
       model?: string;
+      providerId?: string;
       prompt?: string;
       enabled?: boolean;
       mcpServerIds?: string[];
@@ -263,6 +266,53 @@ export default function SettingsPanel({
   const [orchestratorPromptLoading, setOrchestratorPromptLoading] = useState(true);
   const [addingAgent, setAddingAgent] = useState(false);
   const [agentActionError, setAgentActionError] = useState<string | null>(null);
+  const [chatError, setChatError] = useState<string | null>(null);
+
+  // The Chat slot's URL and key live in the providers table once the slot has been moved there,
+  // so binding these fields to settings.chatApiUrl/chatApiKeySet showed a blank URL and "no key
+  // saved" while the app ran fine on credentials the panel could not see.
+  const providers = useProviders(open);
+  const chatSlotView = providers.chatSlot(
+    settings.chatProviderId,
+    settings.chatApiUrl,
+    settings.chatApiKeySet
+  );
+  const chatProvider = findProvider(chatSlotView.providerId);
+
+  /**
+   * Why an agent's pinned provider will not be used, or undefined when it is fine.
+   *
+   * modelForAgent falls back to the Chat slot and logs rather than throwing — one misconfigured
+   * agent must not take down a run it isn't part of. The cost is that the fallback is invisible,
+   * so this is the surface that makes it visible where the user set it.
+   */
+  const providerWarningFor = (providerId: string): string | undefined => {
+    if (providerId === "") return undefined;
+    const provider = findProvider(providerId);
+    if (!provider) return `Unknown provider — this agent falls back to the Chat provider.`;
+    const row = providers.configured.find((entry) => entry.id === providerId);
+    if (!row) return `${provider.label} isn't set up yet — this agent falls back to the Chat provider.`;
+    if (provider.keyRequired && !row.keySet) {
+      return `${provider.label} has no API key — this agent falls back to the Chat provider.`;
+    }
+    if (!row.apiUrl && !provider.baseUrl) {
+      return `${provider.label} has no API URL — this agent falls back to the Chat provider.`;
+    }
+    return undefined;
+  };
+
+  /** Every Chat edit goes through the one operation, so credentials, the slot and the models of
+   * inheriting agents can never drift apart — see electron/main/ai/selectProvider.ts. */
+  const applyChat = async (selection: { providerId: string; apiUrl?: string; apiKey?: string; model?: string }) => {
+    setChatError(null);
+    try {
+      await providers.selectChat(selection);
+    } catch (err) {
+      // Surfaced rather than swallowed: selectChatProvider refuses a blank URL, a bad model id and
+      // a missing key with messages written for a person to read.
+      setChatError(formatHumanizedError(humanizeError(err)));
+    }
+  };
 
   const runTestChat = async () => {
     if (!hasAgentsAPI()) return;
@@ -420,24 +470,90 @@ export default function SettingsPanel({
                   </p>
                   <div className="group">
                     <div className="card">
+                      <label className="row-field">
+                        <span>
+                          Provider
+                          <small>Switching also moves every agent that follows this slot</small>
+                        </span>
+                        <Combobox
+                          value={chatSlotView.providerId}
+                          options={AI_PROVIDERS.map((provider) => ({ value: provider.id, label: provider.label }))}
+                          onChange={(providerId) => void applyChat({ providerId })}
+                          ariaLabel="Chat provider"
+                        />
+                      </label>
                       <ApiKeyField
                         label="API Key"
-                        isSet={settings.chatApiKeySet}
-                        onSave={(key) => onUpdate({ chatApiKey: key })}
+                        isSet={chatSlotView.keySet}
+                        onSave={(apiKey) => void applyChat({ providerId: chatSlotView.providerId, apiKey })}
+                        onClear={
+                          chatSlotView.keySet
+                            ? () => void applyChat({ providerId: chatSlotView.providerId, apiKey: "" })
+                            : undefined
+                        }
                       />
                       <TextField
                         label="API URL"
-                        value={settings.chatApiUrl}
-                        placeholder="https://api.openai.com/v1"
+                        value={chatSlotView.apiUrl}
+                        placeholder={chatProvider?.baseUrl || "http://localhost:11434/v1"}
                         warningFor={providerUrlWarning}
-                        onCommit={(chatApiUrl) => onUpdate({ chatApiUrl })}
+                        onCommit={(apiUrl) => void applyChat({ providerId: chatSlotView.providerId, apiUrl })}
                       />
                       <TextField
                         label="Model ID"
                         value={settings.orchestratorModel}
-                        placeholder={DEFAULT_ORCHESTRATOR_MODEL}
-                        onCommit={(orchestratorModel) => onUpdate({ orchestratorModel })}
+                        placeholder={chatProvider?.defaultChatModel || DEFAULT_ORCHESTRATOR_MODEL}
+                        onCommit={(model) => void applyChat({ providerId: chatSlotView.providerId, model })}
                       />
+                      {chatError && <p className="settings-error">{chatError}</p>}
+                    </div>
+                  </div>
+                </SettingsAccordion>
+
+                <SettingsAccordion title="Other providers">
+                  <p className="group-hint">
+                    Credentials for providers an individual agent can be pointed at, without making
+                    them your Chat provider. Set one up here, then pick it on the agent in Settings →
+                    Agents.
+                  </p>
+                  <div className="group">
+                    <div className="card">
+                      {AI_PROVIDERS.filter((provider) => provider.id !== chatSlotView.providerId).map(
+                        (provider) => {
+                          const row = providers.configured.find((entry) => entry.id === provider.id);
+                          return (
+                            <div key={provider.id} className="row-field">
+                              <span>
+                                {provider.label}
+                                <small>
+                                  {row?.keySet
+                                    ? "Configured"
+                                    : provider.keyRequired
+                                      ? "No API key yet"
+                                      : "No API URL yet"}
+                                </small>
+                              </span>
+                              <ApiKeyField
+                                label={`${provider.label} API key`}
+                                isSet={row?.keySet ?? false}
+                                onSave={(apiKey) => void providers.save({ providerId: provider.id, apiKey })}
+                                onClear={
+                                  row?.keySet
+                                    ? () => void providers.save({ providerId: provider.id, apiKey: "" })
+                                    : undefined
+                                }
+                              />
+                              <TextField
+                                label={`${provider.label} API URL`}
+                                value={row?.apiUrl ?? ""}
+                                placeholder={provider.baseUrl || "http://localhost:11434/v1"}
+                                warningFor={providerUrlWarning}
+                                onCommit={(apiUrl) => void providers.save({ providerId: provider.id, apiUrl })}
+                              />
+                            </div>
+                          );
+                        }
+                      )}
                     </div>
                   </div>
                 </SettingsAccordion>
@@ -595,6 +711,20 @@ export default function SettingsPanel({
                       onChangeTagline={(tagline) => onUpdateAgent(agent.id, { tagline })}
                       onChangeDescription={(description) => onUpdateAgent(agent.id, { description })}
                       onChangeModel={(model) => onUpdateAgent(agent.id, { model })}
+                      providerId={agent.provider_id}
+                      onChangeProviderId={(providerId) => {
+                        // The model has to move with the provider, for the same reason it does on
+                        // the Chat slot: pinning an agent to Claude while it still names
+                        // gpt-4.1-mini just 404s. Only when the new provider actually has a
+                        // default — a local server has none, because only the user knows which
+                        // model they have pulled, so its model is left alone for them to set.
+                        const nextModel = findProvider(providerId)?.defaultChatModel;
+                        void onUpdateAgent(agent.id, {
+                          providerId,
+                          ...(nextModel ? { model: nextModel } : {}),
+                        });
+                      }}
+                      providerWarning={providerWarningFor(agent.provider_id)}
                       onChangePrompt={(prompt) => onUpdateAgent(agent.id, { prompt })}
                       onChangeEnabled={(enabled) => onUpdateAgent(agent.id, { enabled })}
                       availableMcpServers={mcpServers}
