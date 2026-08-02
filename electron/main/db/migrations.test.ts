@@ -125,6 +125,76 @@ describe("messages.trace_id (migration 32)", () => {
   });
 });
 
+describe("stale API key cleanup (migration 27)", () => {
+  const MIGRATION_27 = String(27).padStart(14, "0");
+
+  /** Re-runs migration 27 alone: apply everything, drop its ledger row, seed the settings row
+   * under test, then run again. Selection is by absence from the ledger, so only 27 replays. */
+  function replayMigration27(rawValue: string): Database.Database {
+    const fresh = new Database(":memory:");
+    runMigrations(fresh);
+    fresh.prepare("DELETE FROM schema_migrations WHERE id = ?").run(MIGRATION_27);
+    fresh
+      .prepare(
+        `INSERT INTO settings (setting_name, setting_value) VALUES (?, ?)
+         ON CONFLICT(setting_name) DO UPDATE SET setting_value = excluded.setting_value`
+      )
+      .run("appSettings.chatApiKey", rawValue);
+    return fresh;
+  }
+
+  function keyRowCount(db: Database.Database): number {
+    return (
+      db.prepare("SELECT COUNT(*) AS n FROM settings WHERE setting_name = ?").get("appSettings.chatApiKey") as {
+        n: number;
+      }
+    ).n;
+  }
+
+  it("keeps a current-format encrypted value", () => {
+    const db = replayMigration27(JSON.stringify("nodeCrypto:abc123"));
+    runMigrations(db);
+    expect(keyRowCount(db)).toBe(1);
+    db.close();
+  });
+
+  it("deletes a value that parses but isn't in the current format", () => {
+    const db = replayMigration27(JSON.stringify("v10:oldSafeStorageBlob"));
+    runMigrations(db);
+    expect(keyRowCount(db)).toBe(0);
+    db.close();
+  });
+
+  it("deletes a value that isn't valid JSON instead of failing the migration", () => {
+    // Unguarded, this threw inside the migration's transaction: migrations failed, getDb()
+    // threw, and the app would not start at all — recoverable only by hand-editing the DB.
+    // A row that can't be parsed is by definition not a current-format secret, so it takes
+    // the same branch as any other unrecognised value.
+    const db = replayMigration27("{not json");
+
+    expect(() => runMigrations(db)).not.toThrow();
+
+    expect(keyRowCount(db)).toBe(0);
+    expect(ledgerContains(db, MIGRATION_27)).toBe(true);
+    db.close();
+  });
+
+  it("still applies the migrations that sort after 27", () => {
+    // A throw here used to abort the whole pending run, not just this one migration.
+    const db = replayMigration27("{not json");
+    const before = (db.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number }).n;
+
+    runMigrations(db);
+
+    expect((db.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number }).n).toBe(before + 1);
+    db.close();
+  });
+
+  function ledgerContains(db: Database.Database, id: string): boolean {
+    return db.prepare("SELECT 1 FROM schema_migrations WHERE id = ?").get(id) !== undefined;
+  }
+});
+
 describe("schema_migrations ledger", () => {
   const pad = (v: number) => String(v).padStart(14, "0");
 
