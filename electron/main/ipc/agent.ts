@@ -43,11 +43,11 @@ function describeRunItem(item: unknown): string {
       output?: unknown;
       agent?: { name?: string };
     };
-    if (anyItem.rawItem?.name) {
-      return `tool="${anyItem.rawItem.name}" args=${anyItem.rawItem.arguments ?? "{}"}`;
-    }
     if (anyItem.output !== undefined) {
       return `output=${typeof anyItem.output === "string" ? anyItem.output : JSON.stringify(anyItem.output)}`;
+    }
+    if (anyItem.rawItem?.name) {
+      return `tool="${anyItem.rawItem.name}" args=${anyItem.rawItem.arguments ?? "{}"}`;
     }
     return JSON.stringify(item).slice(0, 300);
   } catch {
