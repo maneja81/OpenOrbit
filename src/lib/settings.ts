@@ -1,6 +1,6 @@
 export const DEFAULT_ORCHESTRATOR_MODEL = "gpt-4.1-mini";
 export const DEFAULT_VOICE_TRANSCRIPTION_MODEL = "whisper-1";
-export const DEFAULT_VOICE_TTS_MODEL = "tts-1";
+export const DEFAULT_VOICE_TTS_MODEL = "gpt-4o-mini-tts";
 export const DEFAULT_VOICE_TTS_VOICE = "alloy";
 export const VOICE_TTS_VOICE_OPTIONS = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"] as const;
 export const DEFAULT_AGENT_RUN_TIMEOUT_SECONDS = 60;

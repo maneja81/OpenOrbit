@@ -463,7 +463,7 @@ export default function SettingsPanel({
                           type="text"
                           value={settings.voiceTtsModel}
                           onChange={(e) => onUpdate({ voiceTtsModel: e.target.value })}
-                          placeholder="tts-1"
+                          placeholder="gpt-4o-mini-tts"
                           autoComplete="off"
                         />
                       </label>
