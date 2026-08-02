@@ -33,7 +33,6 @@
     "framer-motion": "^12.42.2",
     "jszip": "^3.10.1",
     "mammoth": "^1.12.0",
-    "node": "^26.5.0",
     "node-pptx-parser": "^1.0.1",
     "node-xlrd": "^0.3.10",
     "open-websearch": "^2.1.11",
