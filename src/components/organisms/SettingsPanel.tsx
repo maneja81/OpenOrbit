@@ -363,7 +363,7 @@ export default function SettingsPanel({
   const meta = SECTION_META[activeSection];
 
   return (
-    <Modal open={open} onClose={onClose} className="modal-panel--settings">
+    <Modal open={open} onClose={onClose} className="modal-panel--settings" label="Settings">
       <div className="settings-window-body">
         <SettingsSidebar
           groups={NAV_GROUPS}

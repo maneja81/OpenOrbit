@@ -37,7 +37,11 @@ export default function HttpToolApprovalModal({ approval, onRespond }: HttpToolA
   const formattedArgs = formatArgs(approval?.args);
 
   return (
-    <Modal open={approval !== null} onClose={() => approval && onRespond(approval.approvalId, false)}>
+    <Modal
+      open={approval !== null}
+      onClose={() => approval && onRespond(approval.approvalId, false)}
+      label="Run this tool?"
+    >
       <div className="http-approval-body">
         <h3>Run this tool?</h3>
         <p className="http-approval-lead">

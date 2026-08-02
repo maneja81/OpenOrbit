@@ -69,7 +69,7 @@ export default function AddUrlModal({ open, onClose }: AddUrlModalProps) {
   };
 
   return (
-    <Modal open={open} onClose={handleClose}>
+    <Modal open={open} onClose={handleClose} label="Add from URL">
       <div className="km-header">
         <span className="km-title">Add from URL</span>
         <button className="widget-icon-btn" aria-label="Close" onClick={handleClose}>
