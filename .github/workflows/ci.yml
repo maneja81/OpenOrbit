@@ -14,6 +14,9 @@ on:
     branches: [develop]
   pull_request:
     branches: [develop, main]
+  # Called by release.yml so a tag is gated by exactly this workflow rather than a
+  # copy of it that can drift.
+  workflow_call:
 
 permissions:
   contents: read
