@@ -78,5 +78,15 @@ export function useProviders(open: boolean) {
     [refresh]
   );
 
-  return { configured, refresh, chatSlot, selectChat };
+  /** Credentials for a provider that is not the Chat slot. Returns the refreshed list, so the
+   * caller does not need a second round trip. */
+  const save = useCallback(
+    async (input: { providerId: string; apiUrl?: string; apiKey?: string }) => {
+      if (!hasAgentsAPI()) return;
+      setConfigured(await window.agentsAPI.providers.save(input));
+    },
+    []
+  );
+
+  return { configured, refresh, chatSlot, selectChat, save };
 }

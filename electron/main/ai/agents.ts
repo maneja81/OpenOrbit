@@ -27,6 +27,7 @@ import {
   updateTaskTool,
 } from "./tools/taskAgentTools";
 import { modelForAgent } from "./provider";
+import { findProvider } from "./providers";
 import { formatUserInfoForPrompt, readUserInfoFacts } from "./userInfoStore";
 import defaultAgentsConfig from "./defaultAgents.json";
 import { getDb } from "../db";
@@ -128,10 +129,22 @@ export interface AgentRow {
   mcp_server_ids: string;
   connector_ids: string;
   http_tool_collection_ids: string;
+  /** Registry id from ./providers, or "" to follow the Chat slot. */
+  provider_id: string;
 }
 
 export interface AgentUpdatePatch {
   name?: string;
+  /**
+   * Which provider this agent runs on; "" means "follow the Chat slot".
+   *
+   * Deliberately absent from buildUpdateAgentPatch, so ConfigAgent's update_agent tool cannot
+   * set it. Choosing a provider chooses the host a request and its key are sent to, which is the
+   * same reasoning that keeps chatApiUrl and chatProviderId out of the agent's reach: a reply is
+   * assembled from text this app did not author, and "point the research agent at
+   * https://attacker/v1" is a sentence that can appear in it.
+   */
+  providerId?: string;
   tagline?: string;
   description?: string;
   model?: string;
@@ -689,6 +702,14 @@ export function updateAgent(id: string, patch: AgentUpdatePatch): AgentRow {
   if (patch.name !== undefined && patch.name.trim().length === 0) {
     throw new Error("Agent name cannot be blank.");
   }
+  // Empty is a real value here — "follow the Chat slot" — so only a non-empty id is checked
+  // against the registry. An unknown one is refused rather than stored, because a row naming a
+  // provider this build has never heard of silently falls back at run time.
+  const nextProviderId = patch.providerId === undefined ? existing.provider_id : patch.providerId.trim();
+  if (nextProviderId !== "" && !findProvider(nextProviderId)) {
+    throw new Error(`"${nextProviderId}" is not a provider this app knows about.`);
+  }
+
   const next = {
     name: patch.name === undefined ? existing.name : patch.name.trim(),
     tagline: patch.tagline === undefined ? existing.tagline : patch.tagline.trim(),
@@ -702,9 +723,10 @@ export function updateAgent(id: string, patch: AgentUpdatePatch): AgentRow {
       patch.httpToolCollectionIds === undefined
         ? existing.http_tool_collection_ids
         : JSON.stringify(patch.httpToolCollectionIds),
+    provider_id: nextProviderId,
   };
   db.prepare(
-    "UPDATE agents SET name = ?, tagline = ?, description = ?, prompt = ?, model = ?, enabled = ?, mcp_server_ids = ?, connector_ids = ?, http_tool_collection_ids = ? WHERE id = ?"
+    "UPDATE agents SET name = ?, tagline = ?, description = ?, prompt = ?, model = ?, enabled = ?, mcp_server_ids = ?, connector_ids = ?, http_tool_collection_ids = ?, provider_id = ? WHERE id = ?"
   ).run(
     next.name,
     next.tagline,
@@ -715,6 +737,7 @@ export function updateAgent(id: string, patch: AgentUpdatePatch): AgentRow {
     next.mcp_server_ids,
     next.connector_ids,
     next.http_tool_collection_ids,
+    next.provider_id,
     id
   );
   return db.prepare("SELECT * FROM agents WHERE id = ?").get(id) as AgentRow;

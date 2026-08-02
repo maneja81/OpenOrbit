@@ -49,6 +49,7 @@ interface SettingsPanelProps {
       tagline?: string;
       description?: string;
       model?: string;
+      providerId?: string;
       prompt?: string;
       enabled?: boolean;
       mcpServerIds?: string[];
@@ -278,6 +279,28 @@ export default function SettingsPanel({
   );
   const chatProvider = findProvider(chatSlotView.providerId);
 
+  /**
+   * Why an agent's pinned provider will not be used, or undefined when it is fine.
+   *
+   * modelForAgent falls back to the Chat slot and logs rather than throwing — one misconfigured
+   * agent must not take down a run it isn't part of. The cost is that the fallback is invisible,
+   * so this is the surface that makes it visible where the user set it.
+   */
+  const providerWarningFor = (providerId: string): string | undefined => {
+    if (providerId === "") return undefined;
+    const provider = findProvider(providerId);
+    if (!provider) return `Unknown provider — this agent falls back to the Chat provider.`;
+    const row = providers.configured.find((entry) => entry.id === providerId);
+    if (!row) return `${provider.label} isn't set up yet — this agent falls back to the Chat provider.`;
+    if (provider.keyRequired && !row.keySet) {
+      return `${provider.label} has no API key — this agent falls back to the Chat provider.`;
+    }
+    if (!row.apiUrl && !provider.baseUrl) {
+      return `${provider.label} has no API URL — this agent falls back to the Chat provider.`;
+    }
+    return undefined;
+  };
+
   /** Every Chat edit goes through the one operation, so credentials, the slot and the models of
    * inheriting agents can never drift apart — see electron/main/ai/selectProvider.ts. */
   const applyChat = async (selection: { providerId: string; apiUrl?: string; apiKey?: string; model?: string }) => {
@@ -487,6 +510,54 @@ export default function SettingsPanel({
                   </div>
                 </SettingsAccordion>
 
+                <SettingsAccordion title="Other providers">
+                  <p className="group-hint">
+                    Credentials for providers an individual agent can be pointed at, without making
+                    them your Chat provider. Set one up here, then pick it on the agent in Settings →
+                    Agents.
+                  </p>
+                  <div className="group">
+                    <div className="card">
+                      {AI_PROVIDERS.filter((provider) => provider.id !== chatSlotView.providerId).map(
+                        (provider) => {
+                          const row = providers.configured.find((entry) => entry.id === provider.id);
+                          return (
+                            <div key={provider.id} className="row-field">
+                              <span>
+                                {provider.label}
+                                <small>
+                                  {row?.keySet
+                                    ? "Configured"
+                                    : provider.keyRequired
+                                      ? "No API key yet"
+                                      : "No API URL yet"}
+                                </small>
+                              </span>
+                              <ApiKeyField
+                                label={`${provider.label} API key`}
+                                isSet={row?.keySet ?? false}
+                                onSave={(apiKey) => void providers.save({ providerId: provider.id, apiKey })}
+                                onClear={
+                                  row?.keySet
+                                    ? () => void providers.save({ providerId: provider.id, apiKey: "" })
+                                    : undefined
+                                }
+                              />
+                              <TextField
+                                label={`${provider.label} API URL`}
+                                value={row?.apiUrl ?? ""}
+                                placeholder={provider.baseUrl || "http://localhost:11434/v1"}
+                                warningFor={providerUrlWarning}
+                                onCommit={(apiUrl) => void providers.save({ providerId: provider.id, apiUrl })}
+                              />
+                            </div>
+                          );
+                        }
+                      )}
+                    </div>
+                  </div>
+                </SettingsAccordion>
+
                 <SettingsAccordion
                   title="Voice"
                   headerActions={
@@ -640,6 +711,20 @@ export default function SettingsPanel({
                       onChangeTagline={(tagline) => onUpdateAgent(agent.id, { tagline })}
                       onChangeDescription={(description) => onUpdateAgent(agent.id, { description })}
                       onChangeModel={(model) => onUpdateAgent(agent.id, { model })}
+                      providerId={agent.provider_id}
+                      onChangeProviderId={(providerId) => {
+                        // The model has to move with the provider, for the same reason it does on
+                        // the Chat slot: pinning an agent to Claude while it still names
+                        // gpt-4.1-mini just 404s. Only when the new provider actually has a
+                        // default — a local server has none, because only the user knows which
+                        // model they have pulled, so its model is left alone for them to set.
+                        const nextModel = findProvider(providerId)?.defaultChatModel;
+                        void onUpdateAgent(agent.id, {
+                          providerId,
+                          ...(nextModel ? { model: nextModel } : {}),
+                        });
+                      }}
+                      providerWarning={providerWarningFor(agent.provider_id)}
                       onChangePrompt={(prompt) => onUpdateAgent(agent.id, { prompt })}
                       onChangeEnabled={(enabled) => onUpdateAgent(agent.id, { enabled })}
                       availableMcpServers={mcpServers}

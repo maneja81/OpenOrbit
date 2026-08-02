@@ -17,7 +17,7 @@ function makeRows(n: number): AgentDisplayRow[] {
     created_at: "",
     mcp_server_ids: "[]",
     connector_ids: "[]",
-    http_tool_collection_ids: "[]",
+    http_tool_collection_ids: "[]", provider_id: "",
     toolNames: [],
     connectorToolCount: 0,
   }));

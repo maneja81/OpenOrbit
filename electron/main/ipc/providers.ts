@@ -1,7 +1,8 @@
 import { BrowserWindow, ipcMain } from "electron";
-import { listVisibleProviders, type VisibleProvider } from "../db/providersStore";
+import { listVisibleProviders, saveProvider, type VisibleProvider } from "../db/providersStore";
 import { selectChatProvider, type ChatProviderResult } from "../ai/selectProvider";
-import { AI_PROVIDERS, type AiProvider } from "../ai/providers";
+import { AI_PROVIDERS, findProvider, type AiProvider } from "../ai/providers";
+import { validateSettingValue } from "../settingsSchema";
 import { devLog } from "../devLog";
 
 /**
@@ -29,6 +30,32 @@ export function registerProviderHandlers() {
   ipcMain.handle("providers:list", (): ProvidersSnapshot => {
     return { catalog: AI_PROVIDERS, configured: listVisibleProviders() };
   });
+
+  /**
+   * Credentials for a provider that is *not* the Chat slot.
+   *
+   * Without this, an agent could be pinned to Claude but Claude could only be given a key by
+   * making it the Chat provider first and then switching back — so the per-agent feature looked
+   * available and could not actually be completed.
+   */
+  ipcMain.handle(
+    "providers:save",
+    (_event, input: { providerId: string; apiUrl?: string; apiKey?: string }): VisibleProvider[] => {
+      const provider = findProvider(input?.providerId ?? "");
+      if (!provider) throw new Error(`Unknown provider "${input?.providerId}".`);
+
+      const apiUrl = input.apiUrl?.trim();
+      if (apiUrl !== undefined && apiUrl !== "") {
+        const check = validateSettingValue("chatApiUrl", apiUrl);
+        if (!check.ok) throw new Error(`That API URL ${check.reason}.`);
+      }
+      // Never the key or the URL — debug.log is what users attach to bug reports, and some
+      // OpenAI-compatible hosts carry the credential in a query string.
+      devLog(`[providers:save] ${provider.id}`);
+      saveProvider(provider.id, { apiUrl, apiKey: input.apiKey });
+      return listVisibleProviders();
+    }
+  );
 
   ipcMain.handle(
     "providers:selectChat",

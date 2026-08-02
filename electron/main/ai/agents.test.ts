@@ -66,6 +66,25 @@ describe("settings ConfigAgent may write (backs Cipher's update_setting tool)", 
     expect([...PROTECTED_SETTING_KEYS].sort()).toEqual([...SAFETY_KEYS].sort());
   });
 
+  it("does not let an agent choose another agent's provider", () => {
+    // buildUpdateAgentPatch backs Cipher's update_agent tool. providerId is deliberately absent
+    // from it: choosing a provider chooses the host a request and its key are sent to, which is
+    // the same exposure that keeps chatApiUrl and chatProviderId out of the agent's reach.
+    // "Point the research agent at https://attacker/v1" is a sentence that can arrive in a web
+    // page, a document, or a tool result.
+    const patch = buildUpdateAgentPatch({
+      name: null,
+      tagline: null,
+      description: null,
+      prompt: null,
+      model: null,
+      enabled: null,
+      mcpServerIds: null,
+      connectorIds: null,
+    } as Parameters<typeof buildUpdateAgentPatch>[0]);
+    expect(patch).not.toHaveProperty("providerId");
+  });
+
   it("keeps the two lists disjoint", () => {
     const overlap = (ALLOWED_SETTING_KEYS as readonly string[]).filter((key) =>
       (PROTECTED_SETTING_KEYS as readonly string[]).includes(key)

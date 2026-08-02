@@ -91,6 +91,11 @@ const agentsAPI = {
       }[];
       configured: { id: string; apiUrl: string; keySet: boolean }[];
     }> => ipcRenderer.invoke("providers:list"),
+    /** Credentials for a provider that is not the Chat slot — otherwise an agent could be
+     * pinned to one that could never be given a key. */
+    save: (input: { providerId: string; apiUrl?: string; apiKey?: string }): Promise<
+      { id: string; apiUrl: string; keySet: boolean }[]
+    > => ipcRenderer.invoke("providers:save", input),
     /** One call on purpose: saving credentials, pointing the Chat slot and re-aligning the agents
      * that follow it are a single change — see electron/main/ai/selectProvider.ts. */
     selectChat: (selection: {
@@ -197,6 +202,7 @@ const agentsAPI = {
         tagline?: string;
         description?: string;
         model?: string;
+        providerId?: string;
         prompt?: string;
         enabled?: boolean;
         mcpServerIds?: string[];
@@ -210,6 +216,7 @@ const agentsAPI = {
       tagline?: string;
       description?: string;
       model?: string;
+        providerId?: string;
       prompt?: string;
     }): Promise<AgentRow> => ipcRenderer.invoke("agent:create", input),
     orchestratorPrompt: (): Promise<string> => ipcRenderer.invoke("agent:orchestratorPrompt"),

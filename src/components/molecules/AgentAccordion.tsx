@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import TablerIcon from "@/components/atoms/TablerIcon";
+import Combobox from "@/components/atoms/Combobox";
+import { AI_PROVIDERS } from "@/lib/providers";
 import Toggle from "@/components/atoms/Toggle";
 import TagMultiSelect from "@/components/atoms/TagMultiSelect";
 import DeleteConfirmModal from "@/components/molecules/DeleteConfirmModal";
@@ -22,6 +24,14 @@ interface AgentAccordionProps {
   onChangeTagline?: (tagline: string) => void;
   onChangeDescription?: (description: string) => void;
   onChangeModel?: (model: string) => void;
+  /** Registry id this agent runs on, or "" to follow the Chat slot. Omitted for the
+   * orchestrator, which *is* the Chat slot. */
+  providerId?: string;
+  onChangeProviderId?: (providerId: string) => void;
+  /** Set when the chosen provider has no usable credentials. The run still succeeds —
+   * modelForAgent falls back to the Chat slot and logs — but silently, so without this the
+   * only evidence is a line in debug.log. */
+  providerWarning?: string;
   onChangePrompt?: (prompt: string) => void;
   /** Shown as a "Reset to default" control beside the prompt label. Only passed when the
    * prompt is actually customised, so its presence is what says so. */
@@ -51,6 +61,9 @@ export default function AgentAccordion({
   tagline,
   description,
   model,
+  providerId,
+  onChangeProviderId,
+  providerWarning,
   prompt,
   promptLoading,
   enabled,
@@ -213,6 +226,24 @@ export default function AgentAccordion({
                 placeholder="What does this agent do?"
                 rows={3}
               />
+            </label>
+          )}
+          {onChangeProviderId !== undefined && (
+            <label className="settings-field">
+              <span>Provider</span>
+              <Combobox
+                value={providerId ?? ""}
+                // "" first and always present: following the Chat slot is the default every agent
+                // is seeded with, and the only way back to it once one has been pinned.
+                options={[
+                  { value: "", label: "Same as Chat" },
+                  ...AI_PROVIDERS.map((provider) => ({ value: provider.id, label: provider.label })),
+                ]}
+                onChange={onChangeProviderId}
+                ariaLabel={`Provider for ${name}`}
+                size="sm"
+              />
+              {providerWarning && <small className="settings-warning">{providerWarning}</small>}
             </label>
           )}
           {onChangeModel !== undefined && (

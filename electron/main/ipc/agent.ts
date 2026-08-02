@@ -557,7 +557,7 @@ export function registerAgentHandlers() {
     if (typeof patch !== "object" || patch === null || Array.isArray(patch)) {
       throw new Error("agent:update requires a plain object patch");
     }
-    const stringFields: (keyof AgentUpdatePatch)[] = ["name", "tagline", "description", "model", "prompt"];
+    const stringFields: (keyof AgentUpdatePatch)[] = ["name", "tagline", "description", "model", "prompt", "providerId"];
     for (const field of stringFields) {
       if (patch[field] !== undefined && typeof patch[field] !== "string") {
         throw new Error(`agent:update patch.${field} must be a string`);

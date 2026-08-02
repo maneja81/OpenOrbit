@@ -116,6 +116,8 @@ interface AgentRow {
   connector_ids: string;
   /** JSON array of http_tool_collections.id attached to this agent. */
   http_tool_collection_ids: string;
+  /** Registry id from lib/providers, or "" to follow the Chat slot. */
+  provider_id: string;
 }
 
 /** AgentRow plus derived, non-persisted fields computed by listAgentsForDisplay()
@@ -416,6 +418,9 @@ interface Window {
         }[];
         configured: { id: string; apiUrl: string; keySet: boolean }[];
       }>;
+      save: (input: { providerId: string; apiUrl?: string; apiKey?: string }) => Promise<
+        { id: string; apiUrl: string; keySet: boolean }[]
+      >;
       selectChat: (selection: {
         providerId: string;
         apiUrl?: string;
@@ -484,6 +489,7 @@ interface Window {
           tagline?: string;
           description?: string;
           model?: string;
+        providerId?: string;
           prompt?: string;
           enabled?: boolean;
           mcpServerIds?: string[];
@@ -497,6 +503,7 @@ interface Window {
         tagline?: string;
         description?: string;
         model?: string;
+        providerId?: string;
         prompt?: string;
       }) => Promise<AgentRow>;
       orchestratorPrompt: () => Promise<string>;
