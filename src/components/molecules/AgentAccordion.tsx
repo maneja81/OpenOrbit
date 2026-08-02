@@ -26,7 +26,9 @@ interface AgentAccordionProps {
   /** Shown as a "Reset to default" control beside the prompt label. Only passed when the
    * prompt is actually customised, so its presence is what says so. */
   onResetPrompt?: () => void;
-  onChangeEnabled: (enabled: boolean) => void;
+  /** Omitted when the agent cannot be enabled or disabled at all — pass `enabledLocked` instead.
+   * Optional rather than required-with-a-no-op so a locked agent has no handler to read as live. */
+  onChangeEnabled?: (enabled: boolean) => void;
   defaultOpen?: boolean;
   availableMcpServers?: McpServerRow[];
   mcpServerIds?: string[];
@@ -122,7 +124,7 @@ export default function AgentAccordion({
         <span className="agent-accordion-spacer" />
         <Toggle
           checked={enabled}
-          onChange={onChangeEnabled}
+          onChange={(next) => onChangeEnabled?.(next)}
           label={`Toggle ${name}`}
           disabled={enabledLocked}
         />
