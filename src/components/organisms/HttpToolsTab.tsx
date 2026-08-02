@@ -1,8 +1,7 @@
 import { useState } from "react";
 import TablerIcon from "@/components/atoms/TablerIcon";
 import Toggle from "@/components/atoms/Toggle";
-import Combobox from "@/components/atoms/Combobox";
-import { AgentsSettings, type ToolApprovalDisplay } from "@/lib/settings";
+import { AgentsSettings } from "@/lib/settings";
 import SettingsAccordion from "@/components/molecules/SettingsAccordion";
 import DeleteConfirmModal from "@/components/molecules/DeleteConfirmModal";
 import HttpToolForm from "@/components/molecules/HttpToolForm";
@@ -20,24 +19,10 @@ import { useHttpTools } from "@/hooks/useHttpTools";
 
 interface HttpToolsTabProps {
   httpTools: ReturnType<typeof useHttpTools>;
+  /** Only read, never written: the approval controls moved to Privacy & Safety, but the
+   * per-endpoint "Asks first" badges below are genuinely context for the tools themselves. */
   settings: AgentsSettings;
-  onUpdate: (patch: Partial<AgentsSettings>) => void;
 }
-
-const APPROVAL_METHODS: {
-  key: "httpToolApprovalPost" | "httpToolApprovalPutPatch" | "httpToolApprovalDelete";
-  label: string;
-  hint: string;
-}[] = [
-  { key: "httpToolApprovalPost", label: "POST", hint: "Creating something" },
-  { key: "httpToolApprovalPutPatch", label: "PUT / PATCH", hint: "Updating something" },
-  { key: "httpToolApprovalDelete", label: "DELETE", hint: "Removing something" },
-];
-
-const DISPLAY_OPTIONS = [
-  { value: "modal", label: "Pop-up dialog" },
-  { value: "inline", label: "Card in the chat" },
-];
 
 interface CollectionDraft {
   name: string;
@@ -55,7 +40,7 @@ const EMPTY_COLLECTION_DRAFT: CollectionDraft = {
   allowPrivateHosts: false,
 };
 
-export default function HttpToolsTab({ httpTools, settings, onUpdate }: HttpToolsTabProps) {
+export default function HttpToolsTab({ httpTools, settings }: HttpToolsTabProps) {
   const approvalPolicy = {
     post: settings.httpToolApprovalPost,
     putPatch: settings.httpToolApprovalPutPatch,
@@ -292,44 +277,15 @@ export default function HttpToolsTab({ httpTools, settings, onUpdate }: HttpTool
         they aren't available to every agent by default.
       </p>
 
-      {/* One global posture rather than a switch on every endpoint: "ask before anything is
-          deleted" is a decision about how you want to work, not a property of one URL. */}
-      <div className="group">
-        <div className="group-label">
-          <span>Approval</span>
-        </div>
-        <p className="group-hint">
-          Pause and ask before a request runs. Applies to every API below. Reads (GET, HEAD) never ask.
-        </p>
-        <div className="card">
-          {APPROVAL_METHODS.map(({ key, label, hint }) => (
-            <div className="row" key={key}>
-              <span className="row-label">
-                {label}
-                <small>{hint}</small>
-              </span>
-              <Toggle
-                checked={settings[key]}
-                onChange={(checked) => onUpdate({ [key]: checked })}
-                label={`Ask before ${label} requests`}
-              />
-            </div>
-          ))}
-          <div className="row">
-            <span className="row-label">
-              Ask me with
-              <small>A pop-up is harder to miss; a card keeps the orbit view clear</small>
-            </span>
-            <Combobox
-              value={settings.toolApprovalDisplay}
-              options={DISPLAY_OPTIONS}
-              onChange={(value) => onUpdate({ toolApprovalDisplay: value as ToolApprovalDisplay })}
-              ariaLabel="How to ask for approval"
-              size="sm"
-            />
-          </div>
-        </div>
-      </div>
+      {/* The approval controls themselves live in Settings → Privacy & Safety, with the other
+          decisions about what this app does without asking. They used to sit here, which meant
+          the app's whole "ask before writing" posture was only findable by opening a tab that
+          reads as "configure my own API endpoints" (finding S10). The badges below still show
+          which endpoints will pause, because that is genuinely context for the tools. */}
+      <p className="group-hint">
+        Requests marked <strong>Asks first</strong> pause for your approval. Change what pauses in
+        Settings → Privacy &amp; Safety. Reads (GET, HEAD) never ask.
+      </p>
 
       {addingCollection && <div className="agent-accordion-body http-collection-form">{collectionForm(null)}</div>}
 

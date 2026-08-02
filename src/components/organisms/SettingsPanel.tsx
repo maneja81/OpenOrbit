@@ -14,7 +14,7 @@ import ConnectorsTab from "@/components/organisms/ConnectorsTab";
 import HttpToolsTab from "@/components/organisms/HttpToolsTab";
 import AboutTab from "@/components/organisms/AboutTab";
 import ErrorBoundary from "@/components/atoms/ErrorBoundary";
-import { DEFAULT_ORCHESTRATOR_MODEL, AgentsSettings, SettingsView, VOICE_TTS_VOICE_OPTIONS, SOUND_FX_VARIANT_COUNT } from "@/lib/settings";
+import { ToolApprovalDisplay, DEFAULT_ORCHESTRATOR_MODEL, AgentsSettings, SettingsView, VOICE_TTS_VOICE_OPTIONS, SOUND_FX_VARIANT_COUNT } from "@/lib/settings";
 import { USER_CONTEXT_FIELDS } from "@/lib/userContext";
 import { hasAgentsAPI } from "@/lib/agentsApi";
 import { useMcpServers } from "@/hooks/useMcpServers";
@@ -72,6 +72,7 @@ export type SettingsSection =
   | "http"
   | "files"
   | "general"
+  | "safety"
   | "sounds"
   | "danger"
   | "about";
@@ -91,6 +92,7 @@ const NAV_GROUPS: SettingsNavGroup[] = [
     label: "App",
     items: [
       { id: "general", label: "General", icon: "ti-adjustments" },
+      { id: "safety", label: "Privacy & Safety", icon: "ti-shield-lock" },
       { id: "sounds", label: "App Sounds", icon: "ti-volume" },
       { id: "files", label: "Knowledge", icon: "ti-books" },
       { id: "about", label: "About", icon: "ti-info-circle" },
@@ -112,6 +114,13 @@ const SECTION_META: Record<SettingsSection, { icon: string; title: string; subti
   // list in tourSteps.test.ts and by any tour step's settingsSection, so only the label changes.
   files: { icon: "ti-books", title: "Knowledge", subtitle: "Folders and documents agents can read" },
   general: { icon: "ti-adjustments", title: "General", subtitle: "Voice, sound, and input preferences" },
+  // Gathered from three different screens. What this app will do without asking was previously
+  // split between the HTTP Tools tab and General, so nobody auditing it had one place to look.
+  safety: {
+    icon: "ti-shield-lock",
+    title: "Privacy & Safety",
+    subtitle: "What Orbit does without asking, and what it can see",
+  },
   sounds: { icon: "ti-volume", title: "App Sounds", subtitle: "Pick a variation for each sound effect" },
   danger: { icon: "ti-alert-triangle", title: "Danger Zone", subtitle: "Irreversible actions" },
   about: { icon: "ti-info-circle", title: "About", subtitle: "Version, storage, and licenses" },
@@ -171,6 +180,21 @@ const SOUND_VARIANT_OPTIONS = Array.from({ length: SOUND_FX_VARIANT_COUNT }, (_,
   value: String(i + 1),
   label: `Variant ${i + 1}`,
 }));
+
+const APPROVAL_METHODS: {
+  key: "httpToolApprovalPost" | "httpToolApprovalPutPatch" | "httpToolApprovalDelete";
+  label: string;
+  hint: string;
+}[] = [
+  { key: "httpToolApprovalPost", label: "POST", hint: "Creating something" },
+  { key: "httpToolApprovalPutPatch", label: "PUT / PATCH", hint: "Updating something" },
+  { key: "httpToolApprovalDelete", label: "DELETE", hint: "Removing something" },
+];
+
+const APPROVAL_DISPLAY_OPTIONS = [
+  { value: "modal", label: "Pop-up dialog" },
+  { value: "inline", label: "Card in the chat" },
+];
 
 const RESET_CONFIRM_WORD = "RESET";
 
@@ -626,7 +650,7 @@ export default function SettingsPanel({
 
             {activeSection === "http" && (
               <ErrorBoundary fallbackTitle="HTTP tools failed to load">
-                <HttpToolsTab httpTools={httpTools} settings={settings} onUpdate={onUpdate} />
+                <HttpToolsTab httpTools={httpTools} settings={settings} />
               </ErrorBoundary>
             )}
 
@@ -744,30 +768,6 @@ export default function SettingsPanel({
                       label="Toggle type-anywhere focus"
                     />
                   </div>
-                  <div className="row">
-                    <span className="row-label">
-                      Location access<small>Let agents look up where you are</small>
-                    </span>
-                    <Toggle
-                      checked={settings.locationEnabled}
-                      onChange={(checked) => onUpdate({ locationEnabled: checked })}
-                      label="Toggle location access"
-                    />
-                  </div>
-                  <div className="row">
-                    <span className="row-label">
-                      Load remote images automatically
-                      <small>
-                        Off is safer: a reply can be steered by a web page or email it read, and an
-                        image that loads on sight sends a request before you have read it
-                      </small>
-                    </span>
-                    <Toggle
-                      checked={settings.remoteImagesAutoLoad}
-                      onChange={(checked) => onUpdate({ remoteImagesAutoLoad: checked })}
-                      label="Toggle automatic remote image loading"
-                    />
-                  </div>
                 </div>
 
                 <div className="card">
@@ -810,6 +810,83 @@ export default function SettingsPanel({
                       }}
                     />
                   </label>
+                </div>
+              </div>
+            )}
+
+
+            {activeSection === "safety" && (
+              <div className="group">
+                <div className="group-label">
+                  <span>Approval</span>
+                </div>
+                {/* One global posture rather than a switch on every endpoint: "ask before
+                    anything is deleted" is a decision about how you want to work, not a property
+                    of one URL. */}
+                <p className="group-hint">
+                  Pause and ask before an HTTP tool sends a request. Reads (GET, HEAD) never ask.
+                </p>
+                <div className="card">
+                  {APPROVAL_METHODS.map(({ key, label, hint }) => (
+                    <div className="row" key={key}>
+                      <span className="row-label">
+                        {label}
+                        <small>{hint}</small>
+                      </span>
+                      <Toggle
+                        checked={settings[key]}
+                        onChange={(checked) => onUpdate({ [key]: checked })}
+                        label={`Ask before ${label} requests`}
+                      />
+                    </div>
+                  ))}
+                  <div className="row">
+                    <span className="row-label">
+                      Ask me with
+                      <small>A pop-up is harder to miss; a card keeps the orbit view clear</small>
+                    </span>
+                    <Combobox
+                      value={settings.toolApprovalDisplay}
+                      options={APPROVAL_DISPLAY_OPTIONS}
+                      onChange={(value) => onUpdate({ toolApprovalDisplay: value as ToolApprovalDisplay })}
+                      ariaLabel="How to ask for approval"
+                      size="sm"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeSection === "safety" && (
+              <div className="group">
+                <div className="group-label">
+                  <span>What Orbit can see</span>
+                </div>
+                <div className="card">
+                  <div className="row">
+                    <span className="row-label">
+                      Location access<small>Let agents look up where you are</small>
+                    </span>
+                    <Toggle
+                      checked={settings.locationEnabled}
+                      onChange={(checked) => onUpdate({ locationEnabled: checked })}
+                      label="Toggle location access"
+                    />
+                  </div>
+                  <div className="row">
+                    <span className="row-label">
+                      Load remote images automatically
+                      <small>
+                        Off is safer: a reply can be steered by a web page or email it read, and an
+                        image that loads on sight sends a request before you have read it
+                      </small>
+                    </span>
+                    <Toggle
+                      checked={settings.remoteImagesAutoLoad}
+                      onChange={(checked) => onUpdate({ remoteImagesAutoLoad: checked })}
+                      label="Toggle automatic remote image loading"
+                    />
+                  </div>
                 </div>
               </div>
             )}
