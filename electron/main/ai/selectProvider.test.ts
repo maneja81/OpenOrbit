@@ -96,6 +96,60 @@ describe("selectChatProvider", () => {
     expect(getProviderCredentials("openrouter")?.apiUrl).toBe("https://proxy.example.com/v1");
   });
 
+  // Settings saves the key, the URL and the model as three separate writes, so every one of them
+  // arrives here as a partial selection. Falling through to the registry defaults made each of
+  // those destructive: rotating a key reset a custom model *and* re-aimed a private-gateway URL
+  // at api.openai.com, taking the user's key with it.
+  describe("a partial write keeps what it did not mention", () => {
+    beforeEach(() => {
+      selectChatProvider({
+        providerId: "openai",
+        apiKey: "sk-1",
+        apiUrl: "https://proxy.example.com/v1",
+        model: "gpt-4.1",
+      });
+    });
+
+    it("rotating the key leaves the custom model and URL alone", () => {
+      selectChatProvider({ providerId: "openai", apiKey: "sk-2" });
+
+      expect(setting("appSettings.orchestratorModel")).toBe("gpt-4.1");
+      expect(getProviderCredentials("openai")).toEqual({
+        apiUrl: "https://proxy.example.com/v1",
+        apiKey: "sk-2",
+      });
+    });
+
+    it("editing the URL leaves the custom model alone", () => {
+      selectChatProvider({ providerId: "openai", apiUrl: "https://proxy2.example.com/v1" });
+
+      expect(setting("appSettings.orchestratorModel")).toBe("gpt-4.1");
+      expect(getProviderCredentials("openai")?.apiUrl).toBe("https://proxy2.example.com/v1");
+    });
+
+    it("editing the model leaves the custom URL alone", () => {
+      selectChatProvider({ providerId: "openai", model: "gpt-4.1-nano" });
+
+      expect(setting("appSettings.orchestratorModel")).toBe("gpt-4.1-nano");
+      expect(getProviderCredentials("openai")?.apiUrl).toBe("https://proxy.example.com/v1");
+    });
+
+    it("still moves the model to the new provider's default when the provider actually changes", () => {
+      seedAgent("inheritor", "gpt-4.1");
+      selectChatProvider({ providerId: "anthropic", apiKey: "sk-ant" });
+
+      expect(setting("appSettings.orchestratorModel")).toBe("claude-haiku-4-5-20251001");
+      expect(modelOf("inheritor")).toBe("claude-haiku-4-5-20251001");
+    });
+
+    it("restores a provider's own stored URL when switching back to it", () => {
+      selectChatProvider({ providerId: "anthropic", apiKey: "sk-ant" });
+      selectChatProvider({ providerId: "openai" });
+
+      expect(getProviderCredentials("openai")?.apiUrl).toBe("https://proxy.example.com/v1");
+    });
+  });
+
   it("takes an Ollama name:tag model", () => {
     const result = selectChatProvider({
       providerId: "local",
