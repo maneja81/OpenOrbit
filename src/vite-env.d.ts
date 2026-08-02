@@ -400,6 +400,29 @@ interface Window {
       refresh: () => Promise<LocationData | null>;
       get: () => Promise<LocationData | null>;
     };
+    providers: {
+      list: () => Promise<{
+        catalog: {
+          id: string;
+          label: string;
+          baseUrl: string;
+          defaultChatModel: string;
+          api: string;
+          modelsAuth: string;
+          keyRequired: boolean;
+          supportsVoice: boolean;
+          defaultTranscriptionModel: string;
+          defaultTtsModel: string;
+        }[];
+        configured: { id: string; apiUrl: string; keySet: boolean }[];
+      }>;
+      selectChat: (selection: {
+        providerId: string;
+        apiUrl?: string;
+        apiKey?: string;
+        model?: string;
+      }) => Promise<{ providerId: string; model: string; updatedAgents: number }>;
+    };
     settings: {
       get: () => Promise<Record<string, unknown>>;
       update: (patch: Record<string, unknown>) => Promise<Record<string, unknown>>;

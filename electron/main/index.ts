@@ -11,6 +11,7 @@ import { registerWindowControlHandlers, attachWindowStateEvents } from "./ipc/wi
 import { registerSystemStatsHandlers, startSystemStatsBroadcast } from "./ipc/systemStats";
 import { registerLocationHandlers } from "./ipc/location";
 import { registerSettingsHandlers } from "./ipc/settings";
+import { registerProviderHandlers } from "./ipc/providers";
 import { registerChatHistoryHandlers } from "./ipc/chatHistory";
 import { registerMemoryHandlers } from "./ipc/memory";
 import { registerAgentHandlers } from "./ipc/agent";
@@ -101,6 +102,7 @@ app.whenReady().then(() => {
   migrateLegacyUserData();
   ensureAppDirectories();
   registerAppPingHandler();
+  registerProviderHandlers();
   registerFilesystemHandlers();
   registerAppLauncherHandlers();
   registerWindowControlHandlers();

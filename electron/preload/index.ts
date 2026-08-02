@@ -74,6 +74,33 @@ const agentsAPI = {
     get: (): Promise<LocationData | null> => ipcRenderer.invoke("location:get"),
   },
 
+  providers: {
+    /** Registry + which providers have credentials. Key values never cross this boundary. */
+    list: (): Promise<{
+      catalog: {
+        id: string;
+        label: string;
+        baseUrl: string;
+        defaultChatModel: string;
+        api: string;
+        modelsAuth: string;
+        keyRequired: boolean;
+        supportsVoice: boolean;
+        defaultTranscriptionModel: string;
+        defaultTtsModel: string;
+      }[];
+      configured: { id: string; apiUrl: string; keySet: boolean }[];
+    }> => ipcRenderer.invoke("providers:list"),
+    /** One call on purpose: saving credentials, pointing the Chat slot and re-aligning the agents
+     * that follow it are a single change — see electron/main/ai/selectProvider.ts. */
+    selectChat: (selection: {
+      providerId: string;
+      apiUrl?: string;
+      apiKey?: string;
+      model?: string;
+    }): Promise<{ providerId: string; model: string; updatedAgents: number }> =>
+      ipcRenderer.invoke("providers:selectChat", selection),
+  },
   settings: {
     get: (): Promise<Record<string, unknown>> => ipcRenderer.invoke("settings:get"),
     update: (patch: Record<string, unknown>): Promise<Record<string, unknown>> =>
