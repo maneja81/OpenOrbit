@@ -3,6 +3,7 @@ import { getDb } from "../db";
 import { encryptSecret, decryptSecret } from "../security/secretStorage";
 import { devLog } from "../devLog";
 import { parseIdList, parseStringMap } from "../db/jsonColumn";
+import { detachFromOrchestrator } from "../db/orchestratorAttachments";
 
 export interface McpServerRow {
   id: string;
@@ -132,6 +133,7 @@ export function updateMcpServer(id: string, patch: McpServerUpdatePatch): McpSer
 export function deleteMcpServer(id: string): void {
   const db = getDb();
   db.prepare("DELETE FROM mcp_servers WHERE id = ?").run(id);
+  detachFromOrchestrator("mcp", id);
   // Detach from any agent that had it selected, so a deleted server never lingers as a
   // dangling id in an agent's mcp_server_ids and silently fails to connect on the next run.
   const agents = db.prepare("SELECT id, mcp_server_ids FROM agents").all() as { id: string; mcp_server_ids: string }[];

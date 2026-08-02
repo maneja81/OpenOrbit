@@ -1,6 +1,7 @@
 import { getDb } from "./index";
 import { encryptSecret, decryptSecret } from "../security/secretStorage";
 import { parseIdList, parseStringMap } from "./jsonColumn";
+import { detachFromOrchestrator } from "./orchestratorAttachments";
 
 /** One user-declared input to an HTTP tool. `location` decides where the value ends up in
  * the outgoing request — see ai/httpToolRequest.ts, which is the only place that reads it. */
@@ -260,6 +261,7 @@ export function updateHttpToolCollection(id: string, patch: HttpToolCollectionPa
 export function deleteHttpToolCollection(id: string): void {
   const db = getDb();
   db.prepare("DELETE FROM http_tool_collections WHERE id = ?").run(id);
+  detachFromOrchestrator("httpToolCollection", id);
 
   const agents = db.prepare("SELECT id, http_tool_collection_ids FROM agents").all() as {
     id: string;
