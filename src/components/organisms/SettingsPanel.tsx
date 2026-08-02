@@ -710,6 +710,28 @@ export default function SettingsPanel({
                       )}
                     </label>
                   ))}
+                  <div className="row">
+                    <span className="row-label">
+                      Run onboarding again
+                      <small>Walks through the setup questions. Nothing is cleared — your answers are the starting point</small>
+                    </span>
+                    <button
+                      type="button"
+                      className="settings-action-btn-sm settings-action-btn-ghost"
+                      onClick={() => {
+                        // The tour has had a replay path since it shipped; onboarding never did,
+                        // so the only way back through it was a Danger Zone reset — which also
+                        // destroys chat history, agents, memory and the knowledge base.
+                        // Clearing the flag is all it takes: AgentsApp shows onboarding whenever
+                        // onboardingDone is false. Closing the panel gets it out of the way.
+                        onUpdate({ onboardingDone: false });
+                        onClose();
+                      }}
+                    >
+                      <TablerIcon name="ti-refresh" />
+                      <span>Start</span>
+                    </button>
+                  </div>
                 </div>
                 <div className="card">
                   <div className="row">
