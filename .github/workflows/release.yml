@@ -1,0 +1,138 @@
+# Builds distributable apps for macOS, Windows and Linux on every version tag, then
+# attaches them to a GitHub Release.
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Publishing is done once, by the release job, using the `gh` CLI that is preinstalled
+# on the runners. electron-builder's own publisher is disabled via `--publish never` in
+# the package:ci script — left on, it auto-publishes whenever it detects a CI tag
+# (app-builder-lib PublishManager.js), which would mean four jobs racing to create the
+# same release.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+# Never cancel a release mid-flight: a half-built tag leaves a release with some
+# platforms missing, which is worse than a duplicate run.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # The same four gates as every PR, by reference rather than by copy. A tag can be
+  # pushed from any commit, including one that never went through a PR.
+  verify:
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: Build ${{ matrix.os }}
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One platform failing should still yield the other two, so a partial release can
+      # be completed by hand rather than re-running everything.
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            artifact: mac-build
+            glob: dist/*.dmg
+          - os: windows-latest
+            artifact: windows-build
+            glob: dist/*.exe
+          - os: ubuntu-latest
+            artifact: linux-build
+            glob: dist/*.AppImage
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # electron-builder names artifacts from package.json's version, not from the tag.
+      # Without this, tagging v0.2.0 on an unbumped 0.1.0 produces OpenOrbit-0.1.0.dmg
+      # attached to a release called v0.2.0.
+      - name: Verify tag matches package.json version
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $PKG"
+            exit 1
+          fi
+          echo "Tag $GITHUB_REF_NAME matches package.json version $PKG"
+
+      - run: npm ci
+
+      - name: Package
+        run: npm run package:ci
+        env:
+          # No signing certificate is configured. Without this, electron-builder searches
+          # the runner keychain and can pick up an unrelated identity.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.glob }}
+          # A glob that matches nothing would otherwise produce an empty artifact and a
+          # release with missing downloads.
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    needs: [build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release and attach installers
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(artifacts/*/*)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::No artifacts were downloaded — nothing to release"
+            exit 1
+          fi
+          printf 'Attaching %s\n' "${files[@]}"
+          # A tag containing a hyphen is a prerelease by semver convention (v1.0.0-beta.1).
+          prerelease=""
+          case "$GITHUB_REF_NAME" in
+            *-*) prerelease="--prerelease" ;;
+          esac
+          # `gh release create` has no overwrite flag, so a re-run after a partially
+          # failed release aborts with "release already exists" and leaves a published
+          # release with missing installers. Upload into the existing release instead;
+          # --clobber replaces same-named assets so the re-run is idempotent.
+          if gh release view "$GITHUB_REF_NAME" --repo "$REPO" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists — uploading assets into it"
+            gh release upload "$GITHUB_REF_NAME" \
+              --repo "$REPO" \
+              --clobber \
+              "${files[@]}"
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --repo "$REPO" \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes \
+              --verify-tag \
+              $prerelease \
+              "${files[@]}"
+          fi
