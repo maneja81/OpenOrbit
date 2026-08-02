@@ -1,0 +1,196 @@
+/**
+ * The shape of every persisted app setting, and the one place a value is checked before it
+ * reaches the database.
+ *
+ * There are two write paths — the `settings:update` IPC handler (the whole Settings UI) and
+ * ConfigAgent's `update_setting` tool — and until this module existed only the second one
+ * validated anything. `settings:update` took any key with any value and JSON.stringify'd it
+ * straight into the settings table, so a typo'd key persisted silently, a number could land in
+ * a field every consumer calls string methods on, and nothing stopped a caller from filling the
+ * table with rows the app has never heard of.
+ *
+ * The two paths deliberately keep *different key lists* — the agent may write far fewer keys
+ * than the user can — but they now share one definition of what a valid value looks like, so a
+ * value the agent would be told off for cannot slip in through the UI instead.
+ *
+ * Mirrors `AgentsSettings` in `src/lib/settings.ts`. It cannot import it: `electron/` and `src/`
+ * are separate TypeScript projects and main has no path into the renderer's tree, which is the
+ * same reason main re-declares the defaults it reads (see finding S1). Keep the two in step by
+ * hand — `settingsSchema.test.ts` asserts the key list against the documented count so an added
+ * setting that never reaches here fails loudly rather than being silently unwritable.
+ */
+
+/** How a setting's value is validated. `model` is a string with the loose "model" or
+ * "provider/model" shape; `enum` restricts to a fixed set. */
+export type SettingKind =
+  | { type: "string" }
+  | { type: "model" }
+  | { type: "boolean" }
+  | { type: "number"; min?: number; max?: number; integer?: boolean }
+  | { type: "stringArray" }
+  | { type: "enum"; values: readonly string[] };
+
+const STRING: SettingKind = { type: "string" };
+const BOOLEAN: SettingKind = { type: "boolean" };
+const MODEL: SettingKind = { type: "model" };
+const STRING_ARRAY: SettingKind = { type: "stringArray" };
+
+/** Same loose shape ConfigAgent's update_setting has always applied to model ids: "model" or
+ * "provider/model". Deliberately permissive — the catalogue depends on whichever
+ * OpenAI-compatible host the user pointed at, so this only rejects things that cannot be a
+ * model id at all.
+ *
+ * Exported because agents.ts validates a sub-agent's `model` column against the same shape.
+ * It lives here rather than there so there is one copy: this module has no heavy imports, so
+ * agents.ts can depend on it, and not the other way round. */
+export const MODEL_ID_PATTERN = /^[a-z0-9._-]+(\/[a-z0-9._:-]+)?$/i;
+
+/** Bounds here are the ones the Settings UI already claims via `min` on its number inputs.
+ * `min` constrains a spinner and nothing else — typed and pasted values sail straight past it,
+ * which is findings S2/S3/S4. Enforcing them at the write boundary is what makes the UI's
+ * promise real; clamping on *read* is X3 and still worth doing for rows written before this. */
+export const SETTINGS_SCHEMA = {
+  chatApiKey: STRING,
+  chatApiUrl: STRING,
+  voiceApiKey: STRING,
+  voiceApiUrl: STRING,
+  voiceInputEnabled: BOOLEAN,
+  typeAnywhereEnabled: BOOLEAN,
+  onboardingDone: BOOLEAN,
+  tourCompleted: BOOLEAN,
+  agentName: STRING,
+  agentDescription: STRING,
+  orchestratorPromptOverride: STRING,
+  userName: STRING,
+  orchestratorModel: MODEL,
+  orchestratorEnabled: BOOLEAN,
+  orchestratorMcpServerIds: STRING_ARRAY,
+  orchestratorConnectorIds: STRING_ARRAY,
+  orchestratorHttpToolCollectionIds: STRING_ARRAY,
+  httpToolApprovalPost: BOOLEAN,
+  httpToolApprovalPutPatch: BOOLEAN,
+  httpToolApprovalDelete: BOOLEAN,
+  toolApprovalDisplay: { type: "enum", values: ["modal", "inline"] },
+  voiceTranscriptionModel: MODEL,
+  voiceOutputEnabled: BOOLEAN,
+  soundFxEnabled: BOOLEAN,
+  voiceTtsModel: MODEL,
+  locationEnabled: BOOLEAN,
+  remoteImagesAutoLoad: BOOLEAN,
+  bgMusicEnabled: BOOLEAN,
+  voiceTtsVoice: { type: "enum", values: ["alloy", "echo", "fable", "onyx", "nova", "shimmer"] },
+  agentRunTimeoutSeconds: { type: "number", min: 5, max: 3600, integer: true },
+  chatHistoryMessageLimit: { type: "number", min: 1, max: 200, integer: true },
+  bgMusicVolume: { type: "number", min: 0, max: 1 },
+  systemStatsPollIntervalMs: { type: "number", min: 500, max: 600_000, integer: true },
+  soundVariantSend: { type: "number", min: 1, max: 5, integer: true },
+  soundVariantReceive: { type: "number", min: 1, max: 5, integer: true },
+  soundVariantHandoff: { type: "number", min: 1, max: 5, integer: true },
+  soundVariantComplete: { type: "number", min: 1, max: 5, integer: true },
+  soundVariantStartup: { type: "number", min: 1, max: 5, integer: true },
+  soundVariantAgentCreated: { type: "number", min: 1, max: 5, integer: true },
+  soundVariantAgentDeleted: { type: "number", min: 1, max: 5, integer: true },
+} as const satisfies Record<string, SettingKind>;
+
+export type SettingKey = keyof typeof SETTINGS_SCHEMA;
+
+export function isSettingKey(key: string): key is SettingKey {
+  return Object.prototype.hasOwnProperty.call(SETTINGS_SCHEMA, key);
+}
+
+/** Why a value was refused, phrased for a human — it reaches ConfigAgent's tool error, which
+ * the model relays to the user. */
+export type ValidationFailure = { key: string; reason: string };
+
+function describe(kind: SettingKind): string {
+  switch (kind.type) {
+    case "string":
+      return "a string";
+    case "model":
+      return 'look like a model id ("model" or "provider/model")';
+    case "boolean":
+      return "true or false";
+    case "stringArray":
+      return "an array of strings";
+    case "enum":
+      return `one of: ${kind.values.join(", ")}`;
+    case "number": {
+      const bounds =
+        kind.min !== undefined && kind.max !== undefined ? ` between ${kind.min} and ${kind.max}` : "";
+      return `${kind.integer ? "a whole number" : "a number"}${bounds}`;
+    }
+  }
+}
+
+/**
+ * Checks one value against its key's declared shape, returning the value to persist or a
+ * reason it was refused.
+ *
+ * Strings are trimmed, because every string setting here is a name, URL, model id or prompt —
+ * none of them wants leading whitespace, and a value that differs from the same value with a
+ * stray space is a support question nobody enjoys. Empty strings stay legal: "" is how the app
+ * says "unset" for API keys and for orchestratorPromptOverride ("use the built-in prompt").
+ */
+export function validateSettingValue(key: string, value: unknown): { ok: true; value: unknown } | { ok: false; reason: string } {
+  if (!isSettingKey(key)) return { ok: false, reason: "not a known setting" };
+  const kind: SettingKind = SETTINGS_SCHEMA[key];
+
+  switch (kind.type) {
+    case "string":
+      return typeof value === "string" ? { ok: true, value: value.trim() } : { ok: false, reason: "must be a string" };
+
+    case "model": {
+      if (typeof value !== "string") return { ok: false, reason: "must be a string" };
+      const trimmed = value.trim();
+      // Empty clears the field back to its default; the read side substitutes one.
+      if (trimmed.length === 0) return { ok: true, value: "" };
+      return MODEL_ID_PATTERN.test(trimmed)
+        ? { ok: true, value: trimmed }
+        : { ok: false, reason: `must ${describe(kind)}` };
+    }
+
+    case "boolean":
+      return typeof value === "boolean" ? { ok: true, value } : { ok: false, reason: "must be true or false" };
+
+    case "stringArray":
+      return Array.isArray(value) && value.every((entry) => typeof entry === "string")
+        ? { ok: true, value }
+        : { ok: false, reason: "must be an array of strings" };
+
+    case "enum":
+      return typeof value === "string" && kind.values.includes(value)
+        ? { ok: true, value }
+        : { ok: false, reason: `must be ${describe(kind)}` };
+
+    case "number": {
+      // Number.isFinite rather than !isNaN: Infinity is not NaN but is useless as a timeout,
+      // a row limit or a poll interval.
+      if (typeof value !== "number" || !Number.isFinite(value)) return { ok: false, reason: "must be a number" };
+      if (kind.integer && !Number.isInteger(value)) return { ok: false, reason: "must be a whole number" };
+      if (kind.min !== undefined && value < kind.min) return { ok: false, reason: `must be ${describe(kind)}` };
+      if (kind.max !== undefined && value > kind.max) return { ok: false, reason: `must be ${describe(kind)}` };
+      return { ok: true, value };
+    }
+  }
+}
+
+/**
+ * Splits a patch into the entries safe to persist and the ones refused.
+ *
+ * Refusing per key rather than rejecting the whole patch: a Settings screen sends one field at
+ * a time, and a bulk write that fails entirely because of one bad entry would lose good edits
+ * alongside the bad one.
+ */
+export function validateSettingsPatch(patch: Record<string, unknown>): {
+  accepted: Record<string, unknown>;
+  rejected: ValidationFailure[];
+} {
+  const accepted: Record<string, unknown> = {};
+  const rejected: ValidationFailure[] = [];
+  for (const [key, value] of Object.entries(patch)) {
+    const result = validateSettingValue(key, value);
+    if (result.ok) accepted[key] = result.value;
+    else rejected.push({ key, reason: result.reason });
+  }
+  return { accepted, rejected };
+}

@@ -30,6 +30,7 @@ import { formatUserInfoForPrompt, readUserInfoFacts } from "./userInfoStore";
 import defaultAgentsConfig from "./defaultAgents.json";
 import { getDb } from "../db";
 import { getSetting, setSetting } from "../db/settingsStore";
+import { MODEL_ID_PATTERN, validateSettingValue } from "../settingsSchema";
 import { getCurrentLocation } from "../ipc/location";
 import { encryptSecret } from "../security/secretStorage";
 import { connectMcpServersForAgent } from "./mcp";
@@ -84,7 +85,8 @@ function getCurrentDateTime(): string {
 // Accepts a plain native model id ("gpt-4.1-mini") or an OpenRouter-style "provider/model"
 // id — a loose shape check, not an allowlist of real providers/models, since a user can
 // point the Chat section at OpenAI, OpenRouter, or any other OpenAI-compatible host.
-const MODEL_ID_PATTERN = /^[a-z0-9._-]+(\/[a-z0-9._:-]+)?$/i;
+// Defined in settingsSchema.ts so the settings model fields and an agent's own `model` column
+// are held to one shape rather than two copies of the same regex drifting apart.
 
 // Prompt .md files are statically imported (required by the `?raw` Vite transform,
 // which can't resolve a dynamic path) and looked up here by the `promptKey` each
@@ -223,27 +225,11 @@ const ALLOWED_SETTING_KEYS = [
 ] as const;
 
 const SENSITIVE_SETTING_KEYS = ["chatApiKey", "voiceApiKey"];
-const BOOLEAN_KEYS = [
-  "voiceInputEnabled",
-  "typeAnywhereEnabled",
-  "locationEnabled",
-  "bgMusicEnabled",
-  "soundFxEnabled",
-  "voiceOutputEnabled",
-  "httpToolApprovalPost",
-  "httpToolApprovalPutPatch",
-  "httpToolApprovalDelete",
-];
 
-// Free-form strings are the norm for the other keys, but this one drives a UI branch —
-// an unrecognised value would silently render neither prompt, leaving a paused run with
-// no way to answer it.
-const ENUM_SETTING_VALUES: Record<string, readonly string[]> = {
-  toolApprovalDisplay: ["modal", "inline"],
-};
-// Free-form model-id fields — validated with the same loose "model" or "provider/model"
-// shape as orchestratorModel, since they're the same kind of value.
-const MODEL_ID_KEYS = ["orchestratorModel", "voiceTranscriptionModel", "voiceTtsModel"];
+// What a valid value looks like for each key — booleans, enums like toolApprovalDisplay, and
+// the model-id fields — now lives in settingsSchema.ts, shared with the settings:update IPC
+// handler. The list above stays here because it is this path's own concern: what ConfigAgent is
+// allowed to touch is a much shorter list than what the user can edit in Settings.
 
 const getSettingsTool = tool({
   name: "get_settings",
@@ -308,32 +294,24 @@ const updateSettingTool = tool({
   execute: async ({ key, value }) => {
     const isSensitive = SENSITIVE_SETTING_KEYS.includes(key);
     devLog(`[update_setting] called with key=${key} value=${isSensitive ? "(redacted)" : value}`);
-    if (BOOLEAN_KEYS.includes(key)) {
-      if (typeof value !== "boolean") {
-        throw new Error(`${key} must be true or false.`);
-      }
-      setSetting(`appSettings.${key}`, value);
-      devLog(`[update_setting] appSettings.${key} = ${value}`);
-      return `Updated ${key}.`;
-    }
 
-    if (typeof value !== "string" || value.trim().length === 0) {
+    // One shared definition of a valid value, so a value this path would reject cannot get in
+    // through settings:update instead — which is exactly what used to happen, since that
+    // handler validated nothing at all.
+    const result = validateSettingValue(key, value);
+    if (!result.ok) throw new Error(`${key} ${result.reason}.`);
+
+    // An extra rule for this path only: the schema treats "" as a legal way to clear a field,
+    // but an agent must not be able to blank a setting. Wiping an API key or a prompt is a
+    // deliberate act that belongs in Settings, not something a misread instruction can do.
+    if (typeof result.value === "string" && result.value.length === 0) {
       throw new Error(`${key} cannot be empty.`);
     }
-    const trimmed = value.trim();
 
-    if (MODEL_ID_KEYS.includes(key) && !MODEL_ID_PATTERN.test(trimmed)) {
-      throw new Error(`"${trimmed}" doesn't look like a valid model ID (expected "model" or "provider/model").`);
-    }
-
-    const allowedValues = ENUM_SETTING_VALUES[key];
-    if (allowedValues && !allowedValues.includes(trimmed)) {
-      throw new Error(`${key} must be one of: ${allowedValues.join(", ")}.`);
-    }
-
-    setSetting(`appSettings.${key}`, isSensitive ? encryptSecret(trimmed) : trimmed);
+    const stored = isSensitive && typeof result.value === "string" ? encryptSecret(result.value) : result.value;
+    setSetting(`appSettings.${key}`, stored);
     // Never log the raw value for an API key — only confirm the write happened.
-    devLog(`[update_setting] appSettings.${key} = ${isSensitive ? "(redacted)" : trimmed}`);
+    devLog(`[update_setting] appSettings.${key} = ${isSensitive ? "(redacted)" : result.value}`);
     return `Updated ${key}.`;
   },
 });
