@@ -7,6 +7,7 @@ import KnowledgeModal from "@/components/organisms/KnowledgeModal";
 import ChatHistoryModal from "@/components/organisms/ChatHistoryModal";
 import HttpToolApprovalModal, { type PendingToolApproval } from "@/components/molecules/HttpToolApprovalModal";
 import { approvalSettledMessage } from "@/lib/approvalSettledMessage";
+import ErrorBoundary from "@/components/atoms/ErrorBoundary";
 import ToolApprovalCard from "@/components/molecules/ToolApprovalCard";
 import OnboardingScreen, { type OnboardingAnswers } from "@/components/organisms/OnboardingScreen";
 import { findProvider } from "@/lib/providers";
@@ -758,6 +759,12 @@ export default function AgentsApp() {
   return (
     <KnowledgeFilesContext.Provider value={knowledgeFiles}>
     <KnowledgeWidgetAnchorContext.Provider value={knowledgeAnchorRef}>
+      {/* Two boundaries, nested, because ChatPanel is rendered as OrbitScene's children.
+          The inner one means a chat render failure costs the transcript and leaves the orbit,
+          the widgets and Settings usable; the outer one catches the scene itself. Without
+          either, a throw in the primary UI reached the root boundary in main.tsx and took the
+          whole app down — while five secondary Settings tabs each degraded on their own. */}
+      <ErrorBoundary fallbackTitle="The orbit failed to load">
       <OrbitScene
         containerRef={containerRef}
         bgCanvasRef={bgCanvasRef}
@@ -784,6 +791,7 @@ export default function AgentsApp() {
         cognitiveState={cognitiveState}
         sessionStats={sessionStats}
       >
+        <ErrorBoundary fallbackTitle="The chat failed to load">
         <ChatPanel
           messages={messages}
           inputRef={inputRef}
@@ -806,7 +814,9 @@ export default function AgentsApp() {
           onStartVoice={startVoice}
           onStopVoice={stopVoice}
         />
+        </ErrorBoundary>
       </OrbitScene>
+      </ErrorBoundary>
       <SettingsPanel
         open={settingsOpen}
         onClose={closeSettingsPanel}
