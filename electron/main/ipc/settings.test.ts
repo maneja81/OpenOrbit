@@ -31,12 +31,14 @@ vi.mock("../db", () => ({ getDb: vi.fn() }));
 vi.mock("../db/migrations", () => ({ runMigrations: vi.fn() }));
 vi.mock("../ai/agents", () => ({ DEFAULT_MODEL: "gpt-4.1-mini" }));
 vi.mock("../ai/provider", () => ({ testChatConnection: vi.fn(), testVoiceConnection: vi.fn() }));
+vi.mock("./systemStats", () => ({ restartSystemStatsBroadcast: vi.fn() }));
 
 const devLogMock = vi.hoisted(() => vi.fn());
 vi.mock("../devLog", () => ({ devLog: devLogMock }));
 
 import { ipcMain } from "electron";
 import { registerSettingsHandlers } from "./settings";
+import { restartSystemStatsBroadcast } from "./systemStats";
 
 type Handler = (event: unknown, ...args: unknown[]) => unknown;
 
@@ -55,6 +57,7 @@ describe("settings:update", () => {
   beforeEach(() => {
     stored.clear();
     vi.mocked(ipcMain.handle).mockClear();
+    vi.mocked(restartSystemStatsBroadcast).mockClear();
     devLogMock.mockClear();
   });
 
@@ -179,5 +182,31 @@ describe("settings:update", () => {
     // out in the UI, so no caller can reach it.
     update({ orchestratorEnabled: false });
     expect(stored.has("appSettings.orchestratorEnabled")).toBe(false);
+  });
+});
+
+describe("settings that used to need a restart", () => {
+  beforeEach(() => {
+    stored.clear();
+    vi.mocked(ipcMain.handle).mockClear();
+    vi.mocked(restartSystemStatsBroadcast).mockClear();
+  });
+
+  it("rebuilds the system-stats timer when its interval changes", () => {
+    // The broadcast reads its interval when the timer is built, so a new value used to sit inert
+    // until the next launch — the only "Applies after restarting the app" hint in Settings.
+    update({ systemStatsPollIntervalMs: 5000 });
+    expect(vi.mocked(restartSystemStatsBroadcast)).toHaveBeenCalledOnce();
+  });
+
+  it("leaves the timer alone for any other setting", () => {
+    // Rebuilt on demand rather than polled, so the common case costs nothing.
+    update({ userName: "Ada" });
+    expect(vi.mocked(restartSystemStatsBroadcast)).not.toHaveBeenCalled();
+  });
+
+  it("leaves it alone when the new interval was refused", () => {
+    update({ systemStatsPollIntervalMs: 1 });
+    expect(vi.mocked(restartSystemStatsBroadcast)).not.toHaveBeenCalled();
   });
 });

@@ -123,8 +123,6 @@ let broadcastInterval: NodeJS.Timeout | null = null;
 
 // Guards against duplicate intervals stacking (and sending duplicate system:stats-update
 // events to every window) if this is ever called more than once in the app's lifetime.
-// Interval is read once at startup (Settings → General) rather than per-tick — changing it
-// takes effect on the next app restart, same as most other main-process-only settings here.
 export function startSystemStatsBroadcast() {
   if (broadcastInterval) return;
   const intervalMs = readAppSetting("systemStatsPollIntervalMs", DEFAULT_POLL_INTERVAL_MS);
@@ -134,4 +132,21 @@ export function startSystemStatsBroadcast() {
       win.webContents.send("system:stats-update", stats);
     }
   }, intervalMs);
+}
+
+/**
+ * Re-reads the interval and rebuilds the timer, so a change in Settings applies immediately.
+ *
+ * This setting used to be the one place in the app that told the user to restart — the interval
+ * was read once at startup, so a new value sat inert until they did. Making it live is a better
+ * answer than documenting the wait, and it removes the only "Applies after restarting the app"
+ * hint in Settings. `agentRunTimeoutSeconds` and `chatHistoryMessageLimit` are already re-read
+ * per run for the same reason; this brings the third numeric tunable in line with them.
+ */
+export function restartSystemStatsBroadcast() {
+  if (broadcastInterval) {
+    clearInterval(broadcastInterval);
+    broadcastInterval = null;
+  }
+  startSystemStatsBroadcast();
 }

@@ -7,6 +7,7 @@ import { DEFAULT_MODEL } from "../ai/agents";
 import { testChatConnection, testVoiceConnection } from "../ai/provider";
 import { devLog } from "../devLog";
 import { validateSettingsPatch } from "../settingsSchema";
+import { restartSystemStatsBroadcast } from "./systemStats";
 
 const NAMESPACE = "appSettings.";
 // Chat and Voice are independent credential slots (Settings → AI Models), each encrypted
@@ -110,6 +111,11 @@ export function registerSettingsHandlers() {
         devLog(`[settings:update] ${NAMESPACE}${key} = ${REDACTED_VALUE_KEYS.includes(key) ? "(redacted)" : value}`);
       }
     }
+    // The stats broadcast reads its interval when the timer is built, so a new value would
+    // otherwise sit inert until the next launch. Rebuilt here rather than polled, so the common
+    // case — any other setting changing — costs nothing.
+    if ("systemStatsPollIntervalMs" in accepted) restartSystemStatsBroadcast();
+
     return getVisibleSettings();
   });
 
