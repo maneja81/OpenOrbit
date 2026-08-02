@@ -79,6 +79,40 @@ describe("ChatImage", () => {
     expect(open).not.toHaveBeenCalled();
   });
 
+  it("opens the image externally from the keyboard", () => {
+    // The point of the wrapping button: an <img onClick> had no keyboard path at all.
+    const open = vi.fn();
+    vi.stubGlobal("open", open);
+    const { getByRole } = render(<ChatImage src="https://example.com/a.png" alt="a chart" autoLoadRemote />);
+    // A real button, so Enter and Space are the browser's job — clicking it is what a key
+    // press produces, and that is what this asserts is wired.
+    const button = getByRole("button", { name: "Open image in browser: a chart" });
+    button.focus();
+    expect(document.activeElement).toBe(button);
+    fireEvent.click(button);
+    expect(open).toHaveBeenCalledWith("https://example.com/a.png");
+  });
+
+  it("names the open control without alt text when the author gave none", () => {
+    const { getByRole } = render(<ChatImage src="https://example.com/a.png" autoLoadRemote />);
+    expect(getByRole("button", { name: "Open image in browser" })).not.toBeNull();
+  });
+
+  it("keeps the img an img rather than giving it a button role", () => {
+    const { container } = render(<ChatImage src="https://example.com/a.png" alt="a chart" autoLoadRemote />);
+    const img = container.querySelector("img") as HTMLImageElement;
+    expect(img.getAttribute("role")).toBeNull();
+    expect(img.getAttribute("tabindex")).toBeNull();
+    expect(img.parentElement?.tagName).toBe("BUTTON");
+  });
+
+  it("wraps no button around an image that cannot be opened", () => {
+    // A data: URI is never handed to the OS, so there is no action to expose as a control.
+    const { container, queryByRole } = render(<ChatImage src="data:image/png;base64,iVBORw0KGgo=" />);
+    expect(queryByRole("button")).toBeNull();
+    expect(container.querySelector("img")?.parentElement?.tagName).not.toBe("BUTTON");
+  });
+
   it("omits alt entirely when the author gave none", () => {
     // Better for a screen reader to skip a decorative image than to read out a CDN path.
     const { container } = render(<ChatImage src="https://example.com/a.png" autoLoadRemote />);

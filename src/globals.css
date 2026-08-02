@@ -1045,6 +1045,17 @@ svg#oc {
   cursor: pointer;
 }
 
+/* The button that wraps an openable image. Contributes no box of its own — the image keeps
+   its own margin, radius and border, and the focus ring is the only thing the button draws. */
+.chat-image-open {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: 10px;
+}
+
 /* Shown instead of an <img> for a scheme we won't render (file:, non-image data:) or after a
    load failure — a blank gap would read as a rendering bug rather than a missing image. */
 .chat-image-fallback {
