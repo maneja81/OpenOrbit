@@ -2,8 +2,31 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_SETTINGS, mergeWithDefaults } from "./settings";
 
 describe("mergeWithDefaults", () => {
-  it("returns the defaults untouched when given an empty object", () => {
-    expect(mergeWithDefaults({})).toEqual(DEFAULT_SETTINGS);
+  it("returns the defaults plus the key flags when given an empty object", () => {
+    // The two *Set booleans are not settings — they stand in for the API keys, which
+    // settings:get no longer returns. They are deliberately absent from DEFAULT_SETTINGS so it
+    // keeps mirroring the persisted shape exactly (settingsDefaults.test.ts depends on that).
+    expect(mergeWithDefaults({})).toEqual({
+      ...DEFAULT_SETTINGS,
+      chatApiKeySet: false,
+      voiceApiKeySet: false,
+    });
+  });
+
+  it("assumes no key is set until main says otherwise", () => {
+    // Getting this backwards would show "a key is saved" on a fresh install.
+    expect(mergeWithDefaults({}).chatApiKeySet).toBe(false);
+    expect(mergeWithDefaults({}).voiceApiKeySet).toBe(false);
+  });
+
+  it("takes the key flags from the blob when present", () => {
+    const merged = mergeWithDefaults({ chatApiKeySet: true, voiceApiKeySet: false });
+    expect(merged.chatApiKeySet).toBe(true);
+    expect(merged.voiceApiKeySet).toBe(false);
+  });
+
+  it("leaves the key values empty, since main never sends them", () => {
+    expect(mergeWithDefaults({ chatApiKeySet: true }).chatApiKey).toBe("");
   });
 
   it("overrides only the provided keys, keeping the rest at their defaults", () => {

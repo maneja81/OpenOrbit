@@ -120,7 +120,25 @@ export const DEFAULT_SETTINGS: AgentsSettings = {
   soundVariantAgentDeleted: 1,
 };
 
+/**
+ * What the renderer actually holds: every setting, plus the two booleans that stand in for the
+ * API keys.
+ *
+ * `settings:get` does not return the keys — see getVisibleSettings in electron/main/ipc/settings.ts
+ * — so `chatApiKey`/`voiceApiKey` are always "" here. They stay on the type because a *patch*
+ * still carries them: writes go renderer → main normally, it is only the return trip that stops.
+ */
+export type SettingsView = AgentsSettings & {
+  chatApiKeySet: boolean;
+  voiceApiKeySet: boolean;
+};
+
+/** Kept out of DEFAULT_SETTINGS on purpose: that object mirrors the persisted settings exactly,
+ * and `settingsDefaults.test.ts` asserts it matches main's SETTING_DEFAULTS key for key. These
+ * two are derived signals, not settings. */
+const DEFAULT_KEY_FLAGS = { chatApiKeySet: false, voiceApiKeySet: false };
+
 /** Merges a raw settings blob (from `agentsAPI.settings.get()`, shape not guaranteed) onto defaults. */
-export function mergeWithDefaults(raw: Record<string, unknown>): AgentsSettings {
-  return { ...DEFAULT_SETTINGS, ...(raw as Partial<AgentsSettings>) };
+export function mergeWithDefaults(raw: Record<string, unknown>): SettingsView {
+  return { ...DEFAULT_SETTINGS, ...DEFAULT_KEY_FLAGS, ...(raw as Partial<SettingsView>) };
 }

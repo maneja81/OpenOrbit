@@ -117,10 +117,34 @@ describe("settings:update", () => {
   });
 
   describe("API keys", () => {
-    it("encrypts on the way in and decrypts on the way out", () => {
+    it("encrypts on the way in and never sends the value back", () => {
+      // The key used to come back decrypted on every get and every update, and then sat in
+      // React state for the lifetime of the app. Nothing in the renderer needed it: it was
+      // read in one place, a type="password" input, which renders dots either way.
       const result = update({ chatApiKey: "sk-secret" });
       expect(stored.get("appSettings.chatApiKey")).toBe("nodeCrypto:sk-secret");
-      expect(result.chatApiKey).toBe("sk-secret");
+      expect(result.chatApiKey).toBeUndefined();
+      expect(JSON.stringify(result)).not.toContain("sk-secret");
+    });
+
+    it("reports whether a key is set instead", () => {
+      expect((handlerFor("settings:get")(null) as Record<string, unknown>).chatApiKeySet).toBe(false);
+      const after = update({ chatApiKey: "sk-secret" });
+      expect(after.chatApiKeySet).toBe(true);
+      expect(after.voiceApiKeySet).toBe(false);
+    });
+
+    it("reports a key as unset when it decrypts to nothing", () => {
+      // getDecryptedSettings degrades a failed decryption to "", and the flag must follow —
+      // claiming a key is set when the app cannot read it would be the worse lie.
+      stored.set("appSettings.voiceApiKey", "");
+      expect((handlerFor("settings:get")(null) as Record<string, unknown>).voiceApiKeySet).toBe(false);
+    });
+
+    it("still writes a key sent by the renderer", () => {
+      // Only the return trip is masked; the save path is unchanged.
+      update({ voiceApiKey: "sk-voice" });
+      expect(stored.get("appSettings.voiceApiKey")).toBe("nodeCrypto:sk-voice");
     });
 
     it("never writes the key to the log", () => {

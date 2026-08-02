@@ -2051,6 +2051,17 @@ svg#oc {
   color: #d8ecff;
 }
 
+/* A hint under a row-field's label, matching .row-label small above. The API key fields use one
+   to say a key is already stored — without the block display it runs on inline and reads as
+   "API KeyA key is saved — type a new one to replace it". */
+.group .card .row-field span small {
+  display: block;
+  font-size: 10.5px;
+  color: rgba(150, 190, 230, 0.55);
+  font-weight: 400;
+  margin-top: 2px;
+}
+
 .group .card .row-field input,
 .group .card .row-field select {
   background: rgba(0, 4, 12, 0.4);

@@ -21,6 +21,32 @@ const REDACTED_VALUE_KEYS = ["chatApiUrl", "voiceApiUrl", "orchestratorPromptOve
 // greyed out in the UI) so the setting can never end up false regardless of caller.
 const LOCKED_KEYS = ["orchestratorEnabled"];
 
+/**
+ * What the renderer is allowed to see: every setting except the two API keys, which are replaced
+ * by `chatApiKeySet` / `voiceApiKeySet` booleans.
+ *
+ * The keys used to be decrypted and handed over on every `settings:get`, then held in React
+ * state for the lifetime of the app — so anything with renderer script access could read both in
+ * the clear. Nothing in the renderer ever needed the value: it was read in exactly one place,
+ * `value={settings.chatApiKey}` on a `type="password"` input, which renders dots regardless. The
+ * booleans carry the only information that field actually conveyed — whether a key is configured
+ * — and the same shape ConfigAgent's `get_settings` has always used for these two.
+ *
+ * Writes are unaffected. The key still travels renderer → main on save; it is the *return* trip
+ * that stops.
+ */
+function getVisibleSettings(): Record<string, unknown> {
+  const settings = getDecryptedSettings();
+  const visible: Record<string, unknown> = { ...settings };
+  for (const key of SENSITIVE_KEYS) {
+    visible[`${key}Set`] = typeof settings[key] === "string" && settings[key].length > 0;
+    delete visible[key];
+  }
+  return visible;
+}
+
+/** Decrypted, keys included. Main-process use only — never returned over IPC; see
+ * getVisibleSettings, which is what the handlers below hand to the renderer. */
 function getDecryptedSettings(): Record<string, unknown> {
   const settings = getSettingsByPrefix(NAMESPACE);
   for (const sensitiveKey of SENSITIVE_KEYS) {
@@ -41,7 +67,7 @@ function getDecryptedSettings(): Record<string, unknown> {
 }
 
 export function registerSettingsHandlers() {
-  ipcMain.handle("settings:get", (): Record<string, unknown> => getDecryptedSettings());
+  ipcMain.handle("settings:get", (): Record<string, unknown> => getVisibleSettings());
 
   ipcMain.handle("settings:testChat", () => testChatConnection());
   ipcMain.handle("settings:testVoice", () => testVoiceConnection());
@@ -84,7 +110,7 @@ export function registerSettingsHandlers() {
         devLog(`[settings:update] ${NAMESPACE}${key} = ${REDACTED_VALUE_KEYS.includes(key) ? "(redacted)" : value}`);
       }
     }
-    return getDecryptedSettings();
+    return getVisibleSettings();
   });
 
   // Danger Zone: drops every app-owned table (settings, agents, chat history, memory,
@@ -110,6 +136,6 @@ export function registerSettingsHandlers() {
     dropAndReseed();
     db.pragma("foreign_keys = ON");
     runMigrations(db);
-    return getDecryptedSettings();
+    return getVisibleSettings();
   });
 }
