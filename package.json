@@ -29,7 +29,7 @@
     "better-sqlite3": "^13.0.1",
     "cheerio": "^1.2.0",
     "driver.js": "^1.8.0",
-    "exceljs": "^3.4.0",
+    "exceljs": "^3.10.0",
     "framer-motion": "^12.42.2",
     "jszip": "^3.10.1",
     "mammoth": "^1.12.0",
