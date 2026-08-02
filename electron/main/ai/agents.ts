@@ -186,7 +186,16 @@ function ensureDefaultAgentsSeeded(db: Database.Database): void {
       entry.tagline,
       entry.description,
       prompt,
-      entry.model,
+      // The orchestrator's configured model rather than the one baked into defaultAgents.json.
+      //
+      // Those entries all say "gpt-4.1-mini", which was harmless while OpenAI was the only
+      // provider and is broken now: seed onto Claude or a local Ollama and all four system agents
+      // ask that host for an OpenAI model. Observed live — `404 model 'gpt-4.1-mini' not found`
+      // from Ollama, for agents the user never touched.
+      //
+      // The JSON value stays as the fallback for a database with no setting yet. On a legacy
+      // install readAppSetting returns the same "gpt-4.1-mini" default, so this is a no-op there.
+      readAppSetting("orchestratorModel") || entry.model,
       JSON.stringify(entry.tools),
       entry.system ? 1 : 0
     );

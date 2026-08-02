@@ -10,17 +10,32 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 let chatApiUrl = "";
+/** Which provider the Chat slot is pointed at, per test. "" is a legacy install. */
+let chatProviderId = "";
 
 vi.mock("../db/settingsStore", () => ({
-  getSetting: vi.fn((name: string, defaultValue: unknown) =>
-    name === "appSettings.chatApiUrl" && chatApiUrl ? chatApiUrl : defaultValue
-  ),
+  getSetting: vi.fn((name: string, defaultValue: unknown) => {
+    if (name === "appSettings.chatApiUrl" && chatApiUrl) return chatApiUrl;
+    if (name === "appSettings.chatProviderId") return chatProviderId;
+    return defaultValue;
+  }),
   getSettingsByPrefix: vi.fn(() => ({ voiceApiKey: "encrypted-key", chatApiKey: "encrypted-key" })),
 }));
 
 vi.mock("../security/secretStorage", () => ({
   decryptSecret: vi.fn(() => "test-key"),
 }));
+
+/** What configureChatClient told the SDK, per test. */
+const sdkCalls: { api: string[]; clients: { baseURL?: string }[] } = { api: [], clients: [] };
+vi.mock("@openai/agents", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@openai/agents")>();
+  return {
+    ...actual,
+    setOpenAIAPI: (v: string) => sdkCalls.api.push(v),
+    setDefaultOpenAIClient: (c: { baseURL?: string }) => sdkCalls.clients.push(c),
+  };
+});
 
 /** Credentials the provider store will report, per test. */
 const providerCredentials = new Map<string, { apiUrl: string; apiKey: string }>();
@@ -29,7 +44,13 @@ vi.mock("../db/providersStore", () => ({
 }));
 
 import { OpenAIChatCompletionsModel, OpenAIResponsesModel } from "@openai/agents";
-import { transcribeAudio, synthesizeSpeech, estimateGenerationCost, modelForAgent } from "./provider";
+import {
+  transcribeAudio,
+  synthesizeSpeech,
+  estimateGenerationCost,
+  modelForAgent,
+  configureChatClient,
+} from "./provider";
 
 describe("transcribeAudio", () => {
   afterEach(() => {
@@ -282,5 +303,50 @@ describe("modelForAgent", () => {
       expect(model).not.toBeInstanceOf(OpenAIChatCompletionsModel);
       expect(model).not.toBeInstanceOf(OpenAIResponsesModel);
     });
+  });
+});
+
+describe("configureChatClient", () => {
+  beforeEach(() => {
+    providerCredentials.clear();
+    sdkCalls.api.length = 0;
+    sdkCalls.clients.length = 0;
+    chatProviderId = "";
+  });
+
+  it("keeps a legacy install on the Responses API", () => {
+    // No provider selected: the slot reads the old chatApiKey/chatApiUrl pair and must behave
+    // exactly as it did before the registry existed.
+    configureChatClient();
+    expect(sdkCalls.api).toEqual(["responses"]);
+  });
+
+  it("moves the SDK to Chat Completions when Chat is pointed at Claude", () => {
+    // This is the single line that makes Claude work at all. Agents that inherit the Chat slot
+    // resolve through the SDK's module-level default, so without this they go to /responses on a
+    // host that 404s it — and the failure looks like a broken app, not a misconfiguration.
+    chatProviderId = "anthropic";
+    providerCredentials.set("anthropic", { apiUrl: "https://api.anthropic.com/v1", apiKey: "sk-ant" });
+    configureChatClient();
+    expect(sdkCalls.api).toEqual(["chat_completions"]);
+  });
+
+  it("sets the API mode every time rather than only on a change", () => {
+    // The value is global and sticky. A run that moved it to chat_completions would otherwise
+    // leak into the next run on a Responses provider.
+    chatProviderId = "anthropic";
+    providerCredentials.set("anthropic", { apiUrl: "https://api.anthropic.com/v1", apiKey: "sk-ant" });
+    configureChatClient();
+    chatProviderId = "openai";
+    providerCredentials.set("openai", { apiUrl: "https://api.openai.com/v1", apiKey: "sk-oai" });
+    configureChatClient();
+    expect(sdkCalls.api).toEqual(["chat_completions", "responses"]);
+  });
+
+  it("points the default client at the selected provider's host", () => {
+    chatProviderId = "openrouter";
+    providerCredentials.set("openrouter", { apiUrl: "https://openrouter.ai/api/v1", apiKey: "sk-or" });
+    configureChatClient();
+    expect(sdkCalls.clients.at(-1)?.baseURL).toBe("https://openrouter.ai/api/v1");
   });
 });

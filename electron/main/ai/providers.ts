@@ -64,12 +64,19 @@ export interface AiProvider {
   defaultTtsModel: string;
 }
 
+/** Hosts that code outside the registry also needs to name — the legacy Chat slot falls back to
+ * OpenAI's, and the cost lookup in ai/provider.ts only applies to OpenRouter. Exported from here
+ * so there is one literal per host rather than a copy that can drift out of step with the entry
+ * below it. */
+export const OPENAI_BASE_URL = "https://api.openai.com/v1";
+export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+
 /** Listed in the order the onboarding chips and the Settings dropdown show them. */
 export const AI_PROVIDERS: AiProvider[] = [
   {
     id: "openrouter",
     label: "OpenRouter",
-    baseUrl: "https://openrouter.ai/api/v1",
+    baseUrl: OPENROUTER_BASE_URL,
     // The leading `~` is OpenRouter's own syntax for a floating "latest" alias, not a typo: the
     // id is listed by GET /models and returns 200, while the de-tilde'd form is refused as "not
     // a valid model ID". MODEL_ID_PATTERN in ../settingsSchema.ts admits it for this reason.
@@ -84,7 +91,7 @@ export const AI_PROVIDERS: AiProvider[] = [
   {
     id: "openai",
     label: "OpenAI",
-    baseUrl: "https://api.openai.com/v1",
+    baseUrl: OPENAI_BASE_URL,
     defaultChatModel: "gpt-4.1-mini",
     api: "responses",
     modelsAuth: "bearer",

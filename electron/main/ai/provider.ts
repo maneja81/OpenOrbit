@@ -10,12 +10,18 @@ import { getSettingsByPrefix } from "../db/settingsStore";
 import { readAppSetting } from "../appSettings";
 import { decryptSecret } from "../security/secretStorage";
 import { SETTING_DEFAULTS } from "../settingsSchema";
-import { findProvider, type ProviderApi, type ProviderModelsAuth } from "./providers";
+import {
+  findProvider,
+  OPENAI_BASE_URL,
+  OPENROUTER_BASE_URL,
+  type ProviderApi,
+  type ProviderModelsAuth,
+} from "./providers";
 import { getProviderCredentials } from "../db/providersStore";
 import { devLog } from "../devLog";
 
-export const OPENAI_BASE_URL = "https://api.openai.com/v1";
-const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+export { OPENAI_BASE_URL };
+
 const NAMESPACE = "appSettings.";
 /** Required by Anthropic's native endpoints; ignored by their OpenAI-compatible one. */
 const ANTHROPIC_VERSION = "2023-06-01";
