@@ -76,7 +76,12 @@ export function useSpeak() {
           el.onerror = () => {
             setSpeaking(false);
             audioRef.current = null;
-            devLog("[speak] audio playback failed, falling back to browser TTS");
+            const mediaError = el.error;
+            devLog(
+              "[speak] audio playback failed, falling back to browser TTS",
+              `code=${mediaError?.code ?? "unknown"}`,
+              mediaError?.message || "(no message)"
+            );
             speakWithBrowserTts(text, callbacks);
           };
           void el.play();
