@@ -7,9 +7,11 @@
 /0-cowork/
 /MEMORY.md
 
-# Per-machine Claude Code settings. The shared config belongs in CLAUDE.md;
-# anything under .claude/ that ends in .local.json is one developer's only.
-.claude/settings.local.json
+# Claude Code's per-machine state — settings.local.json and, more importantly,
+# .claude/worktrees/, which holds full checkouts of this repo. Those nest a .git
+# file inside the working tree, so a `git add -A` records them as gitlinks. The
+# shared config belongs in CLAUDE.md, so nothing under .claude/ is project config.
+.claude/
 
 # Dependencies
 /node_modules/
@@ -41,5 +43,4 @@
 
 # Claude
 Claude.md
-./claude
 MEMORY.md
