@@ -26,6 +26,7 @@ import {
   listTasksTool,
   updateTaskTool,
 } from "./tools/taskAgentTools";
+import { modelForAgent } from "./provider";
 import { formatUserInfoForPrompt, readUserInfoFacts } from "./userInfoStore";
 import defaultAgentsConfig from "./defaultAgents.json";
 import { getDb } from "../db";
@@ -255,6 +256,11 @@ export const PROTECTED_SETTING_KEYS = [
   // of these values; the exfiltration path was the more serious half.
   "chatApiUrl",
   "voiceApiUrl",
+  // Same reasoning one step earlier in the chain: picking a provider picks the URL its requests
+  // go to, so an agent able to write these can redirect the user's key just as surely as if it
+  // had written the URL itself.
+  "chatProviderId",
+  "voiceProviderId",
 ] as const;
 
 /** Where each protected setting actually lives, so the refusal can point somewhere useful
@@ -267,6 +273,8 @@ const PROTECTED_SETTING_LOCATION: Record<(typeof PROTECTED_SETTING_KEYS)[number]
   locationEnabled: "Settings → General",
   chatApiUrl: "Settings → AI Models",
   voiceApiUrl: "Settings → AI Models",
+  chatProviderId: "Settings → AI Models",
+  voiceProviderId: "Settings → AI Models",
 };
 
 /** The refusal message for a protected key, or null if the key is freely writable. Exported
@@ -1005,7 +1013,7 @@ export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
     instructions: renderPrompt(configAgentRow.prompt, promptVars) + httpToolsPromptForRow(configAgentRow) + userInfoBlock,
     handoffDescription:
       "Manages app configuration: onboarding, settings (agent names, models, API keys, toggles) — including reading/checking a setting's current value, not just changing it — and creating new custom agents.",
-    model: configAgentRow.model || DEFAULT_MODEL,
+    model: modelForAgent(configAgentRow),
     tools: [
       getSettingsTool,
       updateSettingTool,
@@ -1032,7 +1040,7 @@ export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
       renderPrompt(knowledgeAgentRow.prompt, promptVars) + httpToolsPromptForRow(knowledgeAgentRow) + userInfoBlock,
     handoffDescription:
       "Reads and searches the user's knowledge base documents (resumes, notes, reference material) for anything a personal document might answer, and browses/reads the local folders the user has granted via the Folders widget.",
-    model: knowledgeAgentRow.model || DEFAULT_MODEL,
+    model: modelForAgent(knowledgeAgentRow),
     tools: [
       listKnowledgebaseFilesTool,
       readKnowledgebaseFileTool,
@@ -1053,7 +1061,7 @@ export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
       renderPrompt(explorerAgentRow.prompt, promptVars) + httpToolsPromptForRow(explorerAgentRow) + userInfoBlock,
     handoffDescription:
       "Searches the live web for current information: news, comparisons, products, or anything about the outside world that needs up-to-date data rather than the user's own documents.",
-    model: explorerAgentRow.model || DEFAULT_MODEL,
+    model: modelForAgent(explorerAgentRow),
     tools: [
       webSearchTool,
       fetchWebContentTool,
@@ -1082,7 +1090,7 @@ export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
     instructions: renderPrompt(taskAgentRow.prompt, promptVars) + httpToolsPromptForRow(taskAgentRow) + userInfoBlock,
     handoffDescription:
       "Manages reminders and prompt tasks — one-shot or recurring, with dynamic parameters substituted at run time — and notifies the user when they're due.",
-    model: taskAgentRow.model || DEFAULT_MODEL,
+    model: modelForAgent(taskAgentRow),
     tools: [
       createTaskTool,
       listTasksTool,
@@ -1114,7 +1122,7 @@ export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
           httpToolsPromptForRow(row) +
           userInfoBlock,
         handoffDescription: row.description || row.tagline || `Handles requests related to ${row.name}.`,
-        model: row.model || DEFAULT_MODEL,
+        model: modelForAgent(row),
         tools: [
           createSaveUserInfoTool(row.name),
           createSaveAgentDataTool(row.id),
@@ -1138,7 +1146,7 @@ export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
       renderPrompt(getOrchestratorPromptTemplate(), promptVars) +
       buildHttpToolsPromptBlock(orchestratorHttpToolCollectionIds) +
       userInfoBlock,
-    model: orchestratorModel,
+    model: modelForAgent({ model: orchestratorModel, provider_id: "" }),
     tools: [
       searchHistoryTool,
       getCurrentLocationTool,

@@ -41,6 +41,11 @@ export interface AgentsSettings {
   chatApiUrl: string;
   voiceApiKey: string;
   voiceApiUrl: string;
+  /** Which entry in AI_PROVIDERS this slot is pointed at. `""` means the slot predates the
+   * provider registry and still reads the legacy chatApiKey/chatApiUrl pair — that is what keeps
+   * an existing install behaving exactly as it did. */
+  chatProviderId: string;
+  voiceProviderId: string;
   voiceInputEnabled: boolean;
   typeAnywhereEnabled: boolean;
   onboardingDone: boolean;
@@ -101,6 +106,8 @@ export const DEFAULT_SETTINGS: AgentsSettings = {
   chatApiUrl: "",
   voiceApiKey: "",
   voiceApiUrl: "",
+  chatProviderId: "",
+  voiceProviderId: "",
   voiceInputEnabled: true,
   typeAnywhereEnabled: true,
   onboardingDone: false,

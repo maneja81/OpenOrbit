@@ -20,6 +20,8 @@
  * setting that never reaches here fails loudly rather than being silently unwritable.
  */
 
+import { PROVIDER_IDS } from "./ai/providers";
+
 /** How a setting's value is validated. `model` is a string with the loose "model" or
  * "provider/model" shape; `enum` restricts to a fixed set. */
 export type SettingKind =
@@ -56,6 +58,20 @@ const BOOLEAN: SettingKind = { type: "boolean" };
 const MODEL: SettingKind = { type: "model" };
 const STRING_ARRAY: SettingKind = { type: "stringArray" };
 
+/**
+ * Which provider a credential slot is pointed at.
+ *
+ * `""` is a real, meaningful value and the default: it means "this slot has not been moved to
+ * the provider registry yet — read the legacy chatApiKey/chatApiUrl pair instead". That is what
+ * keeps every install predating the registry behaving exactly as it did, and why this is an enum
+ * over the ids *plus* empty rather than a plain string.
+ *
+ * Imported from ai/providers.ts rather than restated so a provider added there is immediately
+ * writable here; that module is pure data with no imports of its own, which is the same property
+ * that lets this one stay dependency-free enough for the renderer's parity test to load it.
+ */
+const PROVIDER_ID_KIND: SettingKind = { type: "enum", values: ["", ...PROVIDER_IDS] };
+
 /** Same loose shape ConfigAgent's update_setting has always applied to model ids: "model" or
  * "provider/model". Deliberately permissive — the catalogue depends on whichever
  * OpenAI-compatible host the user pointed at, so this only rejects things that cannot be a
@@ -83,6 +99,8 @@ export const SETTINGS_SCHEMA = {
   chatApiUrl: URL_KIND,
   voiceApiKey: STRING,
   voiceApiUrl: URL_KIND,
+  chatProviderId: PROVIDER_ID_KIND,
+  voiceProviderId: PROVIDER_ID_KIND,
   voiceInputEnabled: BOOLEAN,
   typeAnywhereEnabled: BOOLEAN,
   onboardingDone: BOOLEAN,
@@ -155,6 +173,8 @@ export const SETTING_DEFAULTS: { [K in SettingKey]: SettingValue<K> } = {
   chatApiUrl: "",
   voiceApiKey: "",
   voiceApiUrl: "",
+  chatProviderId: "",
+  voiceProviderId: "",
   voiceInputEnabled: true,
   typeAnywhereEnabled: true,
   onboardingDone: false,

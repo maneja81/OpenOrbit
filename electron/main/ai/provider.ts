@@ -1,12 +1,27 @@
 import OpenAI from "openai";
-import { setDefaultOpenAIClient } from "@openai/agents";
+import {
+  OpenAIChatCompletionsModel,
+  OpenAIResponsesModel,
+  setDefaultOpenAIClient,
+  setOpenAIAPI,
+  type Model,
+} from "@openai/agents";
 import { getSettingsByPrefix } from "../db/settingsStore";
 import { readAppSetting } from "../appSettings";
 import { decryptSecret } from "../security/secretStorage";
+import { SETTING_DEFAULTS } from "../settingsSchema";
+import { findProvider, type ProviderApi, type ProviderModelsAuth } from "./providers";
+import { getProviderCredentials } from "../db/providersStore";
+import { devLog } from "../devLog";
 
 export const OPENAI_BASE_URL = "https://api.openai.com/v1";
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const NAMESPACE = "appSettings.";
+/** Required by Anthropic's native endpoints; ignored by their OpenAI-compatible one. */
+const ANTHROPIC_VERSION = "2023-06-01";
+/** Sent as the bearer token for providers that authenticate nothing (a local Ollama server).
+ * Never a credential — it exists only because the OpenAI SDK refuses to construct without one. */
+const UNAUTHENTICATED_PLACEHOLDER_KEY = "no-key-required";
 
 /** Chat and Voice are independent credential slots (Settings → AI Models) — a user can
  * point either at OpenAI (the default), OpenRouter, Ollama, or any other OpenAI-compatible
@@ -33,12 +48,160 @@ function getConfiguredUrl(slot: CredentialSlot): string {
   return readAppSetting(settingKey, OPENAI_BASE_URL) || OPENAI_BASE_URL;
 }
 
+/**
+ * What a slot or an agent actually needs to make a request, wherever it came from.
+ *
+ * `api` is the field that did not exist before providers: `@openai/agents` defaults to the
+ * Responses API and the app has never called `setOpenAIAPI`, so every run to date went to
+ * `POST /responses`. OpenAI and OpenRouter serve that; Anthropic's OpenAI-compatible surface
+ * 404s on it and Ollama has no such endpoint, so those have to be driven through
+ * `/chat/completions` instead.
+ */
+export interface ResolvedProvider {
+  apiKey: string;
+  baseUrl: string;
+  api: ProviderApi;
+  modelsAuth: ProviderModelsAuth;
+  /** For error messages — "Claude" reads better than "anthropic" in a message a user sees. */
+  label: string;
+}
+
+/**
+ * Auth headers for the `GET /models` connectivity check.
+ *
+ * Every provider accepts a bearer token for *chat* traffic, Anthropic included — that is what the
+ * OpenAI SDK client sends and it works. Their native `/v1/models` is the exception: it rejects a
+ * bearer token with 401 "Invalid bearer token" and wants `x-api-key` plus `anthropic-version`.
+ * Without this the Test button would report a working Claude setup as broken.
+ */
+function modelsAuthHeaders(resolved: ResolvedProvider): Record<string, string> {
+  if (resolved.modelsAuth === "anthropic") {
+    return { "x-api-key": resolved.apiKey, "anthropic-version": ANTHROPIC_VERSION };
+  }
+  return { Authorization: `Bearer ${resolved.apiKey}` };
+}
+
+/**
+ * Resolves a credential slot, honouring the provider registry when the slot has been moved to it
+ * and falling back to the legacy pair when it hasn't.
+ *
+ * The empty-`providerId` branch is deliberately the *old* code path verbatim, not a
+ * reimplementation of it: an install that predates the registry — which is every install today —
+ * must behave exactly as it did, down to the "" URL meaning OpenAI's.
+ */
+function resolveSlot(slot: CredentialSlot): ResolvedProvider {
+  const providerId = readAppSetting(slot === "chat" ? "chatProviderId" : "voiceProviderId");
+  if (providerId === "") {
+    return {
+      apiKey: getDecryptedKey(slot),
+      baseUrl: getConfiguredUrl(slot),
+      // What the SDK has always defaulted to, and what this slot has always used.
+      api: "responses",
+      modelsAuth: "bearer",
+      label: slot === "chat" ? "Chat" : "Voice",
+    };
+  }
+  return resolveProviderId(providerId, slot === "chat" ? "Chat" : "Voice");
+}
+
+/**
+ * Resolves one provider by registry id.
+ *
+ * `context` names what was pointed at it — a slot ("Chat") or an agent ("the Researcher agent") —
+ * so a missing key says which thing stopped working rather than only which provider is unset.
+ */
+function resolveProviderId(providerId: string, context: string): ResolvedProvider {
+  const provider = findProvider(providerId);
+  if (!provider) {
+    // A database can hold an id written by a build that offered a provider this one doesn't.
+    throw new Error(
+      `${context} is set to an unknown provider ("${providerId}"). Pick one again in Settings → AI Models.`
+    );
+  }
+  const credentials = getProviderCredentials(providerId);
+  const baseUrl = credentials?.apiUrl || provider.baseUrl;
+  if (baseUrl === "") {
+    throw new Error(`No API URL configured for ${provider.label}. Set one in Settings → AI Models first.`);
+  }
+  // `local` is the one provider that authenticates nothing, which is what keyRequired records.
+  // Sending an empty bearer token to a server that ignores it is fine; demanding a key the user
+  // does not have would block the provider whose whole point is not having one.
+  if (provider.keyRequired && !credentials?.apiKey) {
+    throw new Error(
+      `No ${provider.label} API key configured (needed by ${context}). Set one in Settings → AI Models first.`
+    );
+  }
+  return {
+    apiKey: credentials?.apiKey ?? "",
+    baseUrl,
+    api: provider.api,
+    modelsAuth: provider.modelsAuth,
+    label: provider.label,
+  };
+}
+
+/** A client bound to one provider's credentials. Built per call rather than cached, for the same
+ * reason configureChatClient re-reads on every run: a key or URL changed in Settings has to take
+ * effect on the next agent run, not the next launch. */
+function clientFor(resolved: ResolvedProvider): OpenAI {
+  // The SDK throws "Missing credentials" on an empty apiKey, but a `local` provider
+  // authenticates nothing and the user may legitimately have no key — that is what
+  // keyRequired: false means. A placeholder satisfies the constructor; the server ignores the
+  // header it produces. Without this, pointing an agent at Ollama crashes before the first
+  // request is even attempted.
+  return new OpenAI({ apiKey: resolved.apiKey || UNAUTHENTICATED_PLACEHOLDER_KEY, baseURL: resolved.baseUrl });
+}
+
+/**
+ * The model to hand an `Agent`, for an agent row that may name its own provider.
+ *
+ * Returns a plain string when the row inherits the Chat slot, which is the overwhelmingly common
+ * case and the one that must not change: a string makes the SDK resolve through the process-wide
+ * default client that `configureChatClient` has always set, so those runs are byte-identical to
+ * before providers existed.
+ *
+ * Only a row that explicitly names a different provider gets a `Model` instance bound to its own
+ * client — and which class it gets is the whole reason `api` is tracked per provider.
+ */
+export function modelForAgent(row: { model?: string | null; provider_id?: string | null }): string | Model {
+  const modelId = row.model?.trim() || SETTING_DEFAULTS.orchestratorModel;
+  const providerId = row.provider_id?.trim() ?? "";
+  if (providerId === "") return modelId;
+
+  let resolved: ResolvedProvider;
+  try {
+    resolved = resolveProviderId(providerId, `the model "${modelId}"`);
+  } catch (e) {
+    // Degrade to the Chat slot rather than throwing.
+    //
+    // buildOrchestrator constructs *every* agent before the run starts, so throwing here does not
+    // fail the one misconfigured agent — it fails the whole app. Observed: pinning a single
+    // sub-agent to a Local AI with no URL made an unrelated orchestrator run on OpenRouter die
+    // with "No API URL configured for Local AI", for a question that never involved that agent.
+    //
+    // Inheriting is also the honest reading of the field: provider_id is a preference, and "" has
+    // always meant "use Chat". An unresolvable id is the same situation with a worse cause. This
+    // is not a silent cross-provider credential leak — the Chat provider is the user's own
+    // configured default, which is exactly where this agent's traffic went before they pinned it.
+    devLog(
+      `[providers] agent pinned to "${providerId}" is not usable (${e instanceof Error ? e.message : String(e)}) — ` +
+        `falling back to the Chat provider for model "${modelId}"`
+    );
+    return modelId;
+  }
+
+  const client = clientFor(resolved);
+  return resolved.api === "chat_completions"
+    ? new OpenAIChatCompletionsModel(client, modelId)
+    : new OpenAIResponsesModel(client, modelId);
+}
+
 export function getDecryptedChatApiKey(): string {
-  return getDecryptedKey("chat");
+  return resolveSlot("chat").apiKey;
 }
 
 export function getConfiguredChatUrl(): string {
-  return getConfiguredUrl("chat");
+  return resolveSlot("chat").baseUrl;
 }
 
 /** Reads the current (decrypted) Chat API key and configures the SDK's default client to
@@ -47,8 +210,14 @@ export function getConfiguredChatUrl(): string {
  * rather than caching, so a key/URL change via Settings takes effect on the next agent
  * run without an app restart. */
 export function configureChatClient(): void {
-  const apiKey = getDecryptedChatApiKey();
-  setDefaultOpenAIClient(new OpenAI({ apiKey, baseURL: getConfiguredChatUrl() }));
+  const resolved = resolveSlot("chat");
+  // The SDK picks Responses vs Chat Completions from a module-level default, and every agent that
+  // inherits the Chat slot resolves through it. Pointing Chat at Claude therefore has to move the
+  // default too, or those runs would go to `/responses` on a host that 404s it. Set explicitly
+  // rather than only when it differs: the value is global and sticky, so a previous run that
+  // moved it would otherwise leak into this one.
+  setOpenAIAPI(resolved.api);
+  setDefaultOpenAIClient(clientFor(resolved));
 }
 
 /** Looks up the actual USD cost OpenRouter billed for a completed generation, keyed by the
@@ -109,11 +278,8 @@ export async function estimateGenerationCost(
  * across whichever host a section is pointed at. */
 async function testConnection(slot: CredentialSlot): Promise<{ ok: boolean; detail: string }> {
   try {
-    const apiKey = getDecryptedKey(slot);
-    const baseUrl = getConfiguredUrl(slot);
-    const response = await fetch(`${baseUrl}/models`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
+    const resolved = resolveSlot(slot);
+    const response = await fetch(`${resolved.baseUrl}/models`, { headers: modelsAuthHeaders(resolved) });
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
       return { ok: false, detail: `${response.status} ${detail || response.statusText}` };
@@ -155,7 +321,7 @@ interface WhisperSegment {
  * OpenAI with "Field required: body.file"). Multipart is also what OpenRouter's own
  * OpenAI-compatible surface accepts, so this works unchanged for either default. */
 export async function transcribeAudio(base64Audio: string, format: string): Promise<string> {
-  const apiKey = getDecryptedKey("voice");
+  const voice = resolveSlot("voice");
   const model = readAppSetting("voiceTranscriptionModel");
 
   const audioBuffer = Buffer.from(base64Audio, "base64");
@@ -167,9 +333,9 @@ export async function transcribeAudio(base64Audio: string, format: string): Prom
   // already treats as "nothing to filter on" and falls through to the plain text result.
   formData.append("response_format", "verbose_json");
 
-  const response = await fetch(`${getConfiguredUrl("voice")}/audio/transcriptions`, {
+  const response = await fetch(`${voice.baseUrl}/audio/transcriptions`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}` },
+    headers: { Authorization: `Bearer ${voice.apiKey}` },
     body: formData,
   });
 
@@ -194,14 +360,14 @@ export async function transcribeAudio(base64Audio: string, format: string): Prom
  * cross the contextBridge/IPC boundary as cleanly as a string. If this call fails,
  * useSpeak (renderer) falls back to the browser's speechSynthesis rather than going silent. */
 export async function synthesizeSpeech(text: string): Promise<{ audio: string; format: string }> {
-  const apiKey = getDecryptedKey("voice");
+  const voice = resolveSlot("voice");
   const model = readAppSetting("voiceTtsModel");
   const format = "mp3";
 
-  const response = await fetch(`${getConfiguredUrl("voice")}/audio/speech`, {
+  const response = await fetch(`${voice.baseUrl}/audio/speech`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${voice.apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({

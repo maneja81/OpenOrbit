@@ -48,6 +48,10 @@ describe("settings ConfigAgent may write (backs Cipher's update_setting tool)", 
     // the destination is the problem, not the transport.
     "chatApiUrl",
     "voiceApiUrl",
+    // And the provider selectors, one step earlier in the same chain: choosing a provider chooses
+    // the URL, so writing one of these redirects the key just as effectively as writing the URL.
+    "chatProviderId",
+    "voiceProviderId",
   ];
 
   it.each(SAFETY_KEYS)("does not let an agent write %s", (key) => {
