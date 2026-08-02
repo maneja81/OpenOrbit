@@ -94,6 +94,76 @@ export const SETTINGS_SCHEMA = {
 
 export type SettingKey = keyof typeof SETTINGS_SCHEMA;
 
+/**
+ * What each setting is when the user has never touched it.
+ *
+ * Must stay identical to `DEFAULT_SETTINGS` in `src/lib/settings.ts`. It cannot import it —
+ * `electron/` and `src/` are separate TypeScript projects and main has no path into the
+ * renderer's tree — so `src/lib/settingsDefaults.test.ts` asserts the two are deep-equal from
+ * the renderer side, where both are reachable. That test is the mechanism; this comment is not.
+ *
+ * Before this existed, every main-side read passed its own default inline
+ * (`getSetting("appSettings.voiceInputEnabled", false)`), and two of them disagreed with the
+ * renderer: `voiceInputEnabled` and `typeAnywhereEnabled` were `true` in `DEFAULT_SETTINGS` and
+ * `false` here. Migrations never seed those rows, so on a fresh install the Settings toggle read
+ * "on" while the orchestrator's own view of the setting was "off" — and the orchestrator was the
+ * one telling the truth about what main would do.
+ */
+/** The runtime type a setting holds, derived from its declared kind — so `readAppSetting` returns
+ * `boolean` for a toggle and `number` for a tunable without every caller re-stating it. Enum and
+ * model kinds are strings; widened deliberately, since the value comes from the database and a
+ * literal union would be a promise this layer can't keep. */
+export type SettingValue<K extends SettingKey> = (typeof SETTINGS_SCHEMA)[K] extends { type: "boolean" }
+  ? boolean
+  : (typeof SETTINGS_SCHEMA)[K] extends { type: "number" }
+    ? number
+    : (typeof SETTINGS_SCHEMA)[K] extends { type: "stringArray" }
+      ? string[]
+      : string;
+
+export const SETTING_DEFAULTS: { [K in SettingKey]: SettingValue<K> } = {
+  chatApiKey: "",
+  chatApiUrl: "",
+  voiceApiKey: "",
+  voiceApiUrl: "",
+  voiceInputEnabled: true,
+  typeAnywhereEnabled: true,
+  onboardingDone: false,
+  tourCompleted: false,
+  agentName: "Orbit",
+  agentDescription: "Your personal AI orchestrator.",
+  orchestratorPromptOverride: "",
+  userName: "",
+  orchestratorModel: "gpt-4.1-mini",
+  orchestratorEnabled: true,
+  orchestratorMcpServerIds: [],
+  orchestratorConnectorIds: [],
+  orchestratorHttpToolCollectionIds: [],
+  httpToolApprovalPost: true,
+  httpToolApprovalPutPatch: true,
+  httpToolApprovalDelete: true,
+  toolApprovalDisplay: "modal",
+  voiceTranscriptionModel: "whisper-1",
+  voiceOutputEnabled: true,
+  soundFxEnabled: true,
+  voiceTtsModel: "tts-1",
+  locationEnabled: false,
+  remoteImagesAutoLoad: false,
+  bgMusicEnabled: false,
+  voiceTtsVoice: "alloy",
+  agentRunTimeoutSeconds: 60,
+  chatHistoryMessageLimit: 20,
+  bgMusicVolume: 0.1,
+  systemStatsPollIntervalMs: 3000,
+  soundVariantSend: 1,
+  soundVariantReceive: 1,
+  soundVariantHandoff: 1,
+  soundVariantComplete: 1,
+  soundVariantStartup: 1,
+  soundVariantAgentCreated: 1,
+  soundVariantAgentDeleted: 1,
+};
+
 export function isSettingKey(key: string): key is SettingKey {
   return Object.prototype.hasOwnProperty.call(SETTINGS_SCHEMA, key);
 }

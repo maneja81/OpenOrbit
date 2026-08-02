@@ -1,5 +1,5 @@
 import { getSetting } from "./db/settingsStore";
-import { validateSettingValue, type SettingKey } from "./settingsSchema";
+import { SETTING_DEFAULTS, validateSettingValue, type SettingKey, type SettingValue } from "./settingsSchema";
 import { devLog } from "./devLog";
 
 /** Namespace every user-facing setting is stored under. Matches ipc/settings.ts. */
@@ -20,8 +20,17 @@ const NAMESPACE = "appSettings.";
  * Deliberately a separate layer rather than a change to `getSetting`, which is the generic KV
  * accessor and is also used for keys that have no schema entry — `allowedRoots`
  * (ipc/filesystem.ts) and the encryption key (security/secretStorage.ts).
+ *
+ * `fallback` defaults to the setting's canonical default, and callers should almost always let
+ * it. Passing one inline is what let `voiceInputEnabled` end up `true` in the renderer and
+ * `false` here (finding S1) — every call site was its own source of truth, so a disagreement was
+ * invisible until someone compared two files. Pass one only for a genuinely local override, and
+ * say why.
  */
-export function readAppSetting<T>(key: SettingKey, fallback: T): T {
+export function readAppSetting<K extends SettingKey>(
+  key: K,
+  fallback: SettingValue<K> = SETTING_DEFAULTS[key]
+): SettingValue<K> {
   const raw = getSetting<unknown>(NAMESPACE + key, undefined);
   // Absent row: the caller's default is the answer, and that is not worth logging — it is the
   // normal state of a setting the user has never touched.
@@ -34,5 +43,5 @@ export function readAppSetting<T>(key: SettingKey, fallback: T): T {
     devLog(`[settings] ${key} is unusable (${result.reason}) — using the default instead`);
     return fallback;
   }
-  return result.value as T;
+  return result.value as SettingValue<K>;
 }
