@@ -41,6 +41,12 @@ export default function DeleteConfirmModal({ open, itemLabel, onConfirm, onCance
             onChange={(e) => setConfirmText(e.target.value)}
             placeholder={CONFIRM_WORD}
             autoComplete="off"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                handleConfirm();
+              }
+            }}
           />
         </label>
         <div className="delete-confirm-modal-actions">
