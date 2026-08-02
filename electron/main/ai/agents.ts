@@ -195,16 +195,15 @@ function ensureDefaultAgentsSeeded(db: Database.Database): void {
 // hand off to ConfigAgent. orchestratorEnabled is deliberately absent — the
 // orchestrator can't be disabled (see ipc/settings.ts).
 // Every user-facing toggle/field in AgentsSettings (src/lib/settings.ts) belongs here
-// except onboardingDone (internal lifecycle flag, not a user setting) and
-// orchestratorEnabled (permanently locked — see ipc/settings.ts's LOCKED_KEYS) — anything
-// missing from this list is invisible/unreachable to Cipher regardless of what the user
-// asks for, which is exactly the bug this list previously had (bgMusicEnabled,
-// soundFxEnabled, voiceOutputEnabled, voiceTranscriptionModel, voiceTtsModel were all
-// silently absent).
-const ALLOWED_SETTING_KEYS = [
+// except onboardingDone (internal lifecycle flag, not a user setting),
+// orchestratorEnabled (permanently locked — see ipc/settings.ts's LOCKED_KEYS) and the
+// PROTECTED_SETTING_KEYS below — anything else missing from this list is
+// invisible/unreachable to Cipher regardless of what the user asks for, which is exactly the
+// bug this list previously had (bgMusicEnabled, soundFxEnabled, voiceOutputEnabled,
+// voiceTranscriptionModel, voiceTtsModel were all silently absent).
+export const ALLOWED_SETTING_KEYS = [
   "voiceInputEnabled",
   "typeAnywhereEnabled",
-  "locationEnabled",
   "bgMusicEnabled",
   "soundFxEnabled",
   "voiceOutputEnabled",
@@ -218,11 +217,55 @@ const ALLOWED_SETTING_KEYS = [
   "agentDescription",
   "userName",
   "orchestratorModel",
+] as const;
+
+/**
+ * Settings an agent may read and describe but never write.
+ *
+ * These decide what the app will do *without asking* — whether a write pauses for approval,
+ * how visibly it asks, and whether agents can see where you are. The reason they cannot be
+ * agent-writable is the one already documented on remoteImagesAutoLoad in
+ * src/lib/settings.ts: a reply is assembled from text this app did not author — web search
+ * results, knowledge base files, MCP and HTTP tool output, Gmail/Drive/Calendar — and any of
+ * it can carry an instruction the model acts on.
+ *
+ * With these writable, "set httpToolApprovalDelete to false" was a sentence an attacker could
+ * put in a web page. The model would hand off to ConfigAgent, the gate would come down, and
+ * the next DELETE would execute without pausing — with the setting that would have revealed
+ * it three sections deep in Settings.
+ *
+ * toolApprovalDisplay belongs here for the same reason even though it only changes
+ * presentation: flipping a blocking modal to an inline card makes an approval far easier to
+ * scroll past, which weakens the same guarantee by a quieter route.
+ *
+ * remoteImagesAutoLoad was never in either list, which was already correct — this is that
+ * decision applied consistently.
+ */
+export const PROTECTED_SETTING_KEYS = [
   "httpToolApprovalPost",
   "httpToolApprovalPutPatch",
   "httpToolApprovalDelete",
   "toolApprovalDisplay",
+  "locationEnabled",
 ] as const;
+
+/** Where each protected setting actually lives, so the refusal can point somewhere useful
+ * rather than just saying no. */
+const PROTECTED_SETTING_LOCATION: Record<(typeof PROTECTED_SETTING_KEYS)[number], string> = {
+  httpToolApprovalPost: "Settings → HTTP Tools",
+  httpToolApprovalPutPatch: "Settings → HTTP Tools",
+  httpToolApprovalDelete: "Settings → HTTP Tools",
+  toolApprovalDisplay: "Settings → HTTP Tools",
+  locationEnabled: "Settings → General",
+};
+
+/** The refusal message for a protected key, or null if the key is freely writable. Exported
+ * so the invariant "no approval setting is agent-writable" can be asserted in a test. */
+export function protectedSettingRefusal(key: string): string | null {
+  if (!(PROTECTED_SETTING_KEYS as readonly string[]).includes(key)) return null;
+  const location = PROTECTED_SETTING_LOCATION[key as (typeof PROTECTED_SETTING_KEYS)[number]];
+  return `${key} is a safety setting and can only be changed by the user in ${location}. Tell them where to find it — do not try again.`;
+}
 
 const SENSITIVE_SETTING_KEYS = ["chatApiKey", "voiceApiKey"];
 
@@ -286,14 +329,25 @@ const getSettingsTool = tool({
 const updateSettingTool = tool({
   name: "update_setting",
   description:
-    "Update one of the app's settings: voiceInputEnabled, typeAnywhereEnabled, locationEnabled, bgMusicEnabled, soundFxEnabled, voiceOutputEnabled, chatApiKey, chatApiUrl, voiceApiKey, voiceApiUrl, voiceTranscriptionModel, voiceTtsModel, agentName, agentDescription, userName, orchestratorModel, httpToolApprovalPost, httpToolApprovalPutPatch, httpToolApprovalDelete (whether that HTTP method pauses to ask the user first), toolApprovalDisplay (\"modal\" or \"inline\").",
+    "Update one of the app's settings: voiceInputEnabled, typeAnywhereEnabled, bgMusicEnabled, soundFxEnabled, voiceOutputEnabled, chatApiKey, chatApiUrl, voiceApiKey, voiceApiUrl, voiceTranscriptionModel, voiceTtsModel, agentName, agentDescription, userName, orchestratorModel. The approval settings (httpToolApprovalPost/PutPatch/Delete, toolApprovalDisplay) and locationEnabled are safety settings and cannot be changed here — only the user can change those, in Settings.",
   parameters: z.object({
-    key: z.enum(ALLOWED_SETTING_KEYS),
+    // Protected keys stay nameable so a request to change one gets a real answer pointing at
+    // Settings. Dropping them from the enum instead would surface as a schema error, which
+    // reads as a broken tool rather than a deliberate refusal.
+    key: z.enum([...ALLOWED_SETTING_KEYS, ...PROTECTED_SETTING_KEYS]),
     value: z.union([z.string(), z.boolean()]),
   }),
   execute: async ({ key, value }) => {
     const isSensitive = SENSITIVE_SETTING_KEYS.includes(key);
     devLog(`[update_setting] called with key=${key} value=${isSensitive ? "(redacted)" : value}`);
+
+    // Checked before anything else, and before the value is even looked at — a refusal must
+    // not depend on the value happening to be well-formed.
+    const refusal = protectedSettingRefusal(key);
+    if (refusal) {
+      devLog(`[update_setting] refused protected key ${key}`);
+      throw new Error(refusal);
+    }
 
     // One shared definition of a valid value, so a value this path would reject cannot get in
     // through settings:update instead — which is exactly what used to happen, since that
@@ -314,6 +368,11 @@ const updateSettingTool = tool({
     devLog(`[update_setting] appSettings.${key} = ${isSensitive ? "(redacted)" : result.value}`);
     return `Updated ${key}.`;
   },
+  // Without this the SDK replaces every failure with "An error occurred while running the
+  // tool. Please try again." — which would turn the protected-key refusal into something that
+  // reads as a glitch and invites the model to retry a call that can never succeed. Same
+  // reasoning, and same fix, as the HTTP tools in ai/httpTools.ts.
+  errorFunction: (_context, error) => (error instanceof Error ? error.message : String(error)),
 });
 
 const createAgentTool = tool({
