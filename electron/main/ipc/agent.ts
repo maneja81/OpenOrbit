@@ -419,6 +419,11 @@ export function registerAgentHandlers() {
             toolName: meta.toolName ?? "",
             agentName: meta.agentName,
             args: meta.args,
+            // Absolute deadline rather than a duration: the renderer counts down to a fixed
+            // point, so neither IPC latency nor a slow first render shifts it. Sending it at
+            // all is what stops the countdown copy from hardcoding a number that
+            // APPROVAL_TIMEOUT_MS can silently drift away from.
+            expiresAt: Date.now() + APPROVAL_TIMEOUT_MS,
           });
         }).finally(() => {
           // Resumed here rather than at each call site so an approval that times out or is

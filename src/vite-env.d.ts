@@ -453,6 +453,8 @@ interface Window {
           toolName: string;
           agentName?: string;
           args?: string;
+          /** Absolute epoch ms at which main declines this call on the user's behalf. */
+          expiresAt: number;
         }) => void
       ) => () => void;
       onToolApprovalSettled: (

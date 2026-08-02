@@ -1,5 +1,7 @@
 import Modal from "@/components/atoms/Modal";
 import { humanizeToolName } from "@/lib/humanizeToolName";
+import { formatRemaining } from "@/lib/approvalCountdown";
+import { useApprovalCountdown } from "@/hooks/useApprovalCountdown";
 
 export interface PendingToolApproval {
   approvalId: string;
@@ -7,6 +9,12 @@ export interface PendingToolApproval {
   agentName?: string;
   /** Raw JSON argument string from the SDK, when it exposed one. */
   args?: string;
+  /** Absolute epoch ms at which main declines this call on the user's behalf. */
+  expiresAt: number;
+  /** When the renderer received it. Only used to recover the window's length for the
+   * past-tense message — `expiresAt - requestedAt` is the timeout main is enforcing, which
+   * beats hardcoding a duration the renderer can't see. */
+  requestedAt: number;
 }
 
 interface HttpToolApprovalModalProps {
@@ -42,6 +50,7 @@ function formatArgs(args: string | undefined): string | null {
  */
 export default function HttpToolApprovalModal({ approval, onRespond }: HttpToolApprovalModalProps) {
   const formattedArgs = formatArgs(approval?.args);
+  const msLeft = useApprovalCountdown(approval?.expiresAt ?? null);
 
   return (
     <Modal
@@ -58,6 +67,20 @@ export default function HttpToolApprovalModal({ approval, onRespond }: HttpToolA
           on the remote service, so it needs your go-ahead.
         </p>
         {formattedArgs && <pre className="http-approval-args">{formattedArgs}</pre>}
+        {msLeft !== null && (
+          // aria-live polite rather than off: a screen-reader user gets no other signal that
+          // the prompt is about to answer itself. Not assertive — it must not interrupt them
+          // reading the arguments they are being asked to approve.
+          <p className={`http-approval-expiry${msLeft <= 30_000 ? " http-approval-expiry--soon" : ""}`} aria-live="polite">
+            {msLeft > 0 ? (
+              <>
+                Declines automatically in <strong>{formatRemaining(msLeft)}</strong>
+              </>
+            ) : (
+              "Expired — declining…"
+            )}
+          </p>
+        )}
         <div className="http-approval-actions">
           <button
             type="button"
