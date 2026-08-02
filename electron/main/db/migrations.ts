@@ -553,7 +553,22 @@ const migrations: Migration[] = [
         setting_value: string;
       }[];
       for (const row of rows) {
-        const value = JSON.parse(row.setting_value) as unknown;
+        // Parsed defensively, and a failure takes the same branch as a wrong-format value.
+        // Unguarded, a row that isn't valid JSON threw here — inside the migration's
+        // transaction, so migrations failed, getDb() threw, and the app would not start at
+        // all, recoverable only by hand-editing the database. A row that cannot be parsed is
+        // by definition not a current-format "nodeCrypto:" secret, so deleting it is exactly
+        // what this migration already does with every other value it doesn't recognise.
+        //
+        // Inlined rather than using db/jsonColumn.ts: this module is deliberately free of
+        // runtime imports (see MigrationContext above), and that helper imports devLog and
+        // through it electron.
+        let value: unknown;
+        try {
+          value = JSON.parse(row.setting_value);
+        } catch {
+          value = undefined;
+        }
         if (typeof value !== "string" || !value.startsWith("nodeCrypto:")) {
           db.prepare("DELETE FROM settings WHERE setting_name = ?").run(row.setting_name);
         }
