@@ -2054,6 +2054,15 @@ svg#oc {
 /* A hint under a row-field's label, matching .row-label small above. The API key fields use one
    to say a key is already stored — without the block display it runs on inline and reads as
    "API KeyA key is saved — type a new one to replace it". */
+/* A caution rather than a failure: the value is accepted and stored, it just carries a risk the
+   user should see. Distinct from .settings-error, which means the write was refused. */
+.settings-warning {
+  font-size: 11px;
+  line-height: 1.45;
+  color: rgba(255, 196, 120, 0.9);
+  margin-top: 4px;
+}
+
 .group .card .row-field span small {
   display: block;
   font-size: 10.5px;
