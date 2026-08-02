@@ -2688,6 +2688,17 @@ svg#oc {
   margin-bottom: 12px;
 }
 
+/* A registry result row is a .settings-folder-row — a flex row whose path cell truncates on one
+   line — so the required-keys caution underneath needs its own column box rather than becoming a
+   third inline cell between the path and the Install button. min-width:0 is what still lets the
+   path shrink below its content width and keep its ellipsis. */
+.mcp-result-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .mcp-server-checkbox-row {
   display: flex;
   align-items: center;

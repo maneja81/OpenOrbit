@@ -20,6 +20,27 @@ function server(id: string, name: string, overrides: Partial<McpServerRow> = {})
   };
 }
 
+function searchResult(name: string, overrides: Partial<McpSearchResult> = {}): McpSearchResult {
+  return {
+    id: name,
+    name,
+    description: `${name} server`,
+    command: "npx",
+    args: ["-y", `@modelcontextprotocol/server-${name}`],
+    env: {},
+    requiredEnv: [],
+    ...overrides,
+  };
+}
+
+/** Add → Browse Registry → Search, the three clicks every registry case starts with. */
+async function search(container: HTMLElement) {
+  fireEvent.click(screen.getByRole("button", { name: /Add MCP Server/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Browse Registry" }));
+  fireEvent.click(screen.getByRole("button", { name: "Search" }));
+  await waitFor(() => expect(container.querySelector(".mcp-add-form")).not.toBeNull());
+}
+
 function renderTab(servers: McpServerRow[], overrides: Partial<Mcp> = {}) {
   const mcp: Mcp = {
     servers,
@@ -133,6 +154,7 @@ describe("McpServersTab", () => {
         command: "npx",
         args: ["-y", "@modelcontextprotocol/server-filesystem"],
         env: {},
+        requiredEnv: [],
       },
     ]);
     const { container } = renderTab([], { searchRegistry });
@@ -154,6 +176,62 @@ describe("McpServersTab", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(mcp.updateServer).toHaveBeenCalled());
     expect((mcp.updateServer as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe("b");
+  });
+
+  it("installs a registry result disabled, in a single write", async () => {
+    const searchRegistry = vi.fn(async () => [searchResult("filesystem")]);
+    const { container, mcp } = renderTab([], { searchRegistry });
+    await search(container);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Install" })).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "Install" }));
+
+    await waitFor(() => expect(mcp.addServer).toHaveBeenCalledTimes(1));
+    expect((mcp.addServer as ReturnType<typeof vi.fn>).mock.calls[0][0]).toMatchObject({ enabled: false });
+    // The create-then-disable pair this replaced left a third-party command enabled whenever the
+    // second write failed — the one outcome installing-disabled exists to prevent.
+    expect(mcp.updateServer).not.toHaveBeenCalled();
+  });
+
+  it("says nothing matched only once a search has actually run", async () => {
+    const searchRegistry = vi.fn(async () => []);
+    renderTab([], { searchRegistry });
+    fireEvent.click(screen.getByRole("button", { name: /Add MCP Server/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Browse Registry" }));
+
+    // An empty list before the first search must not read as "no results". It was indistinguishable
+    // for as long as the parser returned nothing for every query.
+    expect(screen.queryByText(/No installable servers matched/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    await waitFor(() => expect(screen.getByText(/No installable servers matched/)).toBeTruthy());
+  });
+
+  it("names the keys a result needs before it is installed", async () => {
+    const searchRegistry = vi.fn(async () => [
+      searchResult("gcs", { requiredEnv: ["GCS_BUCKET", "GCS_PROJECT_ID"] }),
+      searchResult("plain"),
+    ]);
+    const { container } = renderTab([], { searchRegistry });
+    await search(container);
+    await waitFor(() => expect(container.querySelectorAll(".settings-folder-row")).toHaveLength(2));
+
+    // Installed servers land disabled with empty env values, so a required key that isn't named
+    // here surfaces only as an opaque Test connection failure later.
+    const warnings = container.querySelectorAll(".settings-warning");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].textContent).toContain("GCS_BUCKET, GCS_PROJECT_ID");
+  });
+
+  it("counts the results it is showing", async () => {
+    const searchRegistry = vi.fn(async () => [searchResult("a"), searchResult("b")]);
+    const { container } = renderTab([], { searchRegistry });
+    await search(container);
+
+    await waitFor(() => expect(container.querySelectorAll(".settings-folder-row")).toHaveLength(2));
+    // Scoped to the add form: the section's own .settings-hint sits outside it.
+    const form = container.querySelector(".mcp-add-form") as HTMLElement;
+    expect(form.querySelector(".settings-hint")?.textContent).toMatch(/2 servers — npm packages only/);
   });
 
   it("hides the empty-state message while the Add form is open", () => {

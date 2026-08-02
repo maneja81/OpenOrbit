@@ -27,7 +27,13 @@ export function useMcpServers() {
   }, []);
 
   const addServer = useCallback(
-    async (input: { name: string; command: string; args?: string[]; env?: Record<string, string> }) => {
+    async (input: {
+      name: string;
+      command: string;
+      args?: string[];
+      env?: Record<string, string>;
+      enabled?: boolean;
+    }) => {
       if (!hasAgentsAPI()) return;
       setError(null);
       setLoading(true);

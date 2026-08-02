@@ -28,6 +28,10 @@ export default function McpServersTab({ mcp }: McpServersTabProps) {
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<McpSearchResult[]>([]);
+  // Distinguishes "searched and found nothing" from "hasn't searched yet" — both render an empty
+  // list otherwise, and the empty list is what a broken search looked like for as long as the
+  // registry parser was returning nothing.
+  const [searched, setSearched] = useState(false);
 
   const resetForm = () => {
     setName("");
@@ -108,6 +112,7 @@ export default function McpServersTab({ mcp }: McpServersTabProps) {
     setSearching(true);
     const found = await searchRegistry(query);
     setResults(found);
+    setSearched(true);
     setSearching(false);
   };
 
@@ -115,11 +120,19 @@ export default function McpServersTab({ mcp }: McpServersTabProps) {
   // remote third party (registry.modelcontextprotocol.io), so it lands off until the
   // user consciously reviews and enables it from the main list (where the resolved
   // command is shown), rather than a one-click "Install" silently starting to run it.
+  // Passed to create rather than applied by a follow-up update: a create-then-disable pair leaves
+  // the server enabled if the second write fails, which is the one outcome this is meant to prevent.
   const handleInstall = async (result: McpSearchResult) => {
-    const created = await addServer({ name: result.name, command: result.command, args: result.args, env: result.env });
-    if (created) await updateServer(created.id, { enabled: false });
+    await addServer({
+      name: result.name,
+      command: result.command,
+      args: result.args,
+      env: result.env,
+      enabled: false,
+    });
     setAdding(false);
     setResults([]);
+    setSearched(false);
     setQuery("");
   };
 
@@ -236,7 +249,11 @@ export default function McpServersTab({ mcp }: McpServersTabProps) {
                 <input
                   type="text"
                   value={query}
-                  onChange={(e) => setQuery(e.target.value)}
+                  onChange={(e) => {
+                    setQuery(e.target.value);
+                    // Otherwise the "nothing matched" line lingers over a query it never ran.
+                    setSearched(false);
+                  }}
                   onKeyDown={(e) => e.key === "Enter" && handleSearch()}
                   placeholder="e.g. filesystem, github, postgres"
                   autoComplete="off"
@@ -250,12 +267,25 @@ export default function McpServersTab({ mcp }: McpServersTabProps) {
                   className="settings-action-btn-sm settings-action-btn-ghost"
                   onClick={() => {
                     setResults([]);
+                    setSearched(false);
                     setAdding(false);
                   }}
                 >
                   Cancel
                 </button>
               </div>
+              {searched && results.length === 0 && (
+                <p className="settings-empty">
+                  No installable servers matched. The registry lists servers packaged for other runtimes
+                  too — only npm-based ones can run here.
+                </p>
+              )}
+              {results.length > 0 && (
+                <p className="settings-hint">
+                  {results.length} server{results.length === 1 ? "" : "s"} — npm packages only, latest
+                  version of each.
+                </p>
+              )}
               {/* Result rows stay flat: these are search hits with a single Install action,
                   not editable items, so they get no accordion of their own. */}
               <div className="settings-folder-list">
@@ -264,12 +294,21 @@ export default function McpServersTab({ mcp }: McpServersTabProps) {
                   return (
                     <div className="settings-folder-row" key={result.id}>
                       <TablerIcon name="ti-plug" />
-                      <span
-                        className="settings-folder-path"
-                        title={`${result.description}\n\nWill run: ${resolvedCommand}`}
-                      >
-                        {result.name} — {resolvedCommand}
-                      </span>
+                      <div className="mcp-result-text">
+                        <span
+                          className="settings-folder-path"
+                          title={`${result.description}\n\nWill run: ${resolvedCommand}`}
+                        >
+                          {result.name} — {resolvedCommand}
+                        </span>
+                        {result.requiredEnv.length > 0 && (
+                          // Installed servers land disabled with empty env values, so without this
+                          // the first Test connection fails with no clue which key is missing.
+                          <span className="settings-warning">
+                            Needs: {result.requiredEnv.join(", ")} — add values after installing.
+                          </span>
+                        )}
+                      </div>
                       <button className="settings-action-btn-sm" onClick={() => handleInstall(result)}>
                         Install
                       </button>

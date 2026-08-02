@@ -142,6 +142,9 @@ interface McpSearchResult {
   command: string;
   args: string[];
   env: Record<string, string>;
+  /** Mirror of the main-process type in electron/main/ai/mcp.ts — env vars the registry marks
+   * `isRequired`, so a result that will fail without a key can say so before it is installed. */
+  requiredEnv: string[];
 }
 
 interface ConnectorSettingsField {
@@ -497,7 +500,13 @@ interface Window {
     };
     mcp: {
       list: () => Promise<McpServerRow[]>;
-      create: (input: { name: string; command: string; args?: string[]; env?: Record<string, string> }) => Promise<McpServerRow>;
+      create: (input: {
+        name: string;
+        command: string;
+        args?: string[];
+        env?: Record<string, string>;
+        enabled?: boolean;
+      }) => Promise<McpServerRow>;
       update: (
         id: string,
         patch: { name?: string; command?: string; args?: string[]; env?: Record<string, string>; enabled?: boolean }

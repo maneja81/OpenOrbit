@@ -63,6 +63,7 @@ import {
   updateMcpServer,
   deleteMcpServer,
   connectMcpServersForAgent,
+  searchMcpRegistry,
 } from "./mcp";
 
 describe("MCP server CRUD", () => {
@@ -166,5 +167,233 @@ describe("connectMcpServersForAgent", () => {
     const servers = await connectMcpServersForAgent([server.id]);
 
     expect(servers).toEqual([]);
+  });
+});
+
+// Trimmed to the fields the parser reads, but the *structure* is copied verbatim from a live
+// registry.modelcontextprotocol.io/v0/servers?search=filesystem response (2026-08-02). The
+// `{ server, _meta }` nesting is the whole point of this fixture: reading name/packages off the
+// wrapper instead of `server` returned zero results for every query in production, and the two
+// tests that existed at the time passed throughout because neither called this function.
+const REGISTRY_PAGE = {
+  servers: [
+    {
+      server: {
+        name: "com.pulsemcp/remote-filesystem",
+        description: "MCP server for remote filesystem operations on cloud storage.",
+        packages: [
+          {
+            registryType: "npm",
+            identifier: "remote-filesystem-mcp-server",
+            transport: { type: "stdio" },
+            runtimeArguments: [{ value: "-y", type: "positional" }],
+            environmentVariables: [
+              { name: "GCS_BUCKET", description: "Bucket name.", isRequired: true },
+              { name: "GCS_PROJECT_ID", description: "Project ID." },
+            ],
+          },
+        ],
+      },
+      _meta: { "io.modelcontextprotocol.registry/official": { isLatest: true } },
+    },
+    {
+      server: {
+        name: "io.github.bytedance/mcp-server-filesystem",
+        description: "MCP server for filesystem access",
+        packages: [
+          {
+            registryType: "npm",
+            identifier: "@agent-infra/mcp-server-filesystem",
+            transport: { type: "stdio" },
+          },
+        ],
+      },
+      _meta: { "io.modelcontextprotocol.registry/official": { isLatest: true } },
+    },
+    {
+      server: {
+        name: "io.github.example/py-only",
+        description: "Published for pypi only",
+        packages: [{ registryType: "pypi", identifier: "py-only-mcp", transport: { type: "stdio" } }],
+      },
+      _meta: { "io.modelcontextprotocol.registry/official": { isLatest: true } },
+    },
+  ],
+};
+
+function stubRegistry(page: unknown, response: Partial<{ ok: boolean; status: number; statusText: string }> = {}) {
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: response.ok ?? true,
+    status: response.status ?? 200,
+    statusText: response.statusText ?? "OK",
+    json: async () => page,
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+describe("searchMcpRegistry", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("reads each entry through `server`, not off the wrapper", async () => {
+    stubRegistry(REGISTRY_PAGE);
+
+    const results = await searchMcpRegistry("filesystem");
+
+    // The regression guard: this returned [] for every query while the endpoint answered 200
+    // with 30 servers.
+    expect(results).toHaveLength(2);
+    expect(results.map((r) => r.name)).toEqual([
+      "com.pulsemcp/remote-filesystem",
+      "io.github.bytedance/mcp-server-filesystem",
+    ]);
+    expect(results[0].description).toBe("MCP server for remote filesystem operations on cloud storage.");
+  });
+
+  it("emits -y exactly once, before the package identifier", async () => {
+    stubRegistry(REGISTRY_PAGE);
+
+    const results = await searchMcpRegistry("filesystem");
+
+    // The registry supplied `-y` itself for the first server and nothing for the second; both
+    // must come out identical. Appending runtimeArguments after the identifier, as this used to,
+    // produced `npx -y remote-filesystem-mcp-server -y`.
+    expect(results[0].args).toEqual(["-y", "remote-filesystem-mcp-server"]);
+    expect(results[1].args).toEqual(["-y", "@agent-infra/mcp-server-filesystem"]);
+  });
+
+  it("puts packageArguments after the identifier and runtimeArguments before it", async () => {
+    stubRegistry({
+      servers: [
+        {
+          server: {
+            name: "example/with-args",
+            packages: [
+              {
+                registryType: "npm",
+                identifier: "with-args-mcp",
+                runtimeArguments: [{ value: "-y" }],
+                packageArguments: [{ value: "--root" }, { value: "/tmp" }],
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    const [result] = await searchMcpRegistry("");
+
+    expect(result.args).toEqual(["-y", "with-args-mcp", "--root", "/tmp"]);
+  });
+
+  it("uses runtimeHint as the command and does not force -y onto a non-npx runtime", async () => {
+    stubRegistry({
+      servers: [
+        {
+          server: {
+            name: "example/bun",
+            packages: [{ registryType: "npm", identifier: "bun-mcp", runtimeHint: "bunx" }],
+          },
+        },
+      ],
+    });
+
+    const [result] = await searchMcpRegistry("");
+
+    expect(result.command).toBe("bunx");
+    expect(result.args).toEqual(["bun-mcp"]);
+  });
+
+  it("drops a package whose transport is not stdio, and keeps one that declares none", async () => {
+    stubRegistry({
+      servers: [
+        {
+          server: {
+            name: "example/remote",
+            packages: [{ registryType: "npm", identifier: "remote-mcp", transport: { type: "sse" } }],
+          },
+        },
+        {
+          server: {
+            name: "example/implicit-stdio",
+            packages: [{ registryType: "npm", identifier: "implicit-mcp" }],
+          },
+        },
+      ],
+    });
+
+    const results = await searchMcpRegistry("");
+
+    // MCPServerStdio is the only runtime here, so an sse package would install and then fail to
+    // start. A missing transport is the registry's own stdio default.
+    expect(results.map((r) => r.name)).toEqual(["example/implicit-stdio"]);
+  });
+
+  it("keys env by every declared variable but lists only the required ones", async () => {
+    stubRegistry(REGISTRY_PAGE);
+
+    const [result] = await searchMcpRegistry("filesystem");
+
+    expect(result.env).toEqual({ GCS_BUCKET: "", GCS_PROJECT_ID: "" });
+    expect(result.requiredEnv).toEqual(["GCS_BUCKET"]);
+  });
+
+  it("drops superseded versions but keeps an entry carrying no _meta", async () => {
+    stubRegistry({
+      servers: [
+        {
+          server: { name: "example/old", packages: [{ registryType: "npm", identifier: "old-mcp" }] },
+          _meta: { "io.modelcontextprotocol.registry/official": { isLatest: false } },
+        },
+        {
+          server: { name: "example/no-meta", packages: [{ registryType: "npm", identifier: "no-meta-mcp" }] },
+        },
+      ],
+    });
+
+    const results = await searchMcpRegistry("");
+
+    // Guarded on `=== false` rather than `!== true` precisely so the second entry survives.
+    expect(results.map((r) => r.name)).toEqual(["example/no-meta"]);
+  });
+
+  it("asks the registry for latest versions only, with the search term encoded", async () => {
+    const fetchMock = stubRegistry({ servers: [] });
+
+    await searchMcpRegistry("file system");
+
+    const requestedUrl = fetchMock.mock.calls[0][0] as string;
+    expect(requestedUrl).toContain("version=latest");
+    expect(requestedUrl).toContain("search=file+system");
+  });
+
+  it("omits the search parameter entirely for an empty query", async () => {
+    const fetchMock = stubRegistry({ servers: [] });
+
+    await searchMcpRegistry("");
+
+    const requestedUrl = fetchMock.mock.calls[0][0] as string;
+    expect(requestedUrl).toContain("version=latest");
+    expect(requestedUrl).not.toContain("search=");
+  });
+
+  it("aborts a slow registry rather than hanging the search", async () => {
+    const fetchMock = stubRegistry({ servers: [] });
+
+    await searchMcpRegistry("");
+
+    // The endpoint was observed timing out on two of three consecutive requests (2026-08-02);
+    // without a signal the Searching… state had no way back.
+    expect((fetchMock.mock.calls[0][1] as { signal?: AbortSignal }).signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("throws with the status when the registry rejects the request", async () => {
+    stubRegistry({}, { ok: false, status: 503, statusText: "Service Unavailable" });
+
+    await expect(searchMcpRegistry("filesystem")).rejects.toThrow(
+      "MCP registry search failed (503): Service Unavailable"
+    );
   });
 });

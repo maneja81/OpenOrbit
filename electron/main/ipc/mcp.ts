@@ -52,6 +52,9 @@ export function registerMcpHandlers() {
       throw new Error("mcp:create requires a non-empty command");
     }
     assertArgsAndEnvShape(input, "mcp:create");
+    if (input.enabled !== undefined && typeof input.enabled !== "boolean") {
+      throw new Error("mcp:create enabled must be a boolean");
+    }
     return createMcpServer(input);
   });
 
