@@ -114,3 +114,63 @@ describe("Danger Zone reset", () => {
     });
   });
 });
+
+describe("orchestrator prompt override", () => {
+  function renderAgents(overrideValue: string) {
+    const onUpdate = vi.fn();
+    render(
+      <SettingsPanel
+        open
+        onClose={vi.fn()}
+        settings={mergeWithDefaults({ orchestratorPromptOverride: overrideValue })}
+        sessionElapsedMs={0}
+        onUpdate={onUpdate}
+        onReset={vi.fn()}
+        agents={[]}
+        onUpdateAgent={vi.fn()}
+        onCreateAgent={vi.fn()}
+        onDeleteAgent={vi.fn()}
+        onExportAgent={vi.fn()}
+        onExportAllAgents={vi.fn()}
+        onImportAgents={vi.fn()}
+      />
+    );
+    fireEvent.click(screen.getByRole("tab", { name: /^Agents$/i }));
+    // The orchestrator's accordion is collapsed by default, so its prompt section isn't rendered
+    // until the header toggle is clicked.
+    const toggle = document.querySelector(".agent-accordion-header-toggle");
+    if (!toggle) throw new Error("no accordion header");
+    fireEvent.click(toggle);
+    // Queried directly rather than through screen: the panel renders into a portal with
+    // aria-modal, and once the accordion is expanded getByRole stops resolving inside it.
+    const resetButton = () =>
+      [...document.querySelectorAll("button")].find((b) => /reset to default/i.test(b.textContent ?? ""));
+    return { onUpdate, resetButton };
+  }
+
+  it("says nothing when the prompt is the built-in one", () => {
+    const { resetButton } = renderAgents("");
+    expect(resetButton()).toBeUndefined();
+  });
+
+  it("says the prompt is customised, and offers a way back", () => {
+    // Nothing told the user an override was active, so improvements to orchestrator.md silently
+    // stopped reaching them and there was no way to undo it short of clearing the box by hand.
+    const { resetButton } = renderAgents("You are a custom orchestrator.");
+    expect(resetButton()).toBeDefined();
+    expect(resetButton()?.textContent).toMatch(/customised/i);
+  });
+
+  it("clears the override when reset is pressed", () => {
+    const { onUpdate, resetButton } = renderAgents("You are a custom orchestrator.");
+    fireEvent.click(resetButton()!);
+    expect(onUpdate).toHaveBeenCalledWith({ orchestratorPromptOverride: "" });
+  });
+
+  it("treats a whitespace-only override as no override", () => {
+    // getOrchestratorPromptTemplate trims before deciding, so the renderer must agree —
+    // otherwise the button appears for a prompt main is already ignoring.
+    const { resetButton } = renderAgents("   \n  ");
+    expect(resetButton()).toBeUndefined();
+  });
+});
