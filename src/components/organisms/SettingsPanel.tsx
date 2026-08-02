@@ -19,12 +19,14 @@ import ErrorBoundary from "@/components/atoms/ErrorBoundary";
 import { SETTING_BOUNDS, ToolApprovalDisplay, DEFAULT_ORCHESTRATOR_MODEL, AgentsSettings, SettingsView, VOICE_TTS_VOICE_OPTIONS, SOUND_FX_VARIANT_COUNT } from "@/lib/settings";
 import { USER_CONTEXT_FIELDS } from "@/lib/userContext";
 import { hasAgentsAPI } from "@/lib/agentsApi";
+import { useProviders } from "@/hooks/useProviders";
 import { useMcpServers } from "@/hooks/useMcpServers";
 import { useConnectors } from "@/hooks/useConnectors";
 import { useHttpTools } from "@/hooks/useHttpTools";
 import { useUserContext } from "@/hooks/useUserContext";
 import { formatHumanizedError, humanizeError } from "@/lib/humanizeError";
 import { providerUrlWarning } from "@/lib/providerUrlWarning";
+import { AI_PROVIDERS, findProvider } from "@/lib/providers";
 import { DEFAULT_SETTINGS_SECTION, sectionOnTransition } from "@/lib/settingsSection";
 import { SoundFxEvent, sfxPreviewSrc } from "@/hooks/useSoundFX";
 
@@ -263,6 +265,31 @@ export default function SettingsPanel({
   const [orchestratorPromptLoading, setOrchestratorPromptLoading] = useState(true);
   const [addingAgent, setAddingAgent] = useState(false);
   const [agentActionError, setAgentActionError] = useState<string | null>(null);
+  const [chatError, setChatError] = useState<string | null>(null);
+
+  // The Chat slot's URL and key live in the providers table once the slot has been moved there,
+  // so binding these fields to settings.chatApiUrl/chatApiKeySet showed a blank URL and "no key
+  // saved" while the app ran fine on credentials the panel could not see.
+  const providers = useProviders(open);
+  const chatSlotView = providers.chatSlot(
+    settings.chatProviderId,
+    settings.chatApiUrl,
+    settings.chatApiKeySet
+  );
+  const chatProvider = findProvider(chatSlotView.providerId);
+
+  /** Every Chat edit goes through the one operation, so credentials, the slot and the models of
+   * inheriting agents can never drift apart — see electron/main/ai/selectProvider.ts. */
+  const applyChat = async (selection: { providerId: string; apiUrl?: string; apiKey?: string; model?: string }) => {
+    setChatError(null);
+    try {
+      await providers.selectChat(selection);
+    } catch (err) {
+      // Surfaced rather than swallowed: selectChatProvider refuses a blank URL, a bad model id and
+      // a missing key with messages written for a person to read.
+      setChatError(formatHumanizedError(humanizeError(err)));
+    }
+  };
 
   const runTestChat = async () => {
     if (!hasAgentsAPI()) return;
@@ -420,24 +447,42 @@ export default function SettingsPanel({
                   </p>
                   <div className="group">
                     <div className="card">
+                      <label className="row-field">
+                        <span>
+                          Provider
+                          <small>Switching also moves every agent that follows this slot</small>
+                        </span>
+                        <Combobox
+                          value={chatSlotView.providerId}
+                          options={AI_PROVIDERS.map((provider) => ({ value: provider.id, label: provider.label }))}
+                          onChange={(providerId) => void applyChat({ providerId })}
+                          ariaLabel="Chat provider"
+                        />
+                      </label>
                       <ApiKeyField
                         label="API Key"
-                        isSet={settings.chatApiKeySet}
-                        onSave={(key) => onUpdate({ chatApiKey: key })}
+                        isSet={chatSlotView.keySet}
+                        onSave={(apiKey) => void applyChat({ providerId: chatSlotView.providerId, apiKey })}
+                        onClear={
+                          chatSlotView.keySet
+                            ? () => void applyChat({ providerId: chatSlotView.providerId, apiKey: "" })
+                            : undefined
+                        }
                       />
                       <TextField
                         label="API URL"
-                        value={settings.chatApiUrl}
-                        placeholder="https://api.openai.com/v1"
+                        value={chatSlotView.apiUrl}
+                        placeholder={chatProvider?.baseUrl || "http://localhost:11434/v1"}
                         warningFor={providerUrlWarning}
-                        onCommit={(chatApiUrl) => onUpdate({ chatApiUrl })}
+                        onCommit={(apiUrl) => void applyChat({ providerId: chatSlotView.providerId, apiUrl })}
                       />
                       <TextField
                         label="Model ID"
                         value={settings.orchestratorModel}
-                        placeholder={DEFAULT_ORCHESTRATOR_MODEL}
-                        onCommit={(orchestratorModel) => onUpdate({ orchestratorModel })}
+                        placeholder={chatProvider?.defaultChatModel || DEFAULT_ORCHESTRATOR_MODEL}
+                        onCommit={(model) => void applyChat({ providerId: chatSlotView.providerId, model })}
                       />
+                      {chatError && <p className="settings-error">{chatError}</p>}
                     </div>
                   </div>
                 </SettingsAccordion>

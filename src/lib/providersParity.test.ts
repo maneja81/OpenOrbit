@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AI_PROVIDERS, DEFAULT_PROVIDER_ID, findProvider, voiceProviders } from "./providers";
+import { AI_PROVIDERS, DEFAULT_PROVIDER_ID, findProvider, inferProviderId, voiceProviders } from "./providers";
 import { AI_PROVIDERS as MAIN_AI_PROVIDERS } from "../../electron/main/ai/providers";
 import { MODEL_ID_PATTERN } from "../../electron/main/settingsSchema";
 
@@ -115,6 +115,22 @@ describe("every default model the registry ships", () => {
     for (const bad of ["", " ", "has space", "deep~seek/model", "~", "model/", "/model", "a/b/c"]) {
       expect(MODEL_ID_PATTERN.test(bad), JSON.stringify(bad)).toBe(false);
     }
+  });
+});
+
+describe("inferring a provider from a legacy URL", () => {
+  // chatProviderId is "" on an install that predates the registry, so Settings has to derive a
+  // selection from the URL alone. This must agree with the prefix match the migration used to
+  // seed those same installs, or the dropdown would disagree with the database.
+  it.each([
+    ["", "openai"],
+    ["https://api.openai.com/v1", "openai"],
+    ["https://openrouter.ai/api/v1", "openrouter"],
+    ["https://api.anthropic.com/v1", "anthropic"],
+    ["http://localhost:11434/v1", "local"],
+    ["https://some-proxy.example.com/v1", "local"],
+  ])("maps %s to %s", (url, expected) => {
+    expect(inferProviderId(url)).toBe(expected);
   });
 });
 

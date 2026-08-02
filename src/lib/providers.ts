@@ -126,6 +126,24 @@ export function findProvider(id: string): AiProvider | null {
   return AI_PROVIDERS.find((provider) => provider.id === id) ?? null;
 }
 
+/**
+ * Which provider a bare base URL belongs to.
+ *
+ * Needed because `chatProviderId` is `""` on an install that predates the registry, while the
+ * legacy `chatApiUrl` still says where it was pointed. Settings has to show *something* selected
+ * rather than an empty dropdown, and this is the same prefix match the providers migration used
+ * to seed those installs — deliberately, so the UI agrees with what the database did.
+ *
+ * An empty URL is OpenAI, because that is what an empty chatApiUrl has always meant at runtime.
+ * Anything unrecognised is a custom OpenAI-compatible host, which is what `local` is for.
+ */
+export function inferProviderId(url: string): string {
+  const trimmed = url.trim();
+  if (trimmed === "") return DEFAULT_PROVIDER_ID;
+  const hosted = AI_PROVIDERS.find((provider) => provider.baseUrl !== "" && trimmed.startsWith(provider.baseUrl));
+  return hosted?.id ?? "local";
+}
+
 /** The providers that can back the Voice slot. Separate from the full list because Voice needs
  * `/audio/*`, which only OpenAI serves. */
 export function voiceProviders(): AiProvider[] {

@@ -1,4 +1,4 @@
-import { ipcMain } from "electron";
+import { BrowserWindow, ipcMain } from "electron";
 import { listVisibleProviders, type VisibleProvider } from "../db/providersStore";
 import { selectChatProvider, type ChatProviderResult } from "../ai/selectProvider";
 import { AI_PROVIDERS, type AiProvider } from "../ai/providers";
@@ -45,7 +45,18 @@ export function registerProviderHandlers() {
       devLog(`[providers:selectChat] ${selection.providerId} (model "${selection.model ?? "default"}")`);
       // Thrown errors cross IPC as a rejected promise; the renderer surfaces the message, which
       // is why selectChatProvider's messages are written for a person to read.
-      return selectChatProvider(selection);
+      const result = selectChatProvider(selection);
+
+      // selectChatProvider writes orchestratorModel and chatProviderId with setSetting, which
+      // bypasses the settings:update handler — so nothing tells useSettings its cache is stale.
+      // Without this the Settings panel keeps rendering the *previous* provider's URL and model
+      // straight after a switch, while the app is already running on the new one. Same mechanism,
+      // and the same reason, as the broadcast after an agent run in ipc/agent.ts.
+      devLog("[providers] broadcasting settings:update after a provider change");
+      for (const win of BrowserWindow.getAllWindows()) {
+        win.webContents.send("settings:update");
+      }
+      return result;
     }
   );
 }
