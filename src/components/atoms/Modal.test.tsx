@@ -87,6 +87,51 @@ describe("Modal", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it("closes on a backdrop click by default", () => {
+    const onClose = vi.fn();
+    const { baseElement } = render(
+      <Modal open onClose={onClose} label="Body">
+        <p>body</p>
+      </Modal>
+    );
+
+    fireEvent.mouseDown(baseElement.querySelector(".modal-backdrop")!);
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  // U5 — for a modal whose onClose is an answer rather than a dismissal, a mis-aimed click must
+  // not decide it. Escape stays live; it is deliberate.
+  it("ignores a backdrop click when closeOnBackdrop is false", () => {
+    const onClose = vi.fn();
+    const { baseElement } = render(
+      <Modal open onClose={onClose} label="Body" closeOnBackdrop={false}>
+        <p>body</p>
+      </Modal>
+    );
+
+    fireEvent.mouseDown(baseElement.querySelector(".modal-backdrop")!);
+
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a click that lands inside the panel", () => {
+    const onClose = vi.fn();
+    render(
+      <Modal open onClose={onClose} label="Body">
+        <p>body</p>
+      </Modal>
+    );
+
+    fireEvent.mouseDown(screen.getByText("body"));
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   // U1 — `aria-modal="true"` with no name announces as an unnamed "dialog".
   it("gives the dialog an accessible name", () => {
     render(
