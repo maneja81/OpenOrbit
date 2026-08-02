@@ -13,7 +13,7 @@ import {
 import { assertPublicHttpUrl } from "../net/urlSafety";
 import { buildHttpRequest, toolParamsSchema, type HttpToolArgValue } from "./httpToolRequest";
 import { requiresApproval, type ApprovalPolicy } from "./approvalPolicy";
-import { getSetting } from "../db/settingsStore";
+import { readAppSetting } from "../appSettings";
 import { devLog } from "../devLog";
 
 /** Per-request ceiling. A slow or hanging endpoint must never hold an agent run open until
@@ -118,14 +118,21 @@ function describeTool(collection: HttpToolCollectionRow, row: HttpToolRow): stri
   return parts.join(" ");
 }
 
-/** Reads the user's global approval posture. Defaults match DEFAULT_SETTINGS in
- * src/lib/settings.ts — all writes ask, so a database that has never stored these keys
- * still behaves safely. */
+/**
+ * Reads the user's global approval posture, defaults resolved from settingsSchema so a database
+ * that has never stored these keys still asks before every write.
+ *
+ * Through readAppSetting rather than getSetting, which matters more here than elsewhere: this
+ * feeds `needsApproval` directly, and `getSetting<boolean>` is an assertion, not a check. A row
+ * holding null — writable by any build from before the settings schema — is falsy, so the gate
+ * would simply stop asking, silently and in the unsafe direction. Now a value that isn't a real
+ * boolean falls back to "ask".
+ */
 export function readApprovalPolicy(): ApprovalPolicy {
   return {
-    post: getSetting<boolean>("appSettings.httpToolApprovalPost", true),
-    putPatch: getSetting<boolean>("appSettings.httpToolApprovalPutPatch", true),
-    delete: getSetting<boolean>("appSettings.httpToolApprovalDelete", true),
+    post: readAppSetting("httpToolApprovalPost"),
+    putPatch: readAppSetting("httpToolApprovalPutPatch"),
+    delete: readAppSetting("httpToolApprovalDelete"),
   };
 }
 

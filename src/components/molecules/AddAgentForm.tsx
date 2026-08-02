@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { formatHumanizedError, humanizeError } from "@/lib/humanizeError";
+import { DEFAULT_ORCHESTRATOR_MODEL } from "@/lib/settings";
 
 interface AddAgentFormProps {
   defaultModel: string;
@@ -83,7 +84,7 @@ export default function AddAgentForm({ defaultModel, onCreate, onCancel }: AddAg
             type="text"
             value={model}
             onChange={(e) => setModel(e.target.value)}
-            placeholder="gpt-4.1-mini"
+            placeholder={DEFAULT_ORCHESTRATOR_MODEL}
             autoComplete="off"
           />
         </label>

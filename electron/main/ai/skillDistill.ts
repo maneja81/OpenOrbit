@@ -8,7 +8,8 @@
 
 import OpenAI from "openai";
 import { getConfiguredChatUrl, getDecryptedChatApiKey } from "./provider";
-import { getSetting } from "../db/settingsStore";
+import { readAppSetting } from "../appSettings";
+import { SETTING_DEFAULTS } from "../settingsSchema";
 
 // Reads the same setting agents.ts's buildOrchestrator() uses for the orchestrator's
 // own model, via settingsStore directly rather than importing agents.ts (which would be
@@ -16,10 +17,12 @@ import { getSetting } from "../db/settingsStore";
 // distillation on whatever model the user actually has configured instead of a separately
 // hardcoded literal that can silently drift out of sync — which is exactly what happened
 // when DEFAULT_MODEL switched formats and this file's old hardcoded copy didn't.
-const FALLBACK_MODEL = "gpt-4.1-mini";
-
 function getOrchestratorModel(): string {
-  return getSetting<string>("appSettings.orchestratorModel", FALLBACK_MODEL) || FALLBACK_MODEL;
+  // The local FALLBACK_MODEL this used to declare was the fourth hardcoded copy of the same
+  // string — and the comment above it already described that exact failure happening once
+  // before. readAppSetting resolves the default from settingsSchema, so there is nothing left
+  // here to drift. The `||` still stands because "" is a legal stored value meaning "unset".
+  return readAppSetting("orchestratorModel") || SETTING_DEFAULTS.orchestratorModel;
 }
 
 export interface SkillDistillSource {

@@ -16,7 +16,12 @@ vi.mock("../db/index", () => ({ getDb: () => db }));
 
 import { createHttpTool, createHttpToolCollection, updateHttpTool, updateHttpToolCollection } from "../db/httpToolsStore";
 import { setSetting } from "../db/settingsStore";
-import { buildHttpToolsForCollectionIds, buildHttpToolsPromptBlock, formatHttpToolsForPrompt } from "./httpTools";
+import {
+  buildHttpToolsForCollectionIds,
+  buildHttpToolsPromptBlock,
+  formatHttpToolsForPrompt,
+  readApprovalPolicy,
+} from "./httpTools";
 
 /** Calls a built tool the way the SDK does — through invoke() with a JSON argument string,
  * so zod parsing runs too. */
@@ -280,5 +285,41 @@ describe("http tool building and execution", () => {
     // With the gate off, claiming the app will ask would be a lie the agent acts on.
     setSetting("appSettings.httpToolApprovalDelete", false);
     expect(buildHttpToolsPromptBlock([collection.id])).not.toContain("call it directly, don't ask first");
+  });
+});
+
+describe("readApprovalPolicy", () => {
+  beforeEach(() => {
+    db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    runMigrations(db);
+  });
+
+  it("asks before every write when nothing has been stored", () => {
+    // A fresh install must ask. The defaults come from settingsSchema now rather than three
+    // inline `true`s here.
+    expect(readApprovalPolicy()).toEqual({ post: true, putPatch: true, delete: true });
+  });
+
+  it("honours a real stored choice", () => {
+    setSetting("appSettings.httpToolApprovalDelete", false);
+    expect(readApprovalPolicy().delete).toBe(false);
+    expect(readApprovalPolicy().post).toBe(true);
+  });
+
+  it("falls back to asking when a stored value isn't a boolean", () => {
+    // This is the one that matters. The policy feeds needsApproval directly, and a null row —
+    // writable by any build from before the settings schema — is falsy, so the gate would have
+    // stopped asking silently, in the unsafe direction.
+    for (const bad of [null, "false", "true", 0, 1]) {
+      setSetting("appSettings.httpToolApprovalDelete", bad);
+      expect(readApprovalPolicy().delete).toBe(true);
+    }
+  });
+
+  it("does not let one unusable value change the others", () => {
+    setSetting("appSettings.httpToolApprovalPost", false);
+    setSetting("appSettings.httpToolApprovalDelete", null);
+    expect(readApprovalPolicy()).toEqual({ post: false, putPatch: true, delete: true });
   });
 });

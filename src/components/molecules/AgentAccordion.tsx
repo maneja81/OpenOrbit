@@ -3,6 +3,7 @@ import TablerIcon from "@/components/atoms/TablerIcon";
 import Toggle from "@/components/atoms/Toggle";
 import TagMultiSelect from "@/components/atoms/TagMultiSelect";
 import DeleteConfirmModal from "@/components/molecules/DeleteConfirmModal";
+import { DEFAULT_ORCHESTRATOR_MODEL } from "@/lib/settings";
 
 interface AgentAccordionProps {
   icon: string;
@@ -221,7 +222,7 @@ export default function AgentAccordion({
                   if (modelDraft !== (model ?? "")) onChangeModel(modelDraft);
                 }}
                 onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-                placeholder="gpt-4.1-mini"
+                placeholder={DEFAULT_ORCHESTRATOR_MODEL}
                 autoComplete="off"
               />
             </label>
