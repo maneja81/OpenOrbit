@@ -10,6 +10,29 @@ export const DEFAULT_SYSTEM_STATS_POLL_INTERVAL_MS = 3000;
 /** Number of pre-rendered variations available per SFX event (public/audio/sfx/<event>/v1..v5.wav). */
 export const SOUND_FX_VARIANT_COUNT = 5;
 
+/** The range a numeric setting is allowed to hold. */
+export interface NumericBound {
+  min: number;
+  max: number;
+  integer?: boolean;
+}
+
+/**
+ * Must match the number kinds in `electron/main/settingsSchema.ts`, which is what actually
+ * enforces them at the write boundary. The renderer declares its own copy because `electron/` and
+ * `src/` are separate TypeScript projects — the same reason DEFAULT_SETTINGS is duplicated — and
+ * `settingsDefaults.test.ts` asserts the two agree, so a bound changed on one side alone fails.
+ *
+ * Here they make the UI honest: the input advertises the real range, and a value outside it is
+ * refused with a reason instead of snapping back silently.
+ */
+export const SETTING_BOUNDS = {
+  agentRunTimeoutSeconds: { min: 5, max: 3600, integer: true },
+  chatHistoryMessageLimit: { min: 1, max: 200, integer: true },
+  bgMusicVolume: { min: 0, max: 1 },
+  systemStatsPollIntervalMs: { min: 500, max: 600_000, integer: true },
+} as const satisfies Record<string, NumericBound>;
+
 export const TOOL_APPROVAL_DISPLAY_OPTIONS = ["modal", "inline"] as const;
 export type ToolApprovalDisplay = (typeof TOOL_APPROVAL_DISPLAY_OPTIONS)[number];
 
