@@ -23,6 +23,7 @@ import { useConnectors } from "@/hooks/useConnectors";
 import { useHttpTools } from "@/hooks/useHttpTools";
 import { useUserContext } from "@/hooks/useUserContext";
 import { formatHumanizedError, humanizeError } from "@/lib/humanizeError";
+import { providerUrlWarning } from "@/lib/providerUrlWarning";
 import { DEFAULT_SETTINGS_SECTION, sectionOnTransition } from "@/lib/settingsSection";
 import { SoundFxEvent, sfxPreviewSrc } from "@/hooks/useSoundFX";
 
@@ -432,6 +433,9 @@ export default function SettingsPanel({
                           placeholder="https://api.openai.com/v1"
                           autoComplete="off"
                         />
+                        {providerUrlWarning(settings.chatApiUrl) && (
+                          <p className="settings-warning">{providerUrlWarning(settings.chatApiUrl)}</p>
+                        )}
                       </label>
                       <label className="row-field">
                         <span>Model ID</span>
@@ -491,6 +495,9 @@ export default function SettingsPanel({
                           placeholder="https://api.openai.com/v1"
                           autoComplete="off"
                         />
+                        {providerUrlWarning(settings.voiceApiUrl) && (
+                          <p className="settings-warning">{providerUrlWarning(settings.voiceApiUrl)}</p>
+                        )}
                       </label>
                       <label className="row-field">
                         <span>Transcription model</span>
