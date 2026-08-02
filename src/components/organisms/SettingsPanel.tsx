@@ -804,7 +804,6 @@ export default function SettingsPanel({
                   />
                   <NumberField
                     label="System Status refresh interval (ms)"
-                    hint="Applies after restarting the app"
                     value={settings.systemStatsPollIntervalMs}
                     bound={SETTING_BOUNDS.systemStatsPollIntervalMs}
                     onCommit={(systemStatsPollIntervalMs) => onUpdate({ systemStatsPollIntervalMs })}
