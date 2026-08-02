@@ -59,6 +59,26 @@ export const DEFAULT_MODEL = SETTING_DEFAULTS.orchestratorModel;
 // provider.ts, with a comment saying so — are now read from SETTING_DEFAULTS along with
 // everything else. That duplication is what finding S1 was about.
 
+/**
+ * The model an agent should carry when its Model ID field is left blank.
+ *
+ * "Blank means the default" is only meaningful once you say *whose* default. Both writers below
+ * used DEFAULT_MODEL — the *static* `SETTING_DEFAULTS.orchestratorModel`, i.e. the literal
+ * "gpt-4.1-mini" — which is neither the model the Chat slot is currently on nor one the agent's
+ * own provider serves. So clearing the field on a Claude-backed install stored an OpenAI id and
+ * the next run 404'd against Anthropic. That is the exact failure ai/selectProvider.ts exists to
+ * prevent, in the one path it did not cover.
+ *
+ * A pinned agent takes its own provider's default. Everything else takes the *live* orchestrator
+ * model: an agent inheriting the Chat slot (`""`), a `local` provider (no default, because only
+ * the user knows which model they have pulled), and an id from a build that offered a provider
+ * this one doesn't. The live value is also what selectChatProvider writes across every inheriting
+ * agent, so a blank save and a provider switch agree by construction rather than by coincidence.
+ */
+export function resolveAgentModel(providerId: string): string {
+  return findProvider(providerId.trim())?.defaultChatModel || readAppSetting("orchestratorModel");
+}
+
 // Prompts are seeded/imported with {{agentName}}/{{userName}}/{{currentDateTime}}
 // placeholders still in them so a rename doesn't require rewriting stored prompt text —
 // substitution happens live at Agent-build time, using whatever settings currently hold.
@@ -696,13 +716,6 @@ export function updateAgent(id: string, patch: AgentUpdatePatch): AgentRow {
   if (patch.enabled === false && existing.system) {
     throw new Error(`${existing.name} is a system agent and cannot be disabled.`);
   }
-  // Blank model field means "use the default" rather than being rejected; anything
-  // else must match the same shape createAgent enforces, otherwise a bad model id
-  // silently persists here and only surfaces later as an opaque provider-side error.
-  const nextModel = patch.model === undefined ? existing.model : patch.model.trim() || DEFAULT_MODEL;
-  if (!MODEL_ID_PATTERN.test(nextModel)) {
-    throw new Error(`"${nextModel}" doesn't look like a valid model ID (expected "model" or "provider/model").`);
-  }
   // Unlike the other optional fields, an explicitly-supplied but blank name is rejected
   // rather than silently kept — otherwise a caller (e.g. Cipher's update_agent tool)
   // could report success while actually leaving the name unchanged.
@@ -712,9 +725,21 @@ export function updateAgent(id: string, patch: AgentUpdatePatch): AgentRow {
   // Empty is a real value here — "follow the Chat slot" — so only a non-empty id is checked
   // against the registry. An unknown one is refused rather than stored, because a row naming a
   // provider this build has never heard of silently falls back at run time.
+  //
+  // Resolved before the model on purpose: a blank model means "this provider's default", so the
+  // provider has to be settled first. Patching both at once — which is what the Settings panel
+  // does when you change an agent's provider — must read the *incoming* id, not the stored one.
   const nextProviderId = patch.providerId === undefined ? existing.provider_id : patch.providerId.trim();
   if (nextProviderId !== "" && !findProvider(nextProviderId)) {
     throw new Error(`"${nextProviderId}" is not a provider this app knows about.`);
+  }
+  // Blank model field means "use the default" rather than being rejected; anything
+  // else must match the same shape createAgent enforces, otherwise a bad model id
+  // silently persists here and only surfaces later as an opaque provider-side error.
+  const nextModel =
+    patch.model === undefined ? existing.model : patch.model.trim() || resolveAgentModel(nextProviderId);
+  if (!MODEL_ID_PATTERN.test(nextModel)) {
+    throw new Error(`"${nextModel}" doesn't look like a valid model ID (expected "model" or "provider/model").`);
   }
 
   const next = {
@@ -782,7 +807,10 @@ export function createAgent(input: AgentCreateInput): AgentRow {
   if (!name) {
     throw new Error("Agent name is required.");
   }
-  const model = input.model?.trim() || DEFAULT_MODEL;
+  // A new agent follows the Chat slot, so a blank model means the model that slot is on right
+  // now — not the build's compile-time default, which is a different provider's id the moment
+  // the user has pointed Chat anywhere but OpenAI.
+  const model = input.model?.trim() || resolveAgentModel("");
   if (!MODEL_ID_PATTERN.test(model)) {
     throw new Error(`"${model}" doesn't look like a valid model ID (expected "model" or "provider/model").`);
   }
