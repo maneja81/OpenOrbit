@@ -68,6 +68,7 @@ Screenshots land in `/tmp/orbit-run/shots` (override: `SCREENSHOT_DIR`).
 | `settings` | dump every setting through the real `settings:get` IPC |
 | `set <json>` | write through `settings:update`, printing sent vs stored per key |
 | `sql-set <name> <raw>` | write a raw `setting_value` straight into SQLite (quit first) |
+| `sql <statement>` | arbitrary SQL against the sandbox DB — SELECT prints rows, else the change count (quit first) |
 | `sql-dump` | print the settings rows unparsed, as they sit on disk |
 | `log [grep]` | tail/filter `debug.log` — where read-side rejections surface |
 | `windows` | list windows and webContents |
@@ -79,6 +80,21 @@ value — a rejected write shows the old value still in place rather than throwi
 `sql-set` exists because the interesting failure modes can't be produced through the UI. Rows
 holding malformed JSON, out-of-range numbers, or values from an older build are exactly what the
 read-side guards are for, and this is the only way to create them.
+
+`sql` is the general form, for tables `sql-set` doesn't cover. Two things it unlocks:
+
+- **`agent_data`** — the per-agent KV store has the same guards as settings, reachable through
+  `window.agentsAPI.agentData.*`.
+- **Replaying a migration.** Migrations are selected by *absence* from `schema_migrations`, so
+  deleting a row makes that one migration re-run on the next launch — the only way to exercise a
+  migration's behaviour against a database state you've constructed.
+
+```
+sql DELETE FROM schema_migrations WHERE id = '00000000000027'
+```
+
+Legacy numeric versions are the id zero-padded to 14 characters; migrations added since use
+`YYYYMMDDHHMMSS` directly.
 
 ## A worked example
 
