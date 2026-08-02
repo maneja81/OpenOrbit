@@ -593,15 +593,28 @@ const getCurrentLocationTool = tool({
 });
 
 /** Returns the user's saved override if set (via Settings → Agents), else the built-in orchestrator.md template. */
-function getOrchestratorPromptTemplate(): string {
+export function getOrchestratorPromptTemplate(): string {
   const override = readAppSetting("orchestratorPromptOverride");
   return override.trim().length > 0 ? override : orchestratorPrompt;
 }
 
-export function getOrchestratorPrompt(): string {
-  const agentName = readAppSetting("agentName");
-  const userName = readAppSetting("userName");
-  return renderPrompt(getOrchestratorPromptTemplate(), { agentName, userName, currentDateTime: getCurrentDateTime() });
+/**
+ * The orchestrator prompt as the Settings panel should show it: the *template*, placeholders
+ * intact.
+ *
+ * This used to return the rendered prompt, which quietly made editing it destructive. The panel
+ * saves whatever the textarea holds as orchestratorPromptOverride, so a rendered prompt saved
+ * back froze the substitutions permanently: {{agentName}} stopped following a rename, and
+ * {{currentDateTime}} pinned the model to the date and time of the edit — reintroducing exactly
+ * the stale-date bug getCurrentDateTime exists to prevent, for good, from one edit.
+ *
+ * Every sub-agent's prompt in the same list is its raw column, placeholders and all, so showing
+ * the template here is also what makes the orchestrator consistent with them.
+ *
+ * Nothing else calls this: the agent build renders the template separately at build time.
+ */
+export function getOrchestratorPromptForEditing(): string {
+  return getOrchestratorPromptTemplate();
 }
 
 export function listAgents(): AgentRow[] {

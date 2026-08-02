@@ -295,6 +295,20 @@ export default function SettingsPanel({
     };
   }, [open]);
 
+  /** Clears the override and pulls the built-in template back into the textarea. The refetch
+   * matters: the panel loads the prompt once on open, so without it the box would keep showing
+   * the customised text the user just discarded. */
+  const resetOrchestratorPrompt = async () => {
+    onUpdate({ orchestratorPromptOverride: "" });
+    if (!hasAgentsAPI()) return;
+    setOrchestratorPromptLoading(true);
+    try {
+      setOrchestratorPrompt(await window.agentsAPI.agent.orchestratorPrompt());
+    } finally {
+      setOrchestratorPromptLoading(false);
+    }
+  };
+
   const previewSound = (event: SoundFxEvent, variant: number) => {
     new Audio(sfxPreviewSrc(event, variant)).play().catch(() => {});
   };
@@ -538,6 +552,11 @@ export default function SettingsPanel({
                       setOrchestratorPrompt(prompt);
                       onUpdate({ orchestratorPromptOverride: prompt });
                     }}
+                    onResetPrompt={
+                      settings.orchestratorPromptOverride.trim().length > 0
+                        ? () => void resetOrchestratorPrompt()
+                        : undefined
+                    }
                     onChangeEnabled={(enabled) => onUpdate({ orchestratorEnabled: enabled })}
                     availableMcpServers={mcpServers}
                     mcpServerIds={settings.orchestratorMcpServerIds}

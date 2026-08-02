@@ -19,7 +19,7 @@ import {
   exportAgent,
   exportAllAgents,
   importAgent,
-  getOrchestratorPrompt,
+  getOrchestratorPromptForEditing,
   AgentUpdatePatch,
   AgentCreateInput,
   AgentExport,
@@ -597,7 +597,7 @@ export function registerAgentHandlers() {
     return createAgent(input);
   });
 
-  ipcMain.handle("agent:orchestratorPrompt", (): string => getOrchestratorPrompt());
+  ipcMain.handle("agent:orchestratorPrompt", (): string => getOrchestratorPromptForEditing());
 
   ipcMain.handle("agent:delete", (_event, id: string) => {
     if (typeof id !== "string" || id.length === 0) {

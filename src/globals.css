@@ -2193,6 +2193,16 @@ svg#oc {
   color: rgba(200, 230, 255, 0.65);
 }
 
+/* The prompt label carries a "reset to default" control on its right when the prompt has been
+   customised. Without this the button stacks under the label text, since .settings-field is a
+   column and its spans are plain inline text everywhere else. */
+.agent-accordion-prompt-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .settings-field input {
   background: rgba(255, 255, 255, 0.04);
   border: 0.5px solid rgba(60, 140, 255, 0.22);

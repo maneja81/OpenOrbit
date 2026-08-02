@@ -23,6 +23,9 @@ interface AgentAccordionProps {
   onChangeDescription?: (description: string) => void;
   onChangeModel?: (model: string) => void;
   onChangePrompt?: (prompt: string) => void;
+  /** Shown as a "Reset to default" control beside the prompt label. Only passed when the
+   * prompt is actually customised, so its presence is what says so. */
+  onResetPrompt?: () => void;
   onChangeEnabled: (enabled: boolean) => void;
   defaultOpen?: boolean;
   availableMcpServers?: McpServerRow[];
@@ -56,6 +59,7 @@ export default function AgentAccordion({
   onChangeDescription,
   onChangeModel,
   onChangePrompt,
+  onResetPrompt,
   onChangeEnabled,
   defaultOpen = false,
   availableMcpServers,
@@ -228,7 +232,21 @@ export default function AgentAccordion({
             </label>
           )}
           <label className="settings-field">
-            <span>Prompt (Markdown){promptDisabled ? " — locked" : ""}</span>
+            <span className="agent-accordion-prompt-label">
+              <span>Prompt (Markdown){promptDisabled ? " — locked" : ""}</span>
+              {onResetPrompt && (
+                <button
+                  type="button"
+                  className="settings-action-btn-sm settings-action-btn-ghost"
+                  // Nothing else told the user their prompt was frozen at a copy of the built-in,
+                  // so improvements to it silently stopped reaching them. This is both the signal
+                  // and the way back.
+                  onClick={onResetPrompt}
+                >
+                  Customised — reset to default
+                </button>
+              )}
+            </span>
             <textarea
               className="agent-accordion-prompt"
               value={promptLoading ? "Loading…" : promptDraft}
