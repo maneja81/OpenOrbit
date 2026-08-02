@@ -99,6 +99,19 @@ function hasColumn(db: Database.Database, table: string, column: string): boolea
   return (db.pragma(`table_info(${table})`) as { name: string }[]).some((c) => c.name === column);
 }
 
+/** Companion to hasColumn, for a migration that reads a table it does not itself create.
+ *
+ * Every real database has every table its migration created, but a migration is also replayed
+ * against partial stand-in schemas: several tests build only the tables the migration under test
+ * touches and pin `user_version` to force the later ones to run (see knowledgeBase.test.ts). A
+ * migration that assumes a table exists turns those into a hard failure the first time someone
+ * adds a migration that reads something new. */
+function hasTable(db: Database.Database, table: string): boolean {
+  return (
+    db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) !== undefined
+  );
+}
+
 /**
  * Append new entries here to evolve the schema — never edit an already-shipped migration.
  * `conversations` exists from day one even though the UI only ever shows one thread today,
@@ -797,6 +810,95 @@ const migrations: Migration[] = [
       // and the guard keeps it a no-op if any database did apply it.
       if (hasColumn(db, "http_tools", "requires_confirmation")) {
         db.exec(`ALTER TABLE http_tools DROP COLUMN requires_confirmation;`);
+      }
+    },
+  },
+  {
+    id: "20260802231500",
+    up: (db) => {
+      // Credentials move from two fixed slots to one row per provider.
+      //
+      // Chat and Voice were each a hardcoded {apiKey, apiUrl} pair in the settings table, which
+      // worked while every supported host spoke the same dialect. Offering OpenAI, OpenRouter,
+      // Claude and a local server breaks that: an agent can now sensibly run on a different
+      // provider than the orchestrator, and per-agent slots would mean N copies of the same
+      // secret to rotate. Keying credentials by provider instead means one Claude key however
+      // many agents point at it.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS providers (
+          id TEXT PRIMARY KEY,
+          api_url TEXT NOT NULL DEFAULT '',
+          api_key TEXT NOT NULL DEFAULT '',
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+      `);
+
+      // Which provider an agent runs on. '' means "inherit the Chat provider", which is what
+      // every existing row gets — so this column changes nothing until a user picks something.
+      if (!hasColumn(db, "agents", "provider_id")) {
+        db.exec(`ALTER TABLE agents ADD COLUMN provider_id TEXT NOT NULL DEFAULT '';`);
+      }
+
+      // Seed from the two legacy slots so an existing install keeps working without the user
+      // re-entering anything. The old rows are deliberately left in place: a downgrade to a
+      // build without this migration has to find its credentials exactly where it left them.
+      //
+      // The base URLs are inlined rather than imported from ai/providers.ts on purpose. This
+      // module is free of runtime imports by design (see MigrationContext), but more
+      // importantly a migration must be frozen against the values that were true when it ran —
+      // if the registry gains a provider next year, that must not retroactively change how a
+      // database written today was interpreted.
+      const KNOWN: { id: string; prefix: string }[] = [
+        { id: "openrouter", prefix: "https://openrouter.ai/api/v1" },
+        { id: "openai", prefix: "https://api.openai.com/v1" },
+        { id: "anthropic", prefix: "https://api.anthropic.com/v1" },
+      ];
+
+      const readSetting = (name: string): string => {
+        const row = db.prepare("SELECT setting_value FROM settings WHERE setting_name = ?").get(name) as
+          | { setting_value: string }
+          | undefined;
+        if (!row) return "";
+        // Stored JSON-encoded (settingsStore stringifies every value). A row written by an older
+        // build, or hand-edited, can be neither — treat anything unparseable as absent rather
+        // than letting one bad row abort the whole migration and with it the app's launch.
+        try {
+          const parsed = JSON.parse(row.setting_value) as unknown;
+          return typeof parsed === "string" ? parsed : "";
+        } catch {
+          return "";
+        }
+      };
+
+      // An empty URL meant "use OpenAI's" everywhere in ai/provider.ts, so an install that never
+      // touched the field is an OpenAI install. A URL pointing somewhere unrecognised is kept as
+      // a `local` row: it is by definition a custom OpenAI-compatible host, which is exactly what
+      // that provider is for, and dropping it would silently disconnect a working setup.
+      const providerIdFor = (url: string): string => {
+        if (url.trim() === "") return "openai";
+        return KNOWN.find((known) => url.startsWith(known.prefix))?.id ?? "local";
+      };
+
+      // The key is copied as stored — still ciphertext, never decrypted here. Same database, same
+      // encryption key, same format, so a round trip would only add a way to fail: OS-backed
+      // decryption can throw, and a migration that throws takes the app's launch with it.
+      // Nothing to seed from if the settings table isn't there. That never happens on a real
+      // database — migration 1 creates it — but this migration is also replayed against the
+      // partial stand-in schemas some tests build, and a table-not-found there would read as
+      // this migration being broken rather than as the stand-in being incomplete.
+      if (!hasTable(db, "settings")) return;
+
+      const seed = db.prepare(
+        `INSERT INTO providers (id, api_url, api_key) VALUES (?, ?, ?)
+         ON CONFLICT(id) DO NOTHING`
+      );
+      for (const slot of ["chat", "voice"]) {
+        const url = readSetting(`appSettings.${slot}ApiUrl`);
+        const key = readSetting(`appSettings.${slot}ApiKey`);
+        // Nothing configured — a fresh install, where seeding an empty row would only make the
+        // Settings screen claim a provider is set up when it isn't.
+        if (url === "" && key === "") continue;
+        seed.run(providerIdFor(url), url, key);
       }
     },
   },
