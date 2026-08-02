@@ -354,3 +354,62 @@ describe("running onboarding again", () => {
     expect(onUpdate).toHaveBeenCalledExactlyOnceWith({ onboardingDone: false });
   });
 });
+
+describe("AI Models section", () => {
+  function renderModels(settings = mergeWithDefaults({})) {
+    render(
+      <SettingsPanel
+        open
+        onClose={vi.fn()}
+        settings={settings}
+        sessionElapsedMs={0}
+        onUpdate={vi.fn()}
+        onReset={vi.fn()}
+        agents={[]}
+        onUpdateAgent={vi.fn()}
+        onCreateAgent={vi.fn()}
+        onDeleteAgent={vi.fn()}
+        onExportAgent={vi.fn()}
+        onExportAllAgents={vi.fn()}
+        onImportAgents={vi.fn()}
+      />
+    );
+    fireEvent.click(screen.getByRole("tab", { name: /^Models$/i }));
+  }
+
+  // Credentials and model choice used to be interleaved per slot, across three accordions, with
+  // the Chat provider's card a different shape from every other provider's.
+  it("splits into exactly two groups — keys, then models", () => {
+    renderModels();
+    expect(screen.getByText("API keys")).toBeInTheDocument();
+    expect(screen.getByText("Default models")).toBeInTheDocument();
+    expect(screen.queryByText("Other providers")).not.toBeInTheDocument();
+  });
+
+  it("lists every provider under API keys, not just the ones that aren't Chat", () => {
+    renderModels();
+    // By field label rather than by provider name: the names also appear in the Chat provider
+    // dropdown, and a bare getByText would match either one.
+    for (const label of ["OpenRouter", "OpenAI", "Claude", "Local AI"]) {
+      expect(screen.getByLabelText(`${label} API key`)).toBeInTheDocument();
+      expect(screen.getByLabelText(`${label} API URL`)).toBeInTheDocument();
+    }
+    // Voice keeps its own credentials — it is a slot, not a registry provider.
+    expect(screen.getByLabelText("Voice API URL")).toBeInTheDocument();
+  });
+
+  it("marks which provider the Chat slot is on", () => {
+    renderModels();
+    // Defaults infer OpenAI from an empty chatApiUrl, the same rule the migration used.
+    expect(screen.getByText(/Chat provider ·/)).toBeInTheDocument();
+  });
+
+  it("puts every model field in the models group, and no key fields there", () => {
+    renderModels();
+    for (const label of ["Chat model", "Transcription model", "Speech (TTS) model"]) {
+      expect(screen.getByLabelText(label)).toBeInTheDocument();
+    }
+    // The old "Model ID" label lived in the Chat credentials card.
+    expect(screen.queryByLabelText("Model ID")).not.toBeInTheDocument();
+  });
+});
