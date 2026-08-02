@@ -29,10 +29,8 @@ import { extractApprovalMeta, extractRunItemMeta } from "../ai/runItemMeta";
 import { configureChatClient, estimateGenerationCost } from "../ai/provider";
 import { insertTokenUsage, updateTokenUsageCost } from "../db/tokenUsageStore";
 import { getRecentMessages, appendMessage, ChatMessageRecord } from "./chatHistory";
-import { getSetting } from "../db/settingsStore";
+import { readAppSetting } from "../appSettings";
 import { devLog } from "../devLog";
-
-const NAMESPACE = "appSettings.";
 
 // Best-effort extraction of a tool call's name/arguments (tool_called) or its output
 // (tool_output) from a RunItem — the SDK's item shape varies by item type (function call
@@ -63,7 +61,7 @@ const DEFAULT_HISTORY_MESSAGE_LIMIT = 20;
  * context per run — a bigger window costs more tokens but keeps more of a long
  * conversation "in view". Re-read per run for the same reason as getAgentRunTimeoutMs. */
 function getHistoryMessageLimit(): number {
-  return getSetting<number>(`${NAMESPACE}chatHistoryMessageLimit`, DEFAULT_HISTORY_MESSAGE_LIMIT);
+  return readAppSetting("chatHistoryMessageLimit", DEFAULT_HISTORY_MESSAGE_LIMIT);
 }
 
 /** The orchestrator is the only agent given prior turns directly. When it hands off to a
@@ -200,7 +198,7 @@ const DEFAULT_AGENT_RUN_TIMEOUT_SECONDS = 60;
  * handoffs, slow MCP tools, web search) — re-read per run rather than cached so a change
  * takes effect on the next send without an app restart. */
 function getAgentRunTimeoutMs(): number {
-  const seconds = getSetting<number>(`${NAMESPACE}agentRunTimeoutSeconds`, DEFAULT_AGENT_RUN_TIMEOUT_SECONDS);
+  const seconds = readAppSetting("agentRunTimeoutSeconds", DEFAULT_AGENT_RUN_TIMEOUT_SECONDS);
   return seconds * 1000;
 }
 

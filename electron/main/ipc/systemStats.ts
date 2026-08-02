@@ -3,10 +3,9 @@ import os from "node:os";
 import { promises as fs } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { getSetting } from "../db/settingsStore";
+import { readAppSetting } from "../appSettings";
 
 const execFileAsync = promisify(execFile);
-const NAMESPACE = "appSettings.";
 
 export interface SystemStats {
   cpuPct: number;
@@ -128,7 +127,7 @@ let broadcastInterval: NodeJS.Timeout | null = null;
 // takes effect on the next app restart, same as most other main-process-only settings here.
 export function startSystemStatsBroadcast() {
   if (broadcastInterval) return;
-  const intervalMs = getSetting<number>(`${NAMESPACE}systemStatsPollIntervalMs`, DEFAULT_POLL_INTERVAL_MS);
+  const intervalMs = readAppSetting("systemStatsPollIntervalMs", DEFAULT_POLL_INTERVAL_MS);
   broadcastInterval = setInterval(async () => {
     const stats = await collectStats();
     for (const win of BrowserWindow.getAllWindows()) {
