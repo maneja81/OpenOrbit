@@ -7,9 +7,14 @@
 /0-cowork/
 /MEMORY.md
 
-# Per-machine Claude Code settings. The shared config belongs in CLAUDE.md;
-# anything under .claude/ that ends in .local.json is one developer's only.
+# Per-machine Claude Code state — settings.local.json, and the worktrees/ checkouts each
+# feature branch gets. None of it belongs to anyone but the developer who made it.
 .claude/*
+# Skills are the exception: they're shared tooling, versioned with the code they drive, and
+# referenced from CLAUDE.md — a tracked file pointing at an ignored one helps nobody. The
+# negation needs the directory re-included explicitly, because git will not re-include a file
+# whose parent directory is excluded.
+!.claude/skills/
 
 # Dependencies
 /node_modules/

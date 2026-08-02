@@ -86,6 +86,8 @@ Four built-in sub-agents ship seeded from `electron/main/ai/defaultAgents.json`:
 - **Build**: `npm run build` (`tsc -b && electron-vite build`) · **Package**: `npm run package`
 - **Test**: `npm test` (`vitest run`) · watch: `npm run test:watch`
 - **Lint**: `npm run lint`
+- **Drive the running app** (screenshots, clicking through the UI, confirming a change works for real rather than only in vitest): the `run-openorbit` skill — `.claude/skills/run-openorbit/SKILL.md`, a Playwright REPL over the built app.
+- ⚠ **Never launch the app from a worktree without `--user-data-dir`.** `app.getPath("userData")` resolves to the same `~/Library/Application Support/OpenOrbit` from *every* checkout and worktree, so an exploratory launch writes into the real database — settings, chat history, agents, encrypted API keys. The `run-openorbit` driver sandboxes it and aborts if the isolation doesn't take; use it rather than launching by hand.
 - **Env required**: none at runtime. Credentials are entered in-app and stored encrypted in SQLite — chat/voice API key + base URL under `appSettings.*` (`ai/provider.ts`), per-connector OAuth client id/secret in the `connectors` table (`connectors/registry.ts`, migration 26). Optional at build time: `GITHUB_RELEASE_REPO` (`scripts/releaseInfo.ts`); `PORT` overrides the dev renderer port.
 
 ## Conventions
