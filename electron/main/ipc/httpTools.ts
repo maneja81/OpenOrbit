@@ -90,6 +90,30 @@ function assertParamsShape(value: unknown, prefix: string): asserts value is Htt
   }
 }
 
+// A misspelled key is otherwise indistinguishable from an omitted one, and the omission is
+// what gets reported: passing `values` instead of `args` surfaced as `Missing required
+// parameter "id"`, which reads as a bad param definition rather than a wrong key name.
+// Naming the accepted set puts the real key in front of the caller.
+function assertNoUnknownKeys(value: Record<string, unknown>, allowed: readonly string[], prefix: string): void {
+  const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
+  if (unknown.length > 0) {
+    throw new Error(
+      `${prefix} does not accept ${unknown.map((key) => `"${key}"`).join(", ")} — accepted keys are ${allowed.join(", ")}`
+    );
+  }
+}
+
+const TEST_TOOL_KEYS = [
+  "baseUrl",
+  "path",
+  "method",
+  "params",
+  "args",
+  "headers",
+  "bodyTemplate",
+  "allowPrivateHosts",
+] as const;
+
 export function registerHttpToolHandlers() {
   ipcMain.handle("httpTools:listCollections", () => listHttpToolCollections());
 
@@ -179,6 +203,7 @@ export function registerHttpToolHandlers() {
       }
     ): Promise<{ ok: boolean; status?: number; statusText?: string; body?: string; error?: string }> => {
       assertPlainObject(input, "httpTools:testTool requires a plain object input");
+      assertNoUnknownKeys(input, TEST_TOOL_KEYS, "httpTools:testTool");
       assertNonEmptyString(input.baseUrl, "httpTools:testTool requires a non-empty baseUrl");
       if (input.method !== undefined) assertMethod(input.method, "httpTools:testTool");
       if (input.headers !== undefined) assertHeadersShape(input.headers, "httpTools:testTool");
