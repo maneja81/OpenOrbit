@@ -174,3 +174,92 @@ describe("orchestrator prompt override", () => {
     expect(resetButton()).toBeUndefined();
   });
 });
+
+describe("Privacy & Safety", () => {
+  // These six decide what the app does without asking, and what it can see. They used to be
+  // split between the HTTP Tools tab and General, so nobody auditing that had one place to look
+  // (finding S10). The approval tests below moved here from HttpToolsTab.test.tsx with the
+  // controls themselves.
+  function renderSafety(settingsPatch: Record<string, unknown> = {}) {
+    const onUpdate = vi.fn();
+    render(
+      <SettingsPanel
+        open
+        onClose={vi.fn()}
+        settings={mergeWithDefaults(settingsPatch)}
+        sessionElapsedMs={0}
+        onUpdate={onUpdate}
+        onReset={vi.fn()}
+        agents={[]}
+        onUpdateAgent={vi.fn()}
+        onCreateAgent={vi.fn()}
+        onDeleteAgent={vi.fn()}
+        onExportAgent={vi.fn()}
+        onExportAllAgents={vi.fn()}
+        onImportAgents={vi.fn()}
+      />
+    );
+    fireEvent.click(screen.getByRole("tab", { name: /Privacy & Safety/i }));
+    return { onUpdate };
+  }
+
+  it("is reachable from the sidebar under its own name", () => {
+    renderSafety();
+    expect(screen.getByRole("tab", { name: /Privacy & Safety/i })).toBeInTheDocument();
+  });
+
+  it("gathers all six controls in one place", () => {
+    renderSafety();
+    for (const label of [
+      "Ask before POST requests",
+      "Ask before PUT / PATCH requests",
+      "Ask before DELETE requests",
+      "How to ask for approval",
+      "Toggle location access",
+      "Toggle automatic remote image loading",
+    ]) {
+      expect(screen.getByLabelText(label), label).toBeTruthy();
+    }
+  });
+
+  it("offers a toggle for each write method and none for reads", () => {
+    renderSafety();
+    expect(screen.queryByLabelText(/Ask before GET/)).toBeNull();
+    expect(screen.getByText(/Reads \(GET, HEAD\) never ask/)).toBeTruthy();
+  });
+
+  it("ships with every write method gated by default", () => {
+    renderSafety();
+    for (const label of ["Ask before POST requests", "Ask before PUT / PATCH requests", "Ask before DELETE requests"]) {
+      expect(screen.getByLabelText(label).getAttribute("aria-checked"), label).toBe("true");
+    }
+  });
+
+  it("writes each method's policy back under its own key", () => {
+    const { onUpdate } = renderSafety();
+    fireEvent.click(screen.getByLabelText("Ask before DELETE requests"));
+    expect(onUpdate).toHaveBeenCalledWith({ httpToolApprovalDelete: false });
+  });
+
+  it("turns a policy back on independently of the others", () => {
+    const { onUpdate } = renderSafety({ httpToolApprovalPost: false });
+    expect(screen.getByLabelText("Ask before POST requests").getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(screen.getByLabelText("Ask before POST requests"));
+    expect(onUpdate).toHaveBeenCalledWith({ httpToolApprovalPost: true });
+  });
+
+  it("keeps the two privacy defaults off", () => {
+    // The default is the security control for both — an install that has never heard of them
+    // must not be read as consent.
+    renderSafety();
+    expect(screen.getByLabelText("Toggle location access").getAttribute("aria-checked")).toBe("false");
+    expect(screen.getByLabelText("Toggle automatic remote image loading").getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("no longer leaves them in General", () => {
+    renderSafety();
+    fireEvent.click(screen.getByRole("tab", { name: /^General$/i }));
+    expect(screen.queryByLabelText("Toggle location access")).toBeNull();
+    expect(screen.queryByLabelText("Ask before DELETE requests")).toBeNull();
+  });
+});

@@ -26,7 +26,6 @@ function collection(id: string, name: string, overrides: Partial<HttpToolCollect
 }
 
 function renderTab(collections: HttpToolCollectionRow[], overrides: Partial<HttpTools> = {}, settingsPatch = {}) {
-  const onUpdate = vi.fn();
   const httpTools: HttpTools = {
     collections,
     tools: [],
@@ -44,10 +43,13 @@ function renderTab(collections: HttpToolCollectionRow[], overrides: Partial<Http
     ...overrides,
   } as unknown as HttpTools;
   const settings = { ...DEFAULT_SETTINGS, ...settingsPatch };
-  const view = render(<HttpToolsTab httpTools={httpTools} settings={settings} onUpdate={onUpdate} />);
-  return { ...view, httpTools, onUpdate };
+  const view = render(<HttpToolsTab httpTools={httpTools} settings={settings} />);
+  return { ...view, httpTools };
 }
 
+// The approval controls moved to Settings → Privacy & Safety (finding S10); their tests
+// moved with them, to SettingsPanel.test.tsx. What stays here is the per-endpoint "Asks first"
+// badge, which is context for the tools rather than a control.
 describe("HttpToolsTab", () => {
   beforeEach(() => vi.clearAllMocks());
   afterEach(cleanup);
@@ -66,40 +68,6 @@ describe("HttpToolsTab", () => {
 
   /** The write methods each get their own toggle, and reads are never gated — the hint says
    * so, and there is deliberately no GET/HEAD row to turn on. */
-  it("offers a toggle for each write method and none for reads", () => {
-    renderTab([]);
-
-    expect(screen.getByLabelText("Ask before POST requests")).toBeTruthy();
-    expect(screen.getByLabelText("Ask before PUT / PATCH requests")).toBeTruthy();
-    expect(screen.getByLabelText("Ask before DELETE requests")).toBeTruthy();
-    expect(screen.queryByLabelText(/Ask before GET/)).toBeNull();
-    expect(screen.getByText(/Reads \(GET, HEAD\) never ask/)).toBeTruthy();
-  });
-
-  it("ships with every write method gated by default", () => {
-    renderTab([]);
-    for (const label of ["Ask before POST requests", "Ask before PUT / PATCH requests", "Ask before DELETE requests"]) {
-      expect(screen.getByLabelText(label).getAttribute("aria-checked"), label).toBe("true");
-    }
-  });
-
-  it("writes each method's policy back under its own key", () => {
-    const { onUpdate } = renderTab([]);
-
-    fireEvent.click(screen.getByLabelText("Ask before DELETE requests"));
-
-    expect(onUpdate).toHaveBeenCalledWith({ httpToolApprovalDelete: false });
-  });
-
-  it("turns a policy back on independently of the others", () => {
-    const { onUpdate } = renderTab([], {}, { httpToolApprovalPost: false });
-
-    expect(screen.getByLabelText("Ask before POST requests").getAttribute("aria-checked")).toBe("false");
-    fireEvent.click(screen.getByLabelText("Ask before POST requests"));
-
-    expect(onUpdate).toHaveBeenCalledWith({ httpToolApprovalPost: true });
-  });
-
   // --- Encrypted header storage ---------------------------------------------------------
 
   /** Header values are stored encrypted on the row, so the form must fetch the decrypted set

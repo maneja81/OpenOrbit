@@ -10,6 +10,7 @@ const SETTINGS_SECTIONS = [
   "http",
   "files",
   "general",
+  "safety",
   "sounds",
   "danger",
   "about",
