@@ -142,6 +142,27 @@ describe("selectChatProvider", () => {
       expect(modelOf("inheritor")).toBe("claude-haiku-4-5-20251001");
     });
 
+    // Omitted and explicitly-blank are different intents. Collapsing them with `||` made the
+    // second one a silent no-op: TextField only resyncs when the stored value changes, so
+    // emptying the box left it looking empty while the old value stayed in the database.
+    it("treats an explicitly blank URL as a reset, not as 'unchanged'", () => {
+      selectChatProvider({ providerId: "openai", apiUrl: "" });
+
+      expect(getProviderCredentials("openai")?.apiUrl).toBe("https://api.openai.com/v1");
+    });
+
+    it("treats an explicitly blank model as a reset, not as 'unchanged'", () => {
+      selectChatProvider({ providerId: "openai", model: "" });
+
+      expect(setting("appSettings.orchestratorModel")).toBe("gpt-4.1-mini");
+    });
+
+    it("still refuses an explicitly blank model where the provider has no default", () => {
+      expect(() => selectChatProvider({ providerId: "local", apiUrl: "http://localhost:11434/v1", model: "" })).toThrow(
+        "Local AI needs a model id."
+      );
+    });
+
     it("restores a provider's own stored URL when switching back to it", () => {
       selectChatProvider({ providerId: "anthropic", apiKey: "sk-ant" });
       selectChatProvider({ providerId: "openai" });

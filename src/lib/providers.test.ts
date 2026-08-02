@@ -43,6 +43,37 @@ describe("modelBelongsToProvider", () => {
       }
     });
 
+    // Every one of these was wrongly flagged by an earlier allowlist version of this function.
+    // A false warning tells someone their working setup is broken, which is the expensive
+    // failure here — so the bare reasoning parents, the non-chat families, and anything served
+    // by an OpenAI-compatible gateway all have to pass.
+    it("bare reasoning ids, and the families that aren't chat", () => {
+      for (const model of [
+        "o1",
+        "o3",
+        "codex-mini-latest",
+        "text-embedding-3-small",
+        "dall-e-3",
+        "omni-moderation-latest",
+      ]) {
+        expect(modelBelongsToProvider("openai", model)).toBe(true);
+      }
+    });
+
+    it("whatever an OpenAI-compatible gateway serves under the openai slot", () => {
+      // Pointing `openai` at LiteLLM/vLLM/Together is what its editable URL is for, and an
+      // Azure-style deployment name is just a name.
+      for (const model of [
+        "llama-3.3-70b-instruct",
+        "deepseek-chat",
+        "mistral-large-latest",
+        "qwen3-coder",
+        "prod-chat-deployment",
+      ]) {
+        expect(modelBelongsToProvider("openai", model)).toBe(true);
+      }
+    });
+
     it("every provider's own registry default", () => {
       for (const provider of AI_PROVIDERS) {
         expect(modelBelongsToProvider(provider.id, provider.defaultChatModel)).toBe(true);
@@ -63,6 +94,10 @@ describe("modelBelongsToProvider", () => {
 
     it("a bare id pointed at OpenRouter, which namespaces everything", () => {
       expect(modelBelongsToProvider("openrouter", "gpt-4.1-mini")).toBe(false);
+    });
+
+    it("an OpenRouter-namespaced id pointed at the vendor directly", () => {
+      expect(modelBelongsToProvider("anthropic", "anthropic/claude-3.5-sonnet")).toBe(false);
     });
 
     it("regardless of case", () => {

@@ -69,14 +69,23 @@ export const DEFAULT_MODEL = SETTING_DEFAULTS.orchestratorModel;
  * the next run 404'd against Anthropic. That is the exact failure ai/selectProvider.ts exists to
  * prevent, in the one path it did not cover.
  *
- * A pinned agent takes its own provider's default. Everything else takes the *live* orchestrator
- * model: an agent inheriting the Chat slot (`""`), a `local` provider (no default, because only
- * the user knows which model they have pulled), and an id from a build that offered a provider
- * this one doesn't. The live value is also what selectChatProvider writes across every inheriting
- * agent, so a blank save and a provider switch agree by construction rather than by coincidence.
+ * A pinned agent takes its own provider's default. An agent inheriting the Chat slot (`""`), or
+ * one naming a provider from a build that offered it and this one doesn't, takes the *live*
+ * orchestrator model — which is also what selectChatProvider writes across every inheriting agent,
+ * so a blank save and a provider switch agree by construction rather than by coincidence.
+ *
+ * A provider with no default of its own is refused rather than filled in. `local` is the only one,
+ * and the Chat slot's model is the wrong answer for it: on a default install that stores
+ * `gpt-4.1-mini` against an Ollama server, which 404s — the same failure this function exists to
+ * stop, arrived at from the other direction. There is no id anyone but the user can supply, so
+ * asking is the honest move. Same wording, and same reasoning, as selectChatProvider.
  */
 export function resolveAgentModel(providerId: string): string {
-  return findProvider(providerId.trim())?.defaultChatModel || readAppSetting("orchestratorModel");
+  const provider = findProvider(providerId.trim());
+  if (provider && provider.defaultChatModel === "") {
+    throw new Error(`${provider.label} needs a model id — there is no default to fall back on.`);
+  }
+  return provider?.defaultChatModel || readAppSetting("orchestratorModel");
 }
 
 // Prompts are seeded/imported with {{agentName}}/{{userName}}/{{currentDateTime}}
@@ -196,6 +205,15 @@ export interface AgentExport {
   tagline: string;
   description: string;
   model: string;
+  /** Registry id, or "" to follow the Chat slot. Optional because files written before per-agent
+   * providers existed don't have it.
+   *
+   * Unlike the ids this type deliberately omits, a provider id is *portable* — it names an entry
+   * in a registry every install compiles in, not a row in this one's database. Leaving it out
+   * while keeping `model` was the unsafe half of the pair: an agent exported on Claude arrived
+   * carrying `claude-haiku-4-5-20251001` and following whatever the importing machine's Chat slot
+   * was, so every run asked OpenAI for a Claude model. */
+  providerId?: string;
   prompt: string;
 }
 
@@ -738,8 +756,14 @@ export function updateAgent(id: string, patch: AgentUpdatePatch): AgentRow {
   // Resolved before the model on purpose: a blank model means "this provider's default", so the
   // provider has to be settled first. Patching both at once — which is what the Settings panel
   // does when you change an agent's provider — must read the *incoming* id, not the stored one.
+  //
+  // Only what the *patch* supplies is checked. Applying it to a stored id as well made a row
+  // naming a provider this build doesn't have permanently unmodifiable — it could not be renamed,
+  // disabled, or re-pointed at a provider that does exist, which is the one action that would fix
+  // it. Everywhere else an unrecognised stored id degrades to the Chat slot (see modelForAgent in
+  // ai/provider.ts); refusing every write to the row is not that.
   const nextProviderId = patch.providerId === undefined ? existing.provider_id : patch.providerId.trim();
-  if (nextProviderId !== "" && !findProvider(nextProviderId)) {
+  if (patch.providerId !== undefined && nextProviderId !== "" && !findProvider(nextProviderId)) {
     throw new Error(`"${nextProviderId}" is not a provider this app knows about.`);
   }
   // Blank model field means "use the default" rather than being rejected; anything
@@ -866,6 +890,7 @@ function toAgentExport(row: AgentRow): AgentExport {
     tagline: row.tagline,
     description: row.description,
     model: row.model,
+    providerId: row.provider_id,
     prompt: row.prompt,
   };
 }
@@ -897,12 +922,18 @@ export function exportAllAgents(): AgentExport[] {
 // validation, and defaults stay single-sourced — an imported file's own id/system/
 // enabled fields (if present) are ignored, never trusted.
 export function importAgent(input: AgentExport): AgentRow {
+  // An id this build doesn't recognise degrades to the Chat slot rather than failing the import.
+  // The file came from another machine, possibly another version, and refusing the whole agent
+  // over a provider it can be re-pointed at in two clicks is the wrong trade — the same
+  // degrade-don't-throw posture modelForAgent takes for an unrecognised stored id.
+  const providerId = input.providerId && findProvider(input.providerId) ? input.providerId : "";
   return createAgent({
     name: input.name,
     icon: input.icon,
     tagline: input.tagline,
     description: input.description,
     model: input.model,
+    providerId,
     prompt: input.prompt,
   });
 }

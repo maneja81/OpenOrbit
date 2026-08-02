@@ -486,7 +486,16 @@ export default function SettingsPanel({
                               label={`${provider.label} API key`}
                               isSet={keySet}
                               onSave={saveKey}
-                              onClear={keySet ? () => saveKey("") : undefined}
+                              // Removal always goes through the plain credential write, even for
+                              // the Chat provider. selectChatProvider refuses a blank key on a
+                              // provider that requires one — a sensible guard while *choosing* a
+                              // provider, but it made Remove impossible on whichever provider was
+                              // currently selected, answering the click with "OpenAI needs an API
+                              // key." A slot pointed at a provider with no key is just a fresh
+                              // install, and resolveProviderId already says so at run time.
+                              onClear={
+                                keySet ? () => void providers.save({ providerId: provider.id, apiKey: "" }) : undefined
+                              }
                             />
                             <TextField
                               label={`${provider.label} API URL`}
@@ -597,6 +606,11 @@ export default function SettingsPanel({
                         placeholder={chatProvider?.defaultChatModel || DEFAULT_ORCHESTRATOR_MODEL}
                         onCommit={(model) => void applyChat({ providerId: chatSlotView.providerId, model })}
                       />
+                      {/* Also rendered here, not only beside the credentials. Both controls that
+                          can produce a chatError — the provider dropdown above and the model field
+                          — live in this card, and an explanation for a rejected pick that appears
+                          in a different accordion reads as unrelated. */}
+                      {chatError && <p className="settings-error">{chatError}</p>}
                       <TextField
                         label="Transcription model"
                         hint="Turns what you say into text"
@@ -729,9 +743,13 @@ export default function SettingsPanel({
                       providerWarning={providerWarningFor(agent.provider_id, agent.model)}
                       // What a blank field would resolve to, so "leave it empty" is a stated
                       // option rather than something the user has to discover. Mirrors
-                      // resolveAgentModel in electron/main/ai/agents.ts.
+                      // resolveAgentModel in electron/main/ai/agents.ts — including the empty
+                      // case, where that function refuses rather than filling one in, and the
+                      // accordion has to say "required" instead of naming a fallback.
                       modelPlaceholder={
-                        findProvider(agent.provider_id)?.defaultChatModel || settings.orchestratorModel
+                        agent.provider_id === ""
+                          ? settings.orchestratorModel
+                          : (findProvider(agent.provider_id)?.defaultChatModel ?? settings.orchestratorModel)
                       }
                       onChangePrompt={(prompt) => onUpdateAgent(agent.id, { prompt })}
                       onChangeEnabled={(enabled) => onUpdateAgent(agent.id, { enabled })}

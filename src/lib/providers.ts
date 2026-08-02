@@ -151,36 +151,42 @@ export function voiceProviders(): AiProvider[] {
 }
 
 /**
+ * Which provider a model id unmistakably belongs to, or null when nothing about it says.
+ *
+ * Only three shapes are unmistakable, and each is a *naming scheme* rather than a catalogue
+ * entry, so none of them goes stale when a provider ships a new model.
+ */
+function obviousProviderFor(model: string): string | null {
+  if (model.startsWith("claude-")) return "anthropic";
+  // OpenRouter namespaces everything as `vendor/model`, optionally behind its `~latest` marker.
+  if (model.includes("/") || model.startsWith("~")) return "openrouter";
+  if (/^(gpt-|chatgpt-|o\d)/.test(model)) return "openai";
+  return null;
+}
+
+/**
  * Whether a model id looks like one the given provider actually serves.
  *
- * Advisory only — it drives a warning, never a refused write. A model catalogue is not something
- * this app holds, and OpenRouter alone lists hundreds, so the honest thing is a shape check that
- * is confident about the obvious mismatches and silent about everything else.
+ * Advisory only — it drives a warning, never a refused write. It exists because switching an
+ * agent to a provider with no `defaultChatModel` leaves the old provider's id in place, and an
+ * agent reading "Claude" while still naming `gpt-4.1-mini` looks configured and 404s on first use.
  *
- * It exists because switching an agent to a provider with no `defaultChatModel` leaves the old
- * provider's id in place — deliberately, since only the user knows which model they pulled onto a
- * local server — and nothing said so. An agent reading "Local AI" while still naming
- * `claude-haiku-4-5-20251001` looks configured and 404s on first use.
+ * Framed as "does this obviously belong to someone *else*", not "is this on an allowlist for the
+ * chosen provider". The allowlist version is the tempting one and it is wrong: a false warning
+ * tells someone their working setup is broken, which is far more expensive than a missed one, and
+ * an allowlist manufactures those in bulk. Pointing the `openai` slot at an OpenAI-compatible
+ * gateway is a supported setup — that is what its editable URL is for — so `llama-3.3-70b-instruct`
+ * or an Azure-style deployment name under `openai` has to pass, as do bare `o1`/`o3` and every
+ * embedding, image and moderation id that will ship after this is written.
  *
- * Returns true wherever a judgment would be guesswork: a blank id (that means "use the default"),
- * an agent following the Chat slot, an unrecognised provider (which has its own warning), and
- * `local`, where any id can be legitimate because the user names their own models.
+ * So it stays quiet unless the id carries another provider's naming scheme, and quiet always for
+ * a blank id (that means "use the default"), an agent following the Chat slot, an unrecognised
+ * provider (which has its own warning), and `local`, where the user names their own models.
  */
 export function modelBelongsToProvider(providerId: string, modelId: string): boolean {
   const model = modelId.trim().toLowerCase();
-  if (model === "" || providerId === "" || !findProvider(providerId)) return true;
+  if (model === "" || providerId === "" || providerId === "local" || !findProvider(providerId)) return true;
 
-  switch (providerId) {
-    // OpenRouter namespaces every id as `vendor/model`, optionally behind its `~latest` marker.
-    case "openrouter":
-      return model.includes("/") || model.startsWith("~");
-    case "anthropic":
-      return model.startsWith("claude");
-    // Their catalogue is families rather than a single prefix: chat (gpt-, chatgpt-), reasoning
-    // (o1/o3/o4-), and the audio models the Voice slot uses.
-    case "openai":
-      return /^(gpt-|chatgpt-|o\d+-|whisper-|tts-)/.test(model);
-    default:
-      return true;
-  }
+  const obvious = obviousProviderFor(model);
+  return obvious === null || obvious === providerId;
 }
