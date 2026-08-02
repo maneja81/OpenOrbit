@@ -25,12 +25,14 @@
 export type SettingKind =
   | { type: "string" }
   | { type: "model" }
+  | { type: "url" }
   | { type: "boolean" }
   | { type: "number"; min?: number; max?: number; integer?: boolean }
   | { type: "stringArray" }
   | { type: "enum"; values: readonly string[] };
 
 const STRING: SettingKind = { type: "string" };
+const URL_KIND: SettingKind = { type: "url" };
 const BOOLEAN: SettingKind = { type: "boolean" };
 const MODEL: SettingKind = { type: "model" };
 const STRING_ARRAY: SettingKind = { type: "stringArray" };
@@ -51,9 +53,9 @@ export const MODEL_ID_PATTERN = /^[a-z0-9._-]+(\/[a-z0-9._:-]+)?$/i;
  * promise real; clamping on *read* is X3 and still worth doing for rows written before this. */
 export const SETTINGS_SCHEMA = {
   chatApiKey: STRING,
-  chatApiUrl: STRING,
+  chatApiUrl: URL_KIND,
   voiceApiKey: STRING,
-  voiceApiUrl: STRING,
+  voiceApiUrl: URL_KIND,
   voiceInputEnabled: BOOLEAN,
   typeAnywhereEnabled: BOOLEAN,
   onboardingDone: BOOLEAN,
@@ -94,6 +96,18 @@ export const SETTINGS_SCHEMA = {
 
 export type SettingKey = keyof typeof SETTINGS_SCHEMA;
 
+/** The runtime type a setting holds, derived from its declared kind — so `readAppSetting` returns
+ * `boolean` for a toggle and `number` for a tunable without every caller re-stating it. Enum and
+ * model kinds are strings; widened deliberately, since the value comes from the database and a
+ * literal union would be a promise this layer can't keep. */
+export type SettingValue<K extends SettingKey> = (typeof SETTINGS_SCHEMA)[K] extends { type: "boolean" }
+  ? boolean
+  : (typeof SETTINGS_SCHEMA)[K] extends { type: "number" }
+    ? number
+    : (typeof SETTINGS_SCHEMA)[K] extends { type: "stringArray" }
+      ? string[]
+      : string;
+
 /**
  * What each setting is when the user has never touched it.
  *
@@ -109,18 +123,6 @@ export type SettingKey = keyof typeof SETTINGS_SCHEMA;
  * "on" while the orchestrator's own view of the setting was "off" — and the orchestrator was the
  * one telling the truth about what main would do.
  */
-/** The runtime type a setting holds, derived from its declared kind — so `readAppSetting` returns
- * `boolean` for a toggle and `number` for a tunable without every caller re-stating it. Enum and
- * model kinds are strings; widened deliberately, since the value comes from the database and a
- * literal union would be a promise this layer can't keep. */
-export type SettingValue<K extends SettingKey> = (typeof SETTINGS_SCHEMA)[K] extends { type: "boolean" }
-  ? boolean
-  : (typeof SETTINGS_SCHEMA)[K] extends { type: "number" }
-    ? number
-    : (typeof SETTINGS_SCHEMA)[K] extends { type: "stringArray" }
-      ? string[]
-      : string;
-
 export const SETTING_DEFAULTS: { [K in SettingKey]: SettingValue<K> } = {
   chatApiKey: "",
   chatApiUrl: "",
@@ -178,6 +180,8 @@ function describe(kind: SettingKind): string {
       return "a string";
     case "model":
       return 'look like a model id ("model" or "provider/model")';
+    case "url":
+      return "be an http:// or https:// URL";
     case "boolean":
       return "true or false";
     case "stringArray":
@@ -217,6 +221,28 @@ export function validateSettingValue(key: string, value: unknown): { ok: true; v
       return MODEL_ID_PATTERN.test(trimmed)
         ? { ok: true, value: trimmed }
         : { ok: false, reason: `must ${describe(kind)}` };
+    }
+
+    case "url": {
+      if (typeof value !== "string") return { ok: false, reason: "must be a string" };
+      const trimmed = value.trim();
+      // Empty is how the app says "unset"; provider.ts substitutes OpenAI's base URL.
+      if (trimmed.length === 0) return { ok: true, value: "" };
+      let parsed: URL;
+      try {
+        parsed = new URL(trimmed);
+      } catch {
+        return { ok: false, reason: `must ${describe(kind)}` };
+      }
+      // Parsing via `new URL` rather than a regex, for the reason security/externalUrl.ts gives:
+      // it normalises the scheme, so a leading tab or newline cannot smuggle one past a
+      // `^https?:` test. Anything that is not a page URL is refused outright — the API key is
+      // sent to whatever is configured here, so `ftp:`, `file:` and `javascript:` have no
+      // business being accepted, and before this they were stored verbatim.
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        return { ok: false, reason: `must ${describe(kind)}` };
+      }
+      return { ok: true, value: trimmed };
     }
 
     case "boolean":

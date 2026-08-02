@@ -42,6 +42,12 @@ describe("settings ConfigAgent may write (backs Cipher's update_setting tool)", 
     "httpToolApprovalDelete",
     "toolApprovalDisplay",
     "locationEnabled",
+    // The provider URLs decide *where the API key is sent*: every call attaches
+    // `Authorization: Bearer <key>` to whatever host is configured. An agent able to write
+    // them can hand the user's key to a host of its choosing, and HTTPS is no defence —
+    // the destination is the problem, not the transport.
+    "chatApiUrl",
+    "voiceApiUrl",
   ];
 
   it.each(SAFETY_KEYS)("does not let an agent write %s", (key) => {
@@ -64,7 +70,9 @@ describe("settings ConfigAgent may write (backs Cipher's update_setting tool)", 
   });
 
   it("still lets an agent write the ordinary preferences", () => {
-    for (const key of ["agentName", "userName", "voiceInputEnabled", "orchestratorModel", "bgMusicEnabled"]) {
+    // The API *keys* stay writable — entering one by voice or chat during setup is a real
+    // flow, and unlike the URLs a key cannot redirect where data goes.
+    for (const key of ["agentName", "userName", "voiceInputEnabled", "orchestratorModel", "chatApiKey"]) {
       expect(ALLOWED_SETTING_KEYS as readonly string[]).toContain(key);
       expect(protectedSettingRefusal(key)).toBeNull();
     }
@@ -81,6 +89,7 @@ describe("settings ConfigAgent may write (backs Cipher's update_setting tool)", 
       expect(protectedSettingRefusal("httpToolApprovalDelete")).toContain("httpToolApprovalDelete");
       expect(protectedSettingRefusal("httpToolApprovalDelete")).toContain("Settings → HTTP Tools");
       expect(protectedSettingRefusal("locationEnabled")).toContain("Settings → General");
+      expect(protectedSettingRefusal("chatApiUrl")).toContain("Settings → AI Models");
     });
 
     it("tells the model not to retry", () => {

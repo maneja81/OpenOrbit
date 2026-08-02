@@ -209,9 +209,7 @@ export const ALLOWED_SETTING_KEYS = [
   "soundFxEnabled",
   "voiceOutputEnabled",
   "chatApiKey",
-  "chatApiUrl",
   "voiceApiKey",
-  "voiceApiUrl",
   "voiceTranscriptionModel",
   "voiceTtsModel",
   "agentName",
@@ -248,6 +246,14 @@ export const PROTECTED_SETTING_KEYS = [
   "httpToolApprovalDelete",
   "toolApprovalDisplay",
   "locationEnabled",
+  // chatApiUrl and voiceApiUrl decide *where the API key is sent*. Every provider call attaches
+  // `Authorization: Bearer <key>` to whatever host is configured here, so an agent able to write
+  // them can redirect the user's key to a host of its choosing — and the same injected text that
+  // could once disarm the approval gate can do this. HTTPS is no defence: the destination is the
+  // problem, not the transport. Found while investigating S8, which was only about the *format*
+  // of these values; the exfiltration path was the more serious half.
+  "chatApiUrl",
+  "voiceApiUrl",
 ] as const;
 
 /** Where each protected setting actually lives, so the refusal can point somewhere useful
@@ -258,6 +264,8 @@ const PROTECTED_SETTING_LOCATION: Record<(typeof PROTECTED_SETTING_KEYS)[number]
   httpToolApprovalDelete: "Settings → HTTP Tools",
   toolApprovalDisplay: "Settings → HTTP Tools",
   locationEnabled: "Settings → General",
+  chatApiUrl: "Settings → AI Models",
+  voiceApiUrl: "Settings → AI Models",
 };
 
 /** The refusal message for a protected key, or null if the key is freely writable. Exported
@@ -330,7 +338,7 @@ const getSettingsTool = tool({
 const updateSettingTool = tool({
   name: "update_setting",
   description:
-    "Update one of the app's settings: voiceInputEnabled, typeAnywhereEnabled, bgMusicEnabled, soundFxEnabled, voiceOutputEnabled, chatApiKey, chatApiUrl, voiceApiKey, voiceApiUrl, voiceTranscriptionModel, voiceTtsModel, agentName, agentDescription, userName, orchestratorModel. The approval settings (httpToolApprovalPost/PutPatch/Delete, toolApprovalDisplay) and locationEnabled are safety settings and cannot be changed here — only the user can change those, in Settings.",
+    "Update one of the app's settings: voiceInputEnabled, typeAnywhereEnabled, bgMusicEnabled, soundFxEnabled, voiceOutputEnabled, chatApiKey, voiceApiKey, voiceTranscriptionModel, voiceTtsModel, agentName, agentDescription, userName, orchestratorModel. The approval settings (httpToolApprovalPost/PutPatch/Delete, toolApprovalDisplay), locationEnabled, and the provider URLs (chatApiUrl, voiceApiUrl) are safety settings and cannot be changed here — only the user can change those, in Settings.",
   parameters: z.object({
     // Protected keys stay nameable so a request to change one gets a real answer pointing at
     // Settings. Dropping them from the enum instead would surface as a schema error, which
