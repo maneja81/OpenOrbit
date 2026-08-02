@@ -29,6 +29,7 @@ import {
   updateAgent,
 } from "./agents";
 import { saveConnectorCredentials } from "../db/connectorsStore";
+import { setSetting } from "../db/settingsStore";
 
 describe("settings ConfigAgent may write (backs Cipher's update_setting tool)", () => {
   // The point of these: a reply is assembled from text this app did not author — web search
@@ -226,6 +227,64 @@ describe("updateAgent (backs Cipher's update_agent tool)", () => {
   it("rejects an explicitly blank name instead of silently keeping the old one", () => {
     const created = createAgent({ name: "Recipe Helper", prompt: "p1" });
     expect(() => updateAgent(created.id, { name: "   " })).toThrow("Agent name cannot be blank.");
+  });
+});
+
+// The bug these cover: both writers resolved a blank model to the *static*
+// SETTING_DEFAULTS.orchestratorModel — the literal "gpt-4.1-mini". So on an install pointed at
+// Claude, clearing an agent's Model ID stored an OpenAI id, and the next run 404'd against
+// Anthropic for an agent the user had only tried to reset.
+describe("a blank model id resolves against the agent's own provider", () => {
+  beforeEach(() => {
+    db = new Database(":memory:");
+    runMigrations(db);
+  });
+
+  it("takes the pinned provider's default, not the build's", () => {
+    const created = createAgent({ name: "Researcher", prompt: "p" });
+    const updated = updateAgent(created.id, { providerId: "anthropic", model: "" });
+
+    expect(updated.provider_id).toBe("anthropic");
+    expect(updated.model).toBe("claude-haiku-4-5-20251001");
+  });
+
+  it("takes the live orchestrator model when the agent follows the Chat slot", () => {
+    setSetting("appSettings.orchestratorModel", "claude-haiku-4-5-20251001");
+    const created = createAgent({ name: "Researcher", prompt: "p" });
+
+    expect(updateAgent(created.id, { model: "" }).model).toBe("claude-haiku-4-5-20251001");
+  });
+
+  it("takes the live orchestrator model for `local`, which has no default of its own", () => {
+    setSetting("appSettings.orchestratorModel", "~deepseek/deepseek-v4-flash-latest");
+    const created = createAgent({ name: "Researcher", prompt: "p" });
+    const updated = updateAgent(created.id, { providerId: "local", model: "" });
+
+    expect(updated.provider_id).toBe("local");
+    expect(updated.model).toBe("~deepseek/deepseek-v4-flash-latest");
+  });
+
+  it("reads the incoming provider id, not the stored one, when both move at once", () => {
+    const created = createAgent({ name: "Researcher", prompt: "p" });
+    updateAgent(created.id, { providerId: "anthropic" });
+    // Settings patches provider and model together; the model must follow the provider being
+    // set in this same call, not the one the row still holds.
+    const updated = updateAgent(created.id, { providerId: "openrouter", model: "" });
+
+    expect(updated.model).toBe("~deepseek/deepseek-v4-flash-latest");
+  });
+
+  it("seeds a new agent from the live Chat model rather than the compile-time default", () => {
+    setSetting("appSettings.orchestratorModel", "claude-haiku-4-5-20251001");
+
+    expect(createAgent({ name: "Researcher", prompt: "p" }).model).toBe("claude-haiku-4-5-20251001");
+  });
+
+  it("still refuses an unknown provider id rather than falling back to a default", () => {
+    const created = createAgent({ name: "Researcher", prompt: "p" });
+    expect(() => updateAgent(created.id, { providerId: "not-a-provider", model: "" })).toThrow(
+      /is not a provider this app knows about/
+    );
   });
 });
 
