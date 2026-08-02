@@ -145,6 +145,7 @@ export default function AgentsApp() {
   const {
     agents,
     rawAgents,
+    error: agentsError,
     updateAgent,
     createAgent,
     refreshAgents,
@@ -179,7 +180,9 @@ export default function AgentsApp() {
   const handleCreateAgent = useCallback(
     async (input: Parameters<typeof createAgent>[0]) => {
       const result = await createAgent(input);
-      playSfx("agentCreated");
+      // Only on a real creation. The sound used to play unconditionally, so a failed create
+      // still chimed as though it had worked.
+      if (result) playSfx("agentCreated");
       return result;
     },
     [createAgent, playSfx]
@@ -187,8 +190,9 @@ export default function AgentsApp() {
 
   const handleDeleteAgent = useCallback(
     async (id: string) => {
-      await deleteAgent(id);
-      playSfx("agentDeleted");
+      const deleted = await deleteAgent(id);
+      // Same reason as handleCreateAgent — a failed delete announced itself as a success.
+      if (deleted) playSfx("agentDeleted");
     },
     [deleteAgent, playSfx]
   );
@@ -810,6 +814,7 @@ export default function AgentsApp() {
         settings={settings}
         sessionElapsedMs={sessionElapsedMs}
         onUpdate={updateSettings}
+        agentsError={agentsError}
         onReset={handleResetSettings}
         agents={rawAgents}
         onUpdateAgent={updateAgent}
