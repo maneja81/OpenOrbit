@@ -194,6 +194,36 @@ const COMMANDS = {
     console.log(`wrote ${name} = ${raw}`);
   },
 
+  /** `sql <statement>` — run arbitrary SQL against the sandbox database. Quit first.
+   *
+   * `sql-set` only covers the settings table; the read-side guards live on other tables too
+   * (agent_data), and some paths can only be reached by editing schema_migrations to make a
+   * migration replay. A SELECT prints its rows; anything else prints the change count. Safe
+   * because the sandbox check has already confined this to a throwaway database — never point
+   * ORBIT_USER_DATA at the real one. */
+  sql(statement) {
+    if (app) return console.log("ERROR: quit first — the app holds the database open");
+    if (!statement) return console.log("usage: sql SELECT * FROM schema_migrations LIMIT 5");
+    if (!fs.existsSync(dbPath())) return console.log("ERROR: no database yet — launch once first");
+    const Database = require("better-sqlite3");
+    const db = new Database(dbPath());
+    try {
+      const stmt = db.prepare(statement);
+      if (stmt.reader) {
+        const rows = stmt.all();
+        if (!rows.length) console.log("(no rows)");
+        for (const row of rows) console.log(" ", JSON.stringify(row));
+      } else {
+        const { changes } = stmt.run();
+        console.log(`${changes} row(s) changed`);
+      }
+    } catch (e) {
+      console.log("SQL ERROR:", e.message);
+    } finally {
+      db.close();
+    }
+  },
+
   /** Print the settings rows as they actually sit in SQLite, unparsed. */
   "sql-dump"() {
     if (!fs.existsSync(dbPath())) return console.log("ERROR: no database yet — launch once first");
