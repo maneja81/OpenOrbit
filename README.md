@@ -1,18 +1,16 @@
 # OpenOrbit
 
-<img src="public/openorbit-logo.svg" alt="OpenOrbit logo" width="120" height="120">
-
 A desktop app that runs a team of AI agents on your own machine — a central orchestrator
 that delegates to specialist sub-agents, each with its own tools, connected to your files,
 apps, and Google account.
+
+<img src="public/openorbit.webp" alt="OpenOrbit orbit UI screenshot">
 
 > **This is a personal side project — built evenings and weekends, around a full-time job.
 > No support, no roadmap commitments, no guarantees.**
 >
 > The app is built and works. There are no packaged downloads yet, so running it means
 > [building from source](#build-and-run). Dates aren't promised.
-
-<img src="public/openorbit.webp" alt="OpenOrbit orbit UI screenshot">
 
 ## How it works
 
