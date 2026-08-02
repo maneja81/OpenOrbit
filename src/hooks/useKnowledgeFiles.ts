@@ -10,6 +10,28 @@ export function useKnowledgeFiles() {
     hasAgentsAPI() ? null : "Native filesystem bridge unavailable (window.agentsAPI is missing)."
   );
 
+  /** Ids of rows with an operation in flight, so a row's own controls can disable rather than
+   * queueing a second remove or re-sync behind the first. `loading` already covers the
+   * whole-list operations (pickAndAdd, addFolder); it says nothing about a single row, which is
+   * where the repeat clicks actually happen — re-syncing a URL is network-bound and gives no
+   * feedback of its own. */
+  const [pendingIds, setPendingIds] = useState<ReadonlySet<number>>(() => new Set());
+
+  /** Marks `id` busy for the duration of `op`. `finally` rather than a trailing clear: an op
+   * that throws must still release the row, or its buttons stay dead until remount. */
+  const track = useCallback(async (id: number, op: () => Promise<void>): Promise<void> => {
+    setPendingIds((prev) => new Set(prev).add(id));
+    try {
+      await op();
+    } finally {
+      setPendingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  }, []);
+
   const refresh = useCallback(async () => {
     if (!hasAgentsAPI()) return;
     const list = await window.agentsAPI.knowledgebase.list();
@@ -107,45 +129,51 @@ export function useKnowledgeFiles() {
     async (id: number) => {
       if (!hasAgentsAPI()) return;
       setError(null);
-      try {
-        await window.agentsAPI.knowledgebase.remove(id);
-        await refresh();
-      } catch (e) {
-        setError(formatHumanizedError(humanizeError(e)));
-      }
+      await track(id, async () => {
+        try {
+          await window.agentsAPI.knowledgebase.remove(id);
+          await refresh();
+        } catch (e) {
+          setError(formatHumanizedError(humanizeError(e)));
+        }
+      });
     },
-    [refresh]
+    [refresh, track]
   );
 
   const updateCategory = useCallback(
     async (id: number, category: string) => {
       if (!hasAgentsAPI()) return;
       setError(null);
-      try {
-        await window.agentsAPI.knowledgebase.updateCategory(id, category);
-        await refresh();
-      } catch (e) {
-        setError(formatHumanizedError(humanizeError(e)));
-      }
+      await track(id, async () => {
+        try {
+          await window.agentsAPI.knowledgebase.updateCategory(id, category);
+          await refresh();
+        } catch (e) {
+          setError(formatHumanizedError(humanizeError(e)));
+        }
+      });
     },
-    [refresh]
+    [refresh, track]
   );
 
   const syncOne = useCallback(
     async (id: number) => {
       if (!hasAgentsAPI()) return;
       setError(null);
-      try {
-        const { missing } = await window.agentsAPI.knowledgebase.sync(id);
-        await refresh();
-        if (missing.length > 0) {
-          setError(`Could not re-sync: ${missing.map((m) => `${m.name} (${m.error})`).join(", ")}`);
+      await track(id, async () => {
+        try {
+          const { missing } = await window.agentsAPI.knowledgebase.sync(id);
+          await refresh();
+          if (missing.length > 0) {
+            setError(`Could not re-sync: ${missing.map((m) => `${m.name} (${m.error})`).join(", ")}`);
+          }
+        } catch (e) {
+          setError(formatHumanizedError(humanizeError(e)));
         }
-      } catch (e) {
-        setError(formatHumanizedError(humanizeError(e)));
-      }
+      });
     },
-    [refresh]
+    [refresh, track]
   );
 
   const openFile = useCallback(async (filePath: string) => {
@@ -161,6 +189,7 @@ export function useKnowledgeFiles() {
   return {
     files,
     loading,
+    pendingIds,
     error,
     addFiles,
     addFolder,

@@ -29,7 +29,17 @@ function entry(id: number, overrides: Partial<KnowledgebaseFileRecord> = {}): Kn
 }
 
 function setFiles(files: KnowledgebaseFileRecord[]) {
-  useSharedKnowledgeFiles.mockReturnValue({ files, error: null, addFolder, pickAndAdd, removeFile });
+  // pendingIds/loading are part of the hook's contract now — a mock that omits them renders
+  // `pendingIds.has(...)` against undefined and the component throws.
+  useSharedKnowledgeFiles.mockReturnValue({
+    files,
+    error: null,
+    loading: false,
+    pendingIds: new Set<number>(),
+    addFolder,
+    pickAndAdd,
+    removeFile,
+  });
 }
 
 describe("FilesAppsTab", () => {
