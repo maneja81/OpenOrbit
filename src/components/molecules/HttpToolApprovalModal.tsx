@@ -30,8 +30,15 @@ function formatArgs(args: string | undefined): string | null {
  * paused while this is open (its timeout clock is stopped in ipc/agent.ts), so there is no
  * time pressure to answer — but leaving it unanswered for five minutes declines the call.
  *
- * Deliberately not dismissible by clicking away: closing without an answer would leave the
- * run hanging with no visible reason, so the only exits are Approve and Don't run.
+ * Every exit answers the call; none of them leave the run hanging. Approve runs the tool,
+ * Don't run and Escape decline it. Backdrop clicks are ignored (`closeOnBackdrop={false}`):
+ * this modal's onClose is an *answer*, not a dismissal, and a mis-aimed click landing outside
+ * the panel should not decide whether a POST or DELETE goes out. Escape is kept because it is
+ * a deliberate keypress that already means cancel, and a dialog that swallows it is worse for
+ * keyboard users than one that treats it as "no".
+ *
+ * An earlier version of this comment claimed the modal was not dismissible by clicking away.
+ * It was — backdrop mousedown reached Modal's onClose and silently declined the call.
  */
 export default function HttpToolApprovalModal({ approval, onRespond }: HttpToolApprovalModalProps) {
   const formattedArgs = formatArgs(approval?.args);
@@ -41,6 +48,7 @@ export default function HttpToolApprovalModal({ approval, onRespond }: HttpToolA
       open={approval !== null}
       onClose={() => approval && onRespond(approval.approvalId, false)}
       label="Run this tool?"
+      closeOnBackdrop={false}
     >
       <div className="http-approval-body">
         <h3>Run this tool?</h3>

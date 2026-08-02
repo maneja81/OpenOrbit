@@ -10,6 +10,13 @@ interface ModalProps {
    * a name announces as an unnamed "dialog", which is what every modal in the app did before.
    * Pass the same words as the visible heading so the two can't drift. */
   label: string;
+  /** Whether a click on the backdrop closes the modal. Default true.
+   *
+   * Set false for a modal whose `onClose` is itself an answer rather than a dismissal —
+   * HttpToolApprovalModal declines the tool call, so a mis-aimed click would silently answer a
+   * security prompt. Escape stays live either way: it is a deliberate keypress, and WAI-ARIA
+   * expects a dialog to honour it. */
+  closeOnBackdrop?: boolean;
 }
 
 /** Every open Modal listens on `document` for Escape, so one keypress reached all of them — a
@@ -26,7 +33,14 @@ const openModals: RefObject<HTMLDivElement | null>[] = [];
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-export default function Modal({ open, onClose, children, className = "", label }: ModalProps) {
+export default function Modal({
+  open,
+  onClose,
+  children,
+  className = "",
+  label,
+  closeOnBackdrop = true,
+}: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const returnFocusTo = useRef<HTMLElement | null>(null);
 
@@ -120,7 +134,10 @@ export default function Modal({ open, onClose, children, className = "", label }
   if (!open) return null;
 
   return createPortal(
-    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div
+      className="modal-backdrop"
+      onMouseDown={(e) => closeOnBackdrop && e.target === e.currentTarget && onClose()}
+    >
       <div
         className={`modal-panel${className ? ` ${className}` : ""}`}
         role="dialog"
