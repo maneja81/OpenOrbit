@@ -5,7 +5,6 @@ import { AI_PROVIDERS } from "@/lib/providers";
 import Toggle from "@/components/atoms/Toggle";
 import TagMultiSelect from "@/components/atoms/TagMultiSelect";
 import DeleteConfirmModal from "@/components/molecules/DeleteConfirmModal";
-import { DEFAULT_ORCHESTRATOR_MODEL } from "@/lib/settings";
 
 interface AgentAccordionProps {
   icon: string;
@@ -255,7 +254,11 @@ export default function AgentAccordion({
             <label className="settings-field">
               <span>
                 <span>Model ID</span>
-                <small>Leave blank to use {modelPlaceholder || DEFAULT_ORCHESTRATOR_MODEL}</small>
+                <small>
+                  {modelPlaceholder
+                    ? `Leave blank to use ${modelPlaceholder}`
+                    : "Required — this provider has no default model"}
+                </small>
               </span>
               <input
                 type="text"
@@ -267,7 +270,7 @@ export default function AgentAccordion({
                   if (modelDraft !== (model ?? "")) onChangeModel(modelDraft);
                 }}
                 onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-                placeholder={modelPlaceholder || DEFAULT_ORCHESTRATOR_MODEL}
+                placeholder={modelPlaceholder || "e.g. llama3.1:8b"}
                 aria-label="Model ID"
                 autoComplete="off"
               />

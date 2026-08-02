@@ -52,13 +52,20 @@ export function selectChatProvider(selection: ChatProviderSelection): ChatProvid
   const switchingProvider = currentProviderId !== provider.id;
   const storedUrl = listVisibleProviders().find((row) => row.id === provider.id)?.apiUrl ?? "";
 
-  // Omitted fields keep what is already stored rather than snapping back to the registry default.
+  // An *omitted* field keeps what is already stored; an *explicitly blank* one resets to the
+  // provider's default. Those are different intents and collapsing them breaks one of them.
   //
-  // They used to fall through to `provider.baseUrl` / `provider.defaultChatModel` unconditionally,
-  // which made every partial write destructive: the Settings panel saves the key on its own, so
-  // rotating a key reset a custom model *and* a custom API URL. On a setup pointed at a private
-  // gateway that silently re-aimed the slot at api.openai.com and sent the user's key there.
-  const apiUrl = selection.apiUrl?.trim() || storedUrl || provider.baseUrl;
+  // Omitted used to fall through to the registry default unconditionally, which made every partial
+  // write destructive: the Settings panel saves the key on its own, so rotating a key reset a
+  // custom model *and* a custom API URL — on a setup pointed at a private gateway that silently
+  // re-aimed the slot at api.openai.com and sent the user's key there.
+  //
+  // Fixing that with `||` overshot in the other direction: emptying the URL or model field then
+  // resolved to the stored value and was silently discarded, while TextField — which only resyncs
+  // when the stored value changes — left the box looking empty. The field said one thing and the
+  // database held another, with no error. Hence `=== undefined` rather than falsiness.
+  const apiUrl =
+    selection.apiUrl === undefined ? storedUrl || provider.baseUrl : selection.apiUrl.trim() || provider.baseUrl;
   // A hosted provider always has a default URL to fall back on; `local` does not, because only
   // the user knows where their server is.
   if (apiUrl === "") throw new Error(`${provider.label} needs an API URL.`);
@@ -68,8 +75,11 @@ export function selectChatProvider(selection: ChatProviderSelection): ChatProvid
   // Switching provider still moves the model — that is the whole point of this function, and a
   // model id from the old host is exactly what breaks against the new one. Staying put keeps it.
   const model =
-    selection.model?.trim() ||
-    (switchingProvider ? provider.defaultChatModel : readAppSetting("orchestratorModel"));
+    selection.model === undefined
+      ? switchingProvider
+        ? provider.defaultChatModel
+        : readAppSetting("orchestratorModel")
+      : selection.model.trim() || provider.defaultChatModel;
   if (model === "") throw new Error(`${provider.label} needs a model id.`);
   const modelCheck = validateSettingValue("orchestratorModel", model);
   if (!modelCheck.ok) throw new Error(`That model id ${modelCheck.reason}.`);

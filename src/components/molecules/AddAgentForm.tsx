@@ -2,7 +2,6 @@ import { useState } from "react";
 import Combobox from "@/components/atoms/Combobox";
 import { formatHumanizedError, humanizeError } from "@/lib/humanizeError";
 import { AI_PROVIDERS, findProvider } from "@/lib/providers";
-import { DEFAULT_ORCHESTRATOR_MODEL } from "@/lib/settings";
 
 interface AddAgentFormProps {
   defaultModel: string;
@@ -27,14 +26,20 @@ export default function AddAgentForm({ defaultModel, onCreate, onCancel }: AddAg
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  /** What a blank Model ID would resolve to for the provider currently picked — empty when that
+   * provider has no default, which is `local` and only `local`. */
+  const fallbackModel = providerId === "" ? defaultModel : (findProvider(providerId)?.defaultChatModel ?? "");
+
   /** Moving the provider moves the model with it, the same way the accordion does for an agent
    * that already exists — otherwise the field still holds the Chat slot's id, which the newly
-   * chosen provider has never heard of. A provider with no default of its own (`local`) leaves
-   * the field alone for the user to fill. */
+   * chosen provider has never heard of.
+   *
+   * A provider with no default *clears* the field rather than leaving it. Leaving it looked
+   * harmless and wasn't: the field is pre-filled with the Chat model at mount, so picking Local AI
+   * and submitting created an Ollama agent named `gpt-4.1-mini`, which 404s on first use. */
   const changeProvider = (nextProviderId: string) => {
     setProviderId(nextProviderId);
-    const nextModel = nextProviderId === "" ? defaultModel : findProvider(nextProviderId)?.defaultChatModel;
-    if (nextModel) setModel(nextModel);
+    setModel(nextProviderId === "" ? defaultModel : (findProvider(nextProviderId)?.defaultChatModel ?? ""));
   };
 
   const handleSubmit = async () => {
@@ -111,13 +116,17 @@ export default function AddAgentForm({ defaultModel, onCreate, onCancel }: AddAg
         <label className="settings-field">
           <span>
             <span>Model ID</span>
-            <small>Leave blank to use {findProvider(providerId)?.defaultChatModel || defaultModel}</small>
+            <small>
+              {fallbackModel
+                ? `Leave blank to use ${fallbackModel}`
+                : "Required — this provider has no default model"}
+            </small>
           </span>
           <input
             type="text"
             value={model}
             onChange={(e) => setModel(e.target.value)}
-            placeholder={findProvider(providerId)?.defaultChatModel || defaultModel || DEFAULT_ORCHESTRATOR_MODEL}
+            placeholder={fallbackModel || "e.g. llama3.1:8b"}
             aria-label="Model ID"
             autoComplete="off"
           />

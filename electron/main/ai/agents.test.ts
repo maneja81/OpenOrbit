@@ -255,13 +255,27 @@ describe("a blank model id resolves against the agent's own provider", () => {
     expect(updateAgent(created.id, { model: "" }).model).toBe("claude-haiku-4-5-20251001");
   });
 
-  it("takes the live orchestrator model for `local`, which has no default of its own", () => {
-    setSetting("appSettings.orchestratorModel", "~deepseek/deepseek-v4-flash-latest");
+  // The Chat slot's model is the wrong answer for `local`: on a default install it stores
+  // gpt-4.1-mini against an Ollama server, which 404s — the same failure arrived at from the
+  // other direction. Nobody but the user can supply the id, so asking is the honest move.
+  it("refuses a blank model for `local` rather than filling in the Chat slot's", () => {
     const created = createAgent({ name: "Researcher", prompt: "p" });
-    const updated = updateAgent(created.id, { providerId: "local", model: "" });
+    expect(() => updateAgent(created.id, { providerId: "local", model: "" })).toThrow(
+      /Local AI needs a model id/
+    );
+  });
 
-    expect(updated.provider_id).toBe("local");
-    expect(updated.model).toBe("~deepseek/deepseek-v4-flash-latest");
+  it("refuses it at create too", () => {
+    expect(() => createAgent({ name: "Researcher", prompt: "p", providerId: "local" })).toThrow(
+      /Local AI needs a model id/
+    );
+  });
+
+  it("still accepts an explicit model for `local`", () => {
+    const created = createAgent({ name: "Researcher", prompt: "p", providerId: "local", model: "llama3.1:8b" });
+
+    expect(created.provider_id).toBe("local");
+    expect(created.model).toBe("llama3.1:8b");
   });
 
   it("reads the incoming provider id, not the stored one, when both move at once", () => {
@@ -310,6 +324,69 @@ describe("a blank model id resolves against the agent's own provider", () => {
     expect(() => createAgent({ name: "Researcher", prompt: "p", providerId: "not-a-provider" })).toThrow(
       /is not a provider this app knows about/
     );
+  });
+
+  // An unrecognised id in a *stored* row is a different situation from one in a patch: it came
+  // from a build that had that provider. Refusing every write to the row made it impossible to
+  // rename, disable, or re-point — the one action that would fix it.
+  it("still lets a row naming a provider this build lacks be edited and re-pointed", () => {
+    const created = createAgent({ name: "Researcher", prompt: "p" });
+    db.prepare("UPDATE agents SET provider_id = 'gemini' WHERE id = ?").run(created.id);
+
+    expect(updateAgent(created.id, { name: "Renamed" }).name).toBe("Renamed");
+    expect(updateAgent(created.id, { providerId: "anthropic" }).provider_id).toBe("anthropic");
+  });
+});
+
+describe("export/import carries the provider a model belongs to", () => {
+  beforeEach(() => {
+    db = new Database(":memory:");
+    runMigrations(db);
+  });
+
+  // Keeping `model` while dropping `providerId` was the unsafe half of the pair: an agent
+  // exported on Claude arrived naming a Claude model and following the importing machine's Chat
+  // slot, so every run asked OpenAI for a Claude model.
+  it("round-trips a pinned agent's provider", () => {
+    const created = createAgent({ name: "Researcher", prompt: "p", providerId: "anthropic" });
+    const exported = exportAgent(created.id);
+
+    expect(exported.providerId).toBe("anthropic");
+    expect(importAgent(exported).provider_id).toBe("anthropic");
+  });
+
+  it("keeps an agent that followed the Chat slot following it", () => {
+    const created = createAgent({ name: "Researcher", prompt: "p" });
+
+    expect(importAgent(exportAgent(created.id)).provider_id).toBe("");
+  });
+
+  it("degrades a provider this build doesn't have rather than failing the import", () => {
+    const row = importAgent({
+      name: "From Elsewhere",
+      icon: "ti-robot",
+      tagline: "",
+      description: "",
+      model: "gpt-4.1-mini",
+      providerId: "gemini",
+      prompt: "p",
+    });
+
+    expect(row.provider_id).toBe("");
+    expect(row.model).toBe("gpt-4.1-mini");
+  });
+
+  it("accepts a file written before per-agent providers existed", () => {
+    const row = importAgent({
+      name: "Legacy",
+      icon: "ti-robot",
+      tagline: "",
+      description: "",
+      model: "gpt-4.1-mini",
+      prompt: "p",
+    });
+
+    expect(row.provider_id).toBe("");
   });
 
   it("still refuses an unknown provider id rather than falling back to a default", () => {
@@ -402,6 +479,9 @@ describe("exportAgent / exportAllAgents / importAgent", () => {
       tagline: "Cooking",
       description: "desc",
       model: created.model,
+      // Carried, unlike the ids this type omits: a provider id names a registry entry every
+      // install compiles in, not a row in this one's database.
+      providerId: "",
       prompt: "p",
     });
   });
