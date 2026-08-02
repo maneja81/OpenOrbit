@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_ORCHESTRATOR_MODEL, DEFAULT_SETTINGS } from "./settings";
-import { SETTING_DEFAULTS } from "../../electron/main/settingsSchema";
+import { DEFAULT_ORCHESTRATOR_MODEL, DEFAULT_SETTINGS, SETTING_BOUNDS } from "./settings";
+import { SETTING_DEFAULTS, SETTINGS_SCHEMA } from "../../electron/main/settingsSchema";
 
 /**
  * The renderer and the main process each hold their own copy of the settings defaults, because
@@ -54,5 +54,38 @@ describe("the orchestrator model default", () => {
     // remaining way they could diverge.
     expect(SETTING_DEFAULTS.orchestratorModel).toBe(DEFAULT_ORCHESTRATOR_MODEL);
     expect(DEFAULT_SETTINGS.orchestratorModel).toBe(DEFAULT_ORCHESTRATOR_MODEL);
+  });
+});
+
+
+describe("numeric bounds, renderer vs main", () => {
+  it("agree on every bound", () => {
+    // main's schema is what enforces these at the write boundary; the renderer's copy is what the
+    // input advertises and validates against. A bound changed on one side alone would mean the UI
+    // promising a range the boundary doesn't keep, or refusing a value it would have accepted.
+    for (const [key, bound] of Object.entries(SETTING_BOUNDS)) {
+      const kind = SETTINGS_SCHEMA[key as keyof typeof SETTINGS_SCHEMA] as {
+        type: string;
+        min?: number;
+        max?: number;
+        integer?: boolean;
+      };
+      expect(kind.type, key).toBe("number");
+      expect({ min: kind.min, max: kind.max, integer: kind.integer ?? false }, key).toEqual({
+        min: bound.min,
+        max: bound.max,
+        integer: "integer" in bound ? bound.integer : false,
+      });
+    }
+  });
+
+  it("covers every numeric setting the schema declares", () => {
+    const numericKeys = Object.entries(SETTINGS_SCHEMA)
+      .filter(([, kind]) => (kind as { type: string }).type === "number")
+      // The sound variants are clamped on merge rather than typed into a field, so they have no
+      // input to advertise a range on.
+      .filter(([key]) => !key.startsWith("soundVariant"))
+      .map(([key]) => key);
+    expect(numericKeys.sort()).toEqual(Object.keys(SETTING_BOUNDS).sort());
   });
 });

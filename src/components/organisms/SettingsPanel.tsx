@@ -8,13 +8,14 @@ import AgentAccordion from "@/components/molecules/AgentAccordion";
 import SettingsAccordion from "@/components/molecules/SettingsAccordion";
 import AddAgentForm from "@/components/molecules/AddAgentForm";
 import ApiKeyField from "@/components/molecules/ApiKeyField";
+import NumberField from "@/components/molecules/NumberField";
 import FilesAppsTab from "@/components/organisms/FilesAppsTab";
 import McpServersTab from "@/components/organisms/McpServersTab";
 import ConnectorsTab from "@/components/organisms/ConnectorsTab";
 import HttpToolsTab from "@/components/organisms/HttpToolsTab";
 import AboutTab from "@/components/organisms/AboutTab";
 import ErrorBoundary from "@/components/atoms/ErrorBoundary";
-import { ToolApprovalDisplay, DEFAULT_ORCHESTRATOR_MODEL, AgentsSettings, SettingsView, VOICE_TTS_VOICE_OPTIONS, SOUND_FX_VARIANT_COUNT } from "@/lib/settings";
+import { SETTING_BOUNDS, ToolApprovalDisplay, DEFAULT_ORCHESTRATOR_MODEL, AgentsSettings, SettingsView, VOICE_TTS_VOICE_OPTIONS, SOUND_FX_VARIANT_COUNT } from "@/lib/settings";
 import { USER_CONTEXT_FIELDS } from "@/lib/userContext";
 import { hasAgentsAPI } from "@/lib/agentsApi";
 import { useMcpServers } from "@/hooks/useMcpServers";
@@ -745,20 +746,12 @@ export default function SettingsPanel({
                     />
                   </div>
                   {settings.bgMusicEnabled && (
-                    <label className="row-field">
-                      <span>Background music volume</span>
-                      <input
-                        type="number"
-                        min={0}
-                        max={1}
-                        step={0.05}
-                        value={settings.bgMusicVolume}
-                        onChange={(e) => {
-                          const value = Number(e.target.value);
-                          if (!Number.isNaN(value)) onUpdate({ bgMusicVolume: Math.min(1, Math.max(0, value)) });
-                        }}
-                      />
-                    </label>
+                    <NumberField
+                      label="Background music volume"
+                      value={settings.bgMusicVolume}
+                      bound={SETTING_BOUNDS.bgMusicVolume}
+                      onCommit={(bgMusicVolume) => onUpdate({ bgMusicVolume })}
+                    />
                   )}
                   <div className="row">
                     <span className="row-label">Type anywhere to focus chat</span>
@@ -771,45 +764,26 @@ export default function SettingsPanel({
                 </div>
 
                 <div className="card">
-                  <label className="row-field">
-                    <span>Agent run timeout (seconds)</span>
-                    <input
-                      type="number"
-                      min={5}
-                      value={settings.agentRunTimeoutSeconds}
-                      onChange={(e) => {
-                        const value = Number(e.target.value);
-                        if (!Number.isNaN(value) && value > 0) onUpdate({ agentRunTimeoutSeconds: value });
-                      }}
-                    />
-                  </label>
-                  <label className="row-field">
-                    <span>Chat history sent to the orchestrator (messages)</span>
-                    <input
-                      type="number"
-                      min={1}
-                      value={settings.chatHistoryMessageLimit}
-                      onChange={(e) => {
-                        const value = Number(e.target.value);
-                        if (!Number.isNaN(value) && value > 0) onUpdate({ chatHistoryMessageLimit: value });
-                      }}
-                    />
-                  </label>
-                  <label className="row-field">
-                    <span>
-                      System Status refresh interval (ms)<small>Applies after restarting the app</small>
-                    </span>
-                    <input
-                      type="number"
-                      min={500}
-                      step={500}
-                      value={settings.systemStatsPollIntervalMs}
-                      onChange={(e) => {
-                        const value = Number(e.target.value);
-                        if (!Number.isNaN(value) && value > 0) onUpdate({ systemStatsPollIntervalMs: value });
-                      }}
-                    />
-                  </label>
+                  <NumberField
+                    label="Agent run timeout (seconds)"
+                    value={settings.agentRunTimeoutSeconds}
+                    bound={SETTING_BOUNDS.agentRunTimeoutSeconds}
+                    onCommit={(agentRunTimeoutSeconds) => onUpdate({ agentRunTimeoutSeconds })}
+                  />
+                  <NumberField
+                    label="Chat history sent to the orchestrator (messages)"
+                    hint="A bigger window keeps more of a long conversation in view, and costs more per run"
+                    value={settings.chatHistoryMessageLimit}
+                    bound={SETTING_BOUNDS.chatHistoryMessageLimit}
+                    onCommit={(chatHistoryMessageLimit) => onUpdate({ chatHistoryMessageLimit })}
+                  />
+                  <NumberField
+                    label="System Status refresh interval (ms)"
+                    hint="Applies after restarting the app"
+                    value={settings.systemStatsPollIntervalMs}
+                    bound={SETTING_BOUNDS.systemStatsPollIntervalMs}
+                    onCommit={(systemStatsPollIntervalMs) => onUpdate({ systemStatsPollIntervalMs })}
+                  />
                 </div>
               </div>
             )}
