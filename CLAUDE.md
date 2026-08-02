@@ -6,46 +6,102 @@ Use live code evidence before planning or editing. Make the smallest safe change
 
 OpenOrbit — a desktop app that runs a team of AI agents locally, with a central orchestrator delegating to specialist sub-agents, each with its own tools and access to the user's files, apps, and Google account.
 
-**Status:** idea phase. No source code exists yet. All current content is planning documentation.
+**Status:** implemented and under active development on `develop-ai`. ~290 source files across an Electron main process, a preload bridge, and a React renderer. The source tree is currently untracked in git (only `README.md`, `LICENSE`, `.gitignore`, and this file are committed) — `README.md` still describes the project as "idea phase" and is stale.
+
+Four built-in sub-agents ship seeded from `electron/main/ai/defaultAgents.json`: Cipher (`configAgent`), Atlas (`knowledgeAgent`), Explorer (`explorerAgent`), Chrono (`taskAgent`). The orchestrator ("Orbit") is singular, not an `agents` row, and is configured from its own prompt file plus settings.
 
 ## Tech Stack
 
 | Layer | Technology |
 |---|---|
-| Language | TypeScript (throughout) |
+| Language | TypeScript 5, strict, ESM (`"type": "module"`) |
 | Shell | Electron 43 |
-| Renderer | Vite + React 19 |
-| Orchestration | OpenAI Agents SDK |
-| Persistence | better-sqlite3 (SQLite, local) |
-| Packaging | electron-builder (macOS / Windows / Linux) |
+| Build | electron-vite 5 (main / preload / renderer) + Vite 7 |
+| Renderer | React 19 + framer-motion, react-markdown, driver.js |
+| Orchestration | `@openai/agents` SDK + `openai` client |
+| Persistence | better-sqlite3 (WAL, foreign keys on) |
+| Validation | zod 4 |
+| Test | vitest 4 + jsdom + @testing-library/react |
+| Lint | eslint 9 (flat config) + typescript-eslint |
+| Packaging | electron-builder (no config file yet — defaults only) |
 
 ## Project Structure
 
 ```
-/                   — repo root (idea phase, no source yet)
-  README.md         — project overview, planned stack, feature sketch
-  LICENSE           — license file
-  wiki/             — GitHub wiki, separate repo cloned locally (gitignored)
-    Home.md         — wiki index, working notes
+/
+  index.html                  — renderer HTML entry (Vite root)
+  electron.vite.config.ts     — main / preload / renderer builds; injects release defines
+  vite.config.ts              — renderer-only web build (npm run dev:web)
+  vitest.config.ts            — jsdom, @ alias, release-define stubs, exclusions
+  tsconfig.json               — project refs → tsconfig.node.json + tsconfig.web.json
+  eslint.config.mjs
+  electron/
+    main/
+      index.ts                — bootstrap: CSP, userData migration, IPC registration, window
+      appDirs.ts              — app-owned userData dirs + legacy-root migration
+      csp.ts, devLog.ts
+      ai/                     — agents.ts, provider.ts, mcp.ts, webSearchDaemon.ts,
+                                approvalPolicy.ts, httpTools.ts, documentExtract.ts,
+                                skillDistill.ts, userInfoStore.ts, xlsWorker.ts
+        prompts/*.md          — orchestrator + built-in sub-agent system prompts
+        tools/                — per-agent tool sets (task, knowledge, explorer, folder, …)
+        defaultAgents.json    — seed rows for the four built-in agents
+      db/                     — index.ts (bootstrap), migrations.ts, one store per table
+      ipc/                    — one module per surface, each exporting register*Handlers()
+      connectors/             — Google OAuth: account, Gmail, Calendar, Drive, Contacts
+      security/               — secretStorage.ts (AES-256-GCM), externalUrl.ts
+      net/urlSafety.ts        — SSRF/private-host guards for user-authored HTTP tools
+      tasks/scheduler.ts      — recurring + one-shot task runner
+      github/skillSearch.ts
+    preload/index.ts          — contextBridge surface exposed to the renderer
+  src/                        — React renderer
+    main.tsx                  — root render (ErrorBoundary → AgentsApp)
+    components/               — atoms / molecules / organisms
+    hooks/                    — one hook per feature surface
+    lib/                      — pure helpers, each with a colocated .test.ts
+    vendor/tabler-icons/      — bundled icon webfont
+    globals.css
+  scripts/releaseInfo.ts      — build-time release metadata (no runtime network call)
+  public/                     — audio, video, favicon
+  dist-electron/              — build output (untracked)
+  wiki/                       — GitHub wiki, separate repo cloned locally (gitignored)
+  0-cowork/                   — agent working state (gitignored)
 ```
 
 ## Key Entry Points
 
-- **README**: `README.md` — project overview and planned stack
-- **Wiki**: `wiki/Home.md` — working notes (to be expanded)
+- **Main process**: `electron/main/index.ts` — every `register*Handlers()` call is wired here
+- **Preload bridge**: `electron/preload/index.ts` — the only channel the renderer may use
+- **Renderer**: `index.html` → `src/main.tsx` → `src/components/organisms/AgentsApp.tsx`
+- **Schema**: `electron/main/db/migrations.ts` — append-only, ledger-based
+- **DB bootstrap**: `electron/main/db/index.ts` — `getDb()`, WAL, FK pragma, legacy renames
+- **Agents**: `electron/main/ai/agents.ts` + `ai/defaultAgents.json` + `ai/prompts/*.md`
+- **Provider/credentials**: `electron/main/ai/provider.ts` — chat and voice slots
+- **App storage**: `electron/main/appDirs.ts` — every app-owned userData directory
 
 ## Build & Run
 
-- **Dev**: TBD (not scaffolded yet)
-- **Test**: TBD
-- **Env required**: User-supplied API key (OpenAI or compatible); Google OAuth credentials for Gmail/Calendar/Drive/Contacts connectors
+- **Dev**: `npm run dev` (electron-vite; renderer on `PORT`, default 3100)
+- **Dev, renderer only in a browser**: `npm run dev:web`
+- **Build**: `npm run build` (`tsc -b && electron-vite build`) · **Package**: `npm run package`
+- **Test**: `npm test` (`vitest run`) · watch: `npm run test:watch`
+- **Lint**: `npm run lint`
+- **Env required**: none at runtime. Credentials are entered in-app and stored encrypted in SQLite — chat/voice API key + base URL under `appSettings.*` (`ai/provider.ts`), per-connector OAuth client id/secret in the `connectors` table (`connectors/registry.ts`, migration 26). Optional at build time: `GITHUB_RELEASE_REPO` (`scripts/releaseInfo.ts`); `PORT` overrides the dev renderer port.
 
 ## Conventions
 
-- TypeScript throughout — no JS files in the eventual codebase
-- Everything local: chat history, memory, and knowledge in a SQLite database on the user's machine
-- Bring-your-own API key model — no cloud dependency for core functionality
-- MCP-compatible: agents can be extended with any MCP server
+- TypeScript strict throughout, two project refs: `tsconfig.node.json` (electron/, scripts/, configs) and `tsconfig.web.json` (src/). `@/*` → `./src`, aliased in both electron-vite and vitest.
+- Tests are colocated `*.test.ts(x)` beside the file under test — no separate test tree.
+- IPC: one module per surface in `electron/main/ipc/`, each exporting `register*Handlers()`, all invoked from `main/index.ts`. The renderer never touches `ipcRenderer` — it goes through the preload `contextBridge` API.
+- Renderer follows atomic structure (atoms → molecules → organisms), with `hooks/` per feature surface and `lib/` for pure helpers.
+- Schema changes are append-only entries in `db/migrations.ts`, keyed `id: "YYYYMMDDHHMMSS"`. Never edit a shipped migration; never reuse a numeric version (33 and 34 are permanently reserved).
+- Secrets are encrypted via `security/secretStorage.ts` (`nodeCrypto:` prefix) before they reach the DB — API keys, `mcp_servers.env` values, connector credentials and settings.
+- Electron hardening: `contextIsolation` on, `nodeIntegration` off, `sandbox` on, CSP applied to the default session before the first load, `window.open` filtered through `security/externalUrl.ts`.
+- Comments carry non-obvious *why* — constraints, prior incidents, rejected alternatives. Dense rationale comments are the house style; restating code is not.
+- Icons are Tabler webfont class strings (e.g. `"ti-robot"`) — there is no per-service image icon system.
+- Per-agent attachment, never global: MCP servers, connectors, and HTTP tool collections are all attached to individual agents via JSON id arrays on the `agents` row.
+- Everything local: chat history, memory, knowledge, and tasks live in SQLite under Electron's `userData`.
+- Bring-your-own API key against any OpenAI-compatible host (OpenAI by default; OpenRouter and Ollama both supported paths).
 
 ## Design & Planning Rules
 
@@ -183,4 +239,4 @@ Mention only real risks, unresolved unknowns, or follow-up work discovered durin
 
 ## Notes
 - Generated by cb-setup on 2026-07-30 — review and edit to add project-specific rules
-- Project is in idea phase — no source files exist yet. Rules above apply once code scaffolding begins.
+- Context / Tech Stack / Project Structure / Key Entry Points / Build & Run / Conventions refreshed from live code on 2026-08-02. Everything below `## Design & Planning Rules` is unchanged.
