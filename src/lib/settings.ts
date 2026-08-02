@@ -138,7 +138,60 @@ export type SettingsView = AgentsSettings & {
  * two are derived signals, not settings. */
 const DEFAULT_KEY_FLAGS = { chatApiKeySet: false, voiceApiKeySet: false };
 
-/** Merges a raw settings blob (from `agentsAPI.settings.get()`, shape not guaranteed) onto defaults. */
+/** The sound-effect settings, whose stored value has to sit inside the range the picker offers. */
+const SOUND_VARIANT_KEYS = Object.keys(DEFAULT_SETTINGS).filter((key) =>
+  key.startsWith("soundVariant")
+) as (keyof AgentsSettings)[];
+
+/**
+ * Decides whether a stored value is usable, given the default that describes its shape.
+ *
+ * The default is the type reference — there is no separate schema on this side, and adding one
+ * would be a second copy of what `DEFAULT_SETTINGS` already says.
+ */
+function isUsable(value: unknown, fallback: unknown): boolean {
+  if (Array.isArray(fallback)) {
+    return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+  }
+  // Catches the case this function exists for: `null` is an object, so a stored null fails the
+  // typeof check against every default except an array's, and falls back instead of winning.
+  return value !== null && typeof value === typeof fallback;
+}
+
+/**
+ * Merges a raw settings blob (from `agentsAPI.settings.get()`, shape not guaranteed) onto defaults.
+ *
+ * Per key rather than a spread. A spread lets anything in the blob win, including the things a
+ * default exists to prevent: a stored `null` beat the default outright and reached the UI as
+ * `<input value={null}>`, which flips React to an uncontrolled input; a `null` id list reached
+ * components that iterate it. Writes have been validated since the settings schema landed, but
+ * rows written by earlier builds are still out there, and this is the read side.
+ *
+ * Three rules:
+ *  - a value whose type doesn't match its default is discarded
+ *  - a sound variant outside the range the picker offers is clamped, because an out-of-range one
+ *    makes the preview request a file that doesn't exist and leaves the Combobox showing a value
+ *    absent from its own option list
+ *  - a key nobody has heard of is dropped rather than carried through
+ */
 export function mergeWithDefaults(raw: Record<string, unknown>): SettingsView {
-  return { ...DEFAULT_SETTINGS, ...DEFAULT_KEY_FLAGS, ...(raw as Partial<SettingsView>) };
+  const merged: SettingsView = { ...DEFAULT_SETTINGS, ...DEFAULT_KEY_FLAGS };
+  // One local escape hatch so the loops below can address keys dynamically; `merged` keeps its
+  // real type, so the return value is checked rather than asserted.
+  const writable = merged as unknown as Record<string, unknown>;
+
+  for (const [key, value] of Object.entries(raw)) {
+    // Unknown keys are dropped. They cannot be written any more, but a database from before that
+    // can still hold them, and carrying them into app state only spreads the mess further.
+    if (!(key in writable)) continue;
+    if (!isUsable(value, writable[key])) continue;
+    writable[key] = value;
+  }
+
+  for (const key of SOUND_VARIANT_KEYS) {
+    const variant = writable[key] as number;
+    writable[key] = Math.min(SOUND_FX_VARIANT_COUNT, Math.max(1, Math.round(variant)));
+  }
+
+  return merged;
 }
