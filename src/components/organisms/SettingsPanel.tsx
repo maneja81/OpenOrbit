@@ -231,6 +231,7 @@ export default function SettingsPanel({
   const [voiceTestResult, setVoiceTestResult] = useState<{ ok: boolean; detail: string } | null>(null);
   const [resetConfirmText, setResetConfirmText] = useState("");
   const [resetting, setResetting] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
   const [orchestratorPrompt, setOrchestratorPrompt] = useState("");
   const [orchestratorPromptLoading, setOrchestratorPromptLoading] = useState(true);
   const [addingAgent, setAddingAgent] = useState(false);
@@ -301,7 +302,21 @@ export default function SettingsPanel({
   const handleReset = async () => {
     if (resetConfirmText !== RESET_CONFIRM_WORD || resetting) return;
     setResetting(true);
-    await onReset();
+    setResetError(null);
+    try {
+      await onReset();
+      // No reset of `resetting` on success: onReset reloads the window, so the button staying
+      // disabled for those last moments is correct — re-enabling it would invite a second click
+      // against a database mid-rebuild.
+    } catch (err) {
+      // settings:reset drops every app table inside a transaction and re-runs migrations. That
+      // can genuinely fail — most plausibly SQLITE_BUSY, since the userData database is shared
+      // across worktrees and a second running instance holds a write lock. Without this the
+      // rejection was unhandled, the button sat on "Resetting…" disabled forever, and the user
+      // was told nothing. Every other async action in this file already catches this way.
+      setResetError(formatHumanizedError(humanizeError(err)));
+      setResetting(false);
+    }
   };
 
   const meta = SECTION_META[activeSection];
@@ -839,6 +854,7 @@ export default function SettingsPanel({
                       autoComplete="off"
                       disabled={resetting}
                     />
+                    {resetError && <p className="settings-error">{resetError}</p>}
                     <button
                       className="danger-btn"
                       disabled={resetConfirmText !== RESET_CONFIRM_WORD || resetting}
