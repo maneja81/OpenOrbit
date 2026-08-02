@@ -152,7 +152,7 @@ export default function AgentsApp() {
     exportAllAgents,
     importAgents,
   } = useAgents();
-  const { speak, speaking, stop: stopSpeaking } = useSpeak();
+  const { speak, speaking, stop: stopSpeaking } = useSpeak(settings.voiceApiKeySet);
   const soundFxVariants: Record<SoundFxEvent, number> = useMemo(
     () => ({
       send: settings.soundVariantSend,
@@ -636,7 +636,12 @@ export default function AgentsApp() {
         // fails at call time. Only OpenAI serves them today; see supportsVoice in lib/providers.
         ...(findProvider(answers.providerId)?.supportsVoice
           ? { voiceApiKey: answers.apiKey, voiceApiUrl: answers.apiUrl }
-          : {}),
+          : // Voice input is transcription, and useVoiceInput deliberately replaces the browser's
+            // SpeechRecognition with the provider's /audio/transcriptions — so unlike speech
+            // *output*, which falls back to the browser's own voice, there is nothing for it to
+            // degrade to. Leaving the toggle on would offer a mic that can only fail. Voice output
+            // stays on: useSpeak routes it to browser TTS while the slot is unconfigured.
+            { voiceInputEnabled: false }),
         onboardingDone: true,
       });
 

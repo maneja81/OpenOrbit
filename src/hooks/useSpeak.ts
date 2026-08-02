@@ -22,7 +22,13 @@ function devLog(...args: unknown[]): void {
  * Exposes `speaking` (for simple UI gating) and per-call onStart/onEnd callbacks (for
  * callers that need to react to playback transitions, e.g. pushing a status-feed step)
  * without doing so from a render-time effect. */
-export function useSpeak() {
+/**
+ * @param providerConfigured Whether the Voice slot actually has credentials. When it doesn't,
+ *   speech goes straight to the browser's own voice: only OpenAI serves /audio/*, so onboarding
+ *   onto Claude, OpenRouter or a local server leaves Voice unset, and calling the IPC anyway
+ *   produced "No Voice API key configured" on the first greeting.
+ */
+export function useSpeak(providerConfigured: boolean) {
   const [speaking, setSpeaking] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -55,7 +61,12 @@ export function useSpeak() {
       audioRef.current = null;
       if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
 
-      if (!hasAgentsAPI()) {
+      if (!hasAgentsAPI() || !providerConfigured) {
+        // No voice provider set up — go straight to the browser's own voice rather than firing an
+        // IPC call that can only fail. Voice output genuinely works without a key this way, so
+        // there is nothing to disable; what it must not do is throw "No Voice API key configured"
+        // on the very first greeting, which is what onboarding onto a provider that cannot serve
+        // speech used to produce.
         speakWithBrowserTts(text, callbacks);
         return;
       }
@@ -91,7 +102,7 @@ export function useSpeak() {
           speakWithBrowserTts(text, callbacks);
         });
     },
-    [speakWithBrowserTts]
+    [speakWithBrowserTts, providerConfigured]
   );
 
   /** Force-stops whichever playback is active (provider audio or browser TTS fallback)
