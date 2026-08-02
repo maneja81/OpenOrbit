@@ -1,0 +1,867 @@
+import { useEffect, useState } from "react";
+import Modal from "@/components/atoms/Modal";
+import Toggle from "@/components/atoms/Toggle";
+import Combobox from "@/components/atoms/Combobox";
+import TablerIcon from "@/components/atoms/TablerIcon";
+import SettingsSidebar, { SettingsNavGroup } from "@/components/molecules/SettingsSidebar";
+import AgentAccordion from "@/components/molecules/AgentAccordion";
+import SettingsAccordion from "@/components/molecules/SettingsAccordion";
+import AddAgentForm from "@/components/molecules/AddAgentForm";
+import FilesAppsTab from "@/components/organisms/FilesAppsTab";
+import McpServersTab from "@/components/organisms/McpServersTab";
+import ConnectorsTab from "@/components/organisms/ConnectorsTab";
+import HttpToolsTab from "@/components/organisms/HttpToolsTab";
+import AboutTab from "@/components/organisms/AboutTab";
+import ErrorBoundary from "@/components/atoms/ErrorBoundary";
+import { AgentsSettings, VOICE_TTS_VOICE_OPTIONS, SOUND_FX_VARIANT_COUNT } from "@/lib/settings";
+import { USER_CONTEXT_FIELDS } from "@/lib/userContext";
+import { hasAgentsAPI } from "@/lib/agentsApi";
+import { useMcpServers } from "@/hooks/useMcpServers";
+import { useConnectors } from "@/hooks/useConnectors";
+import { useHttpTools } from "@/hooks/useHttpTools";
+import { useUserContext } from "@/hooks/useUserContext";
+import { formatHumanizedError, humanizeError } from "@/lib/humanizeError";
+import { DEFAULT_SETTINGS_SECTION, sectionOnTransition } from "@/lib/settingsSection";
+import { SoundFxEvent, sfxPreviewSrc } from "@/hooks/useSoundFX";
+
+interface SettingsPanelProps {
+  open: boolean;
+  onClose: () => void;
+  /** Section to show when the panel opens; defaults to "models" if omitted. */
+  initialSection?: SettingsSection;
+  settings: AgentsSettings;
+  /** Session age from AgentsApp's existing once-a-minute interval, forwarded to the About
+   * section. Timed there rather than here so no component reads the clock during render. */
+  sessionElapsedMs: number;
+  onUpdate: (patch: Partial<AgentsSettings>) => void;
+  onReset: () => Promise<void>;
+  agents: AgentRow[];
+  onUpdateAgent: (
+    id: string,
+    patch: {
+      name?: string;
+      tagline?: string;
+      description?: string;
+      model?: string;
+      prompt?: string;
+      enabled?: boolean;
+      mcpServerIds?: string[];
+      connectorIds?: string[];
+      httpToolCollectionIds?: string[];
+    }
+  ) => Promise<void>;
+  onCreateAgent: (input: {
+    name: string;
+    tagline?: string;
+    description?: string;
+    model?: string;
+    prompt?: string;
+  }) => Promise<unknown>;
+  onDeleteAgent: (id: string) => Promise<void>;
+  onExportAgent: (id: string) => Promise<{ canceled: boolean } | undefined>;
+  onExportAllAgents: () => Promise<{ canceled: boolean } | undefined>;
+  onImportAgents: () => Promise<AgentRow[]>;
+}
+
+export type SettingsSection =
+  | "models"
+  | "agents"
+  | "mcp"
+  | "connectors"
+  | "http"
+  | "files"
+  | "general"
+  | "sounds"
+  | "danger"
+  | "about";
+
+const NAV_GROUPS: SettingsNavGroup[] = [
+  {
+    label: "AI",
+    items: [
+      { id: "models", label: "Models", icon: "ti-cpu" },
+      { id: "agents", label: "Agents", icon: "ti-robot" },
+      { id: "mcp", label: "MCP Servers", icon: "ti-plug" },
+      { id: "connectors", label: "Connectors", icon: "ti-plug-connected" },
+      { id: "http", label: "HTTP Tools", icon: "ti-api" },
+    ],
+  },
+  {
+    label: "App",
+    items: [
+      { id: "general", label: "General", icon: "ti-adjustments" },
+      { id: "sounds", label: "App Sounds", icon: "ti-volume" },
+      { id: "files", label: "Knowledge", icon: "ti-books" },
+      { id: "about", label: "About", icon: "ti-info-circle" },
+    ],
+  },
+  {
+    label: "Advanced",
+    items: [{ id: "danger", label: "Danger Zone", icon: "ti-alert-triangle", danger: true }],
+  },
+];
+
+const SECTION_META: Record<SettingsSection, { icon: string; title: string; subtitle: string }> = {
+  models: { icon: "ti-cpu", title: "AI Models", subtitle: "Providers powering chat, tools, and voice" },
+  agents: { icon: "ti-robot", title: "AI Agents", subtitle: "The orchestrator and every agent it can hand off to" },
+  mcp: { icon: "ti-plug", title: "MCP Servers", subtitle: "External tool servers agents can be attached to" },
+  connectors: { icon: "ti-plug-connected", title: "Connectors", subtitle: "Third-party services agents can use as tools" },
+  http: { icon: "ti-api", title: "HTTP Tools", subtitle: "Your own API endpoints, callable as agent tools" },
+  // Section id stays "files" deliberately: it is referenced by the hardcoded SETTINGS_SECTIONS
+  // list in tourSteps.test.ts and by any tour step's settingsSection, so only the label changes.
+  files: { icon: "ti-books", title: "Knowledge", subtitle: "Folders and documents agents can read" },
+  general: { icon: "ti-adjustments", title: "General", subtitle: "Voice, sound, and input preferences" },
+  sounds: { icon: "ti-volume", title: "App Sounds", subtitle: "Pick a variation for each sound effect" },
+  danger: { icon: "ti-alert-triangle", title: "Danger Zone", subtitle: "Irreversible actions" },
+  about: { icon: "ti-info-circle", title: "About", subtitle: "Version, storage, and licenses" },
+};
+
+interface SoundEventConfig {
+  event: SoundFxEvent;
+  settingKey: keyof AgentsSettings & (
+    | "soundVariantSend"
+    | "soundVariantReceive"
+    | "soundVariantHandoff"
+    | "soundVariantComplete"
+    | "soundVariantStartup"
+    | "soundVariantAgentCreated"
+    | "soundVariantAgentDeleted"
+  );
+  label: string;
+  hint?: string;
+}
+
+interface SoundEventGroup {
+  label: string;
+  events: SoundEventConfig[];
+}
+
+const SOUND_EVENT_GROUPS: SoundEventGroup[] = [
+  {
+    label: "Chat",
+    events: [
+      { event: "send", settingKey: "soundVariantSend", label: "Message sent" },
+      { event: "receive", settingKey: "soundVariantReceive", label: "Message received" },
+    ],
+  },
+  {
+    label: "Agents",
+    events: [
+      { event: "handoff", settingKey: "soundVariantHandoff", label: "Agent handoff" },
+      { event: "complete", settingKey: "soundVariantComplete", label: "Task complete" },
+      { event: "agentCreated", settingKey: "soundVariantAgentCreated", label: "Agent created" },
+      { event: "agentDeleted", settingKey: "soundVariantAgentDeleted", label: "Agent deleted" },
+    ],
+  },
+  {
+    label: "App",
+    events: [
+      {
+        event: "startup",
+        settingKey: "soundVariantStartup",
+        label: "App startup",
+        hint: "Variant 1 is the original recorded startup clip",
+      },
+    ],
+  },
+];
+
+const SOUND_VARIANT_OPTIONS = Array.from({ length: SOUND_FX_VARIANT_COUNT }, (_, i) => ({
+  value: String(i + 1),
+  label: `Variant ${i + 1}`,
+}));
+
+const RESET_CONFIRM_WORD = "RESET";
+
+/** Reads one of the agent row's JSON id-array columns (mcp_server_ids, connector_ids,
+ * http_tool_collection_ids). Never throws — a malformed column degrades to "nothing
+ * attached" rather than taking the Settings panel down, mirroring the equivalent parsers in
+ * electron/main/ai/agents.ts. */
+function parseIdList(raw: string): string[] {
+  try {
+    const ids = JSON.parse(raw) as unknown;
+    return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export default function SettingsPanel({
+  open,
+  onClose,
+  initialSection,
+  settings,
+  sessionElapsedMs,
+  onUpdate,
+  onReset,
+  agents,
+  onUpdateAgent,
+  onCreateAgent,
+  onDeleteAgent,
+  onExportAgent,
+  onExportAllAgents,
+  onImportAgents,
+}: SettingsPanelProps) {
+  const [activeSection, setActiveSection] = useState<SettingsSection>(DEFAULT_SETTINGS_SECTION);
+  // Adjust activeSection during render (not in an effect) when the panel transitions
+  // from closed to open with a requested initialSection — see React docs on
+  // "Adjusting state when a prop changes" for why this belongs in render, not useEffect.
+  //
+  // initialSection is tracked as well as `open` because the tour walks two consecutive
+  // steps that both request a section (Settings → models, then Connectors) without
+  // closing in between. Keying only off the closed→open edge left the second step
+  // describing Connectors while the panel still showed AI Models.
+  const userContext = useUserContext(open);
+  const [wasOpen, setWasOpen] = useState(open);
+  const [appliedSection, setAppliedSection] = useState(initialSection);
+  if (open !== wasOpen || initialSection !== appliedSection) {
+    const next = sectionOnTransition({
+      opening: open && !wasOpen,
+      open,
+      requested: initialSection,
+    });
+    setWasOpen(open);
+    setAppliedSection(initialSection);
+    if (next) setActiveSection(next);
+  }
+  const [testingChat, setTestingChat] = useState(false);
+  const [testingVoice, setTestingVoice] = useState(false);
+  const [chatTestResult, setChatTestResult] = useState<{ ok: boolean; detail: string } | null>(null);
+  const [voiceTestResult, setVoiceTestResult] = useState<{ ok: boolean; detail: string } | null>(null);
+  const [resetConfirmText, setResetConfirmText] = useState("");
+  const [resetting, setResetting] = useState(false);
+  const [orchestratorPrompt, setOrchestratorPrompt] = useState("");
+  const [orchestratorPromptLoading, setOrchestratorPromptLoading] = useState(true);
+  const [addingAgent, setAddingAgent] = useState(false);
+  const [agentActionError, setAgentActionError] = useState<string | null>(null);
+
+  const runTestChat = async () => {
+    if (!hasAgentsAPI()) return;
+    setTestingChat(true);
+    setChatTestResult(null);
+    try {
+      setChatTestResult(await window.agentsAPI.settings.testChat());
+    } catch (err) {
+      setChatTestResult({ ok: false, detail: formatHumanizedError(humanizeError(err)) });
+    } finally {
+      setTestingChat(false);
+    }
+  };
+
+  const runTestVoice = async () => {
+    if (!hasAgentsAPI()) return;
+    setTestingVoice(true);
+    setVoiceTestResult(null);
+    try {
+      setVoiceTestResult(await window.agentsAPI.settings.testVoice());
+    } catch (err) {
+      setVoiceTestResult({ ok: false, detail: formatHumanizedError(humanizeError(err)) });
+    } finally {
+      setTestingVoice(false);
+    }
+  };
+
+  // Export/import/delete all reject on failure (system-agent guard, bad JSON, disk
+  // errors) — without this, those rejections would be unhandled and silently invisible
+  // to the user, unlike every other renderer error surface (see AddAgentForm.tsx).
+  const runAgentAction = async (action: () => Promise<unknown>) => {
+    setAgentActionError(null);
+    try {
+      await action();
+    } catch (err) {
+      setAgentActionError(formatHumanizedError(humanizeError(err)));
+    }
+  };
+  const mcp = useMcpServers();
+  const mcpServers = mcp.servers;
+  const connectors = useConnectors();
+  const connectorCatalog = connectors.connectors;
+  const httpTools = useHttpTools();
+  const httpToolCollections = httpTools.collections;
+
+  useEffect(() => {
+    if (!open || !hasAgentsAPI()) return;
+    let cancelled = false;
+    window.agentsAPI.agent.orchestratorPrompt().then((text) => {
+      if (!cancelled) {
+        setOrchestratorPrompt(text);
+        setOrchestratorPromptLoading(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  const previewSound = (event: SoundFxEvent, variant: number) => {
+    new Audio(sfxPreviewSrc(event, variant)).play().catch(() => {});
+  };
+
+  const handleReset = async () => {
+    if (resetConfirmText !== RESET_CONFIRM_WORD || resetting) return;
+    setResetting(true);
+    await onReset();
+  };
+
+  const meta = SECTION_META[activeSection];
+
+  return (
+    <Modal open={open} onClose={onClose} className="modal-panel--settings">
+      <div className="settings-window-body">
+        <SettingsSidebar
+          groups={NAV_GROUPS}
+          activeSection={activeSection}
+          onChange={(id) => setActiveSection(id as SettingsSection)}
+        />
+
+        <section className="settings-detail">
+          <header className="detail-header">
+            <div className="detail-title-group">
+              <div className="detail-icon">
+                <TablerIcon name={meta.icon} />
+              </div>
+              <div className="detail-title">
+                <h1>{meta.title}</h1>
+                <p>{meta.subtitle}</p>
+              </div>
+            </div>
+            <button className="window-close" aria-label="Close settings" onClick={onClose}>
+              <TablerIcon name="ti-x" />
+            </button>
+          </header>
+
+          <div className="detail-body">
+            {activeSection === "models" && (
+              <div className="agent-accordion-list">
+                <SettingsAccordion
+                  title="Chat"
+                  headerActions={
+                    <>
+                      {chatTestResult && (
+                        <span
+                          className={`settings-test-status ${chatTestResult.ok ? "settings-success" : "settings-error"}`}
+                          title={chatTestResult.detail}
+                        >
+                          {chatTestResult.detail}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        className="settings-action-btn-sm settings-action-btn-ghost"
+                        onClick={() => runTestChat()}
+                        disabled={testingChat}
+                      >
+                        <TablerIcon name="ti-plug-connected" />
+                        <span>{testingChat ? "Testing…" : "Test"}</span>
+                      </button>
+                    </>
+                  }
+                >
+                  <p className="group-hint">
+                    Powers the orchestrator and every agent's chat/tool calls. Defaults to OpenAI — point it at
+                    OpenRouter, Ollama, or any other OpenAI-compatible host if you want a different model catalog.
+                  </p>
+                  <div className="group">
+                    <div className="card">
+                      <label className="row-field">
+                        <span>API Key</span>
+                        <input
+                          type="password"
+                          value={settings.chatApiKey}
+                          onChange={(e) => onUpdate({ chatApiKey: e.target.value })}
+                          placeholder="sk-…"
+                          autoComplete="off"
+                        />
+                      </label>
+                      <label className="row-field">
+                        <span>API URL</span>
+                        <input
+                          type="text"
+                          value={settings.chatApiUrl}
+                          onChange={(e) => onUpdate({ chatApiUrl: e.target.value })}
+                          placeholder="https://api.openai.com/v1"
+                          autoComplete="off"
+                        />
+                      </label>
+                      <label className="row-field">
+                        <span>Model ID</span>
+                        <input
+                          type="text"
+                          value={settings.orchestratorModel}
+                          onChange={(e) => onUpdate({ orchestratorModel: e.target.value })}
+                          placeholder="gpt-4.1-mini"
+                          autoComplete="off"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                </SettingsAccordion>
+
+                <SettingsAccordion
+                  title="Voice"
+                  headerActions={
+                    <>
+                      {voiceTestResult && (
+                        <span
+                          className={`settings-test-status ${voiceTestResult.ok ? "settings-success" : "settings-error"}`}
+                          title={voiceTestResult.detail}
+                        >
+                          {voiceTestResult.detail}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        className="settings-action-btn-sm settings-action-btn-ghost"
+                        onClick={() => runTestVoice()}
+                        disabled={testingVoice}
+                      >
+                        <TablerIcon name="ti-plug-connected" />
+                        <span>{testingVoice ? "Testing…" : "Test"}</span>
+                      </button>
+                    </>
+                  }
+                >
+                  <p className="group-hint">
+                    Powers speech transcription and spoken replies. Defaults to OpenAI, same as Chat — an
+                    independent key/URL here in case you want voice on a different provider.
+                  </p>
+                  <div className="group">
+                    <div className="card">
+                      <label className="row-field">
+                        <span>API Key</span>
+                        <input
+                          type="password"
+                          value={settings.voiceApiKey}
+                          onChange={(e) => onUpdate({ voiceApiKey: e.target.value })}
+                          placeholder="sk-…"
+                          autoComplete="off"
+                        />
+                      </label>
+                      <label className="row-field">
+                        <span>API URL</span>
+                        <input
+                          type="text"
+                          value={settings.voiceApiUrl}
+                          onChange={(e) => onUpdate({ voiceApiUrl: e.target.value })}
+                          placeholder="https://api.openai.com/v1"
+                          autoComplete="off"
+                        />
+                      </label>
+                      <label className="row-field">
+                        <span>Transcription model</span>
+                        <input
+                          type="text"
+                          value={settings.voiceTranscriptionModel}
+                          onChange={(e) => onUpdate({ voiceTranscriptionModel: e.target.value })}
+                          placeholder="whisper-1"
+                          autoComplete="off"
+                        />
+                      </label>
+                      <label className="row-field">
+                        <span>Speech (TTS) model</span>
+                        <input
+                          type="text"
+                          value={settings.voiceTtsModel}
+                          onChange={(e) => onUpdate({ voiceTtsModel: e.target.value })}
+                          placeholder="tts-1"
+                          autoComplete="off"
+                        />
+                      </label>
+                      <label className="row-field">
+                        <span>Speech (TTS) voice</span>
+                        <Combobox
+                          value={settings.voiceTtsVoice}
+                          options={VOICE_TTS_VOICE_OPTIONS.map((voice) => ({ value: voice, label: voice }))}
+                          onChange={(voice) => onUpdate({ voiceTtsVoice: voice })}
+                          ariaLabel="Speech (TTS) voice"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                </SettingsAccordion>
+              </div>
+            )}
+
+            {activeSection === "agents" && (
+              <section className="settings-section">
+                <div className="settings-section-header">
+                  <div className="settings-section-header-title">
+                    <h3>Agents</h3>
+                    {!addingAgent && (
+                      <button
+                        type="button"
+                        className="settings-action-btn-sm settings-action-btn-ghost"
+                        onClick={() => setAddingAgent(true)}
+                      >
+                        <TablerIcon name="ti-plus" />
+                        <span>New</span>
+                      </button>
+                    )}
+                  </div>
+                  <div className="settings-section-header-actions">
+                    <button
+                      type="button"
+                      className="settings-action-btn-sm settings-action-btn-ghost"
+                      onClick={() => runAgentAction(onExportAllAgents)}
+                    >
+                      <TablerIcon name="ti-download" />
+                      <span>Export All</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="settings-action-btn-sm settings-action-btn-ghost"
+                      onClick={() => runAgentAction(onImportAgents)}
+                    >
+                      <TablerIcon name="ti-upload" />
+                      <span>Import Agent</span>
+                    </button>
+                  </div>
+                </div>
+                <div className="agent-accordion-list">
+                  <AgentAccordion
+                    icon="ti-sparkles"
+                    name={settings.agentName}
+                    description={settings.agentDescription}
+                    prompt={orchestratorPrompt}
+                    promptLoading={orchestratorPromptLoading}
+                    enabled={settings.orchestratorEnabled}
+                    enabledLocked
+                    onChangeName={(name) => onUpdate({ agentName: name })}
+                    onChangeDescription={(description) => onUpdate({ agentDescription: description })}
+                    onChangePrompt={(prompt) => {
+                      setOrchestratorPrompt(prompt);
+                      onUpdate({ orchestratorPromptOverride: prompt });
+                    }}
+                    onChangeEnabled={(enabled) => onUpdate({ orchestratorEnabled: enabled })}
+                    availableMcpServers={mcpServers}
+                    mcpServerIds={settings.orchestratorMcpServerIds}
+                    onChangeMcpServerIds={(mcpServerIds) => onUpdate({ orchestratorMcpServerIds: mcpServerIds })}
+                    availableConnectors={connectorCatalog}
+                    connectorIds={settings.orchestratorConnectorIds}
+                    onChangeConnectorIds={(connectorIds) => onUpdate({ orchestratorConnectorIds: connectorIds })}
+                    availableHttpToolCollections={httpToolCollections}
+                    httpToolCollectionIds={settings.orchestratorHttpToolCollectionIds}
+                    onChangeHttpToolCollectionIds={(ids) => onUpdate({ orchestratorHttpToolCollectionIds: ids })}
+                  />
+                  {agents.map((agent) => (
+                    <AgentAccordion
+                      key={agent.id}
+                      icon={agent.icon}
+                      name={agent.name}
+                      tagline={agent.tagline}
+                      description={agent.description}
+                      model={agent.model}
+                      prompt={agent.prompt}
+                      enabled={!!agent.enabled}
+                      enabledLocked={!!agent.system}
+                      onChangeName={(name) => onUpdateAgent(agent.id, { name })}
+                      onChangeTagline={(tagline) => onUpdateAgent(agent.id, { tagline })}
+                      onChangeDescription={(description) => onUpdateAgent(agent.id, { description })}
+                      onChangeModel={(model) => onUpdateAgent(agent.id, { model })}
+                      onChangePrompt={(prompt) => onUpdateAgent(agent.id, { prompt })}
+                      onChangeEnabled={(enabled) => onUpdateAgent(agent.id, { enabled })}
+                      availableMcpServers={mcpServers}
+                      mcpServerIds={parseIdList(agent.mcp_server_ids)}
+                      onChangeMcpServerIds={(mcpServerIds) => onUpdateAgent(agent.id, { mcpServerIds })}
+                      availableConnectors={connectorCatalog}
+                      connectorIds={parseIdList(agent.connector_ids)}
+                      onChangeConnectorIds={(connectorIds) => onUpdateAgent(agent.id, { connectorIds })}
+                      availableHttpToolCollections={httpToolCollections}
+                      httpToolCollectionIds={parseIdList(agent.http_tool_collection_ids)}
+                      onChangeHttpToolCollectionIds={(httpToolCollectionIds) =>
+                        onUpdateAgent(agent.id, { httpToolCollectionIds })
+                      }
+                      onExport={agent.system ? undefined : () => runAgentAction(() => onExportAgent(agent.id))}
+                      onDelete={agent.system ? undefined : () => runAgentAction(() => onDeleteAgent(agent.id))}
+                    />
+                  ))}
+                  {addingAgent && (
+                    <AddAgentForm
+                      defaultModel={settings.orchestratorModel}
+                      onCreate={onCreateAgent}
+                      onCancel={() => setAddingAgent(false)}
+                    />
+                  )}
+                </div>
+                {agentActionError && <p className="settings-error">{agentActionError}</p>}
+              </section>
+            )}
+
+            {activeSection === "mcp" && (
+              <ErrorBoundary fallbackTitle="MCP servers failed to load">
+                <McpServersTab mcp={mcp} />
+              </ErrorBoundary>
+            )}
+
+            {activeSection === "connectors" && (
+              <ErrorBoundary fallbackTitle="Connectors failed to load">
+                <ConnectorsTab connectors={connectors} />
+              </ErrorBoundary>
+            )}
+
+            {activeSection === "http" && (
+              <ErrorBoundary fallbackTitle="HTTP tools failed to load">
+                <HttpToolsTab httpTools={httpTools} settings={settings} onUpdate={onUpdate} />
+              </ErrorBoundary>
+            )}
+
+            {activeSection === "files" && (
+              <ErrorBoundary fallbackTitle="Files failed to load">
+                <FilesAppsTab />
+              </ErrorBoundary>
+            )}
+
+            {activeSection === "about" && (
+              <ErrorBoundary fallbackTitle="About failed to load">
+                <AboutTab sessionElapsedMs={sessionElapsedMs} />
+              </ErrorBoundary>
+            )}
+
+            {activeSection === "general" && (
+              <div className="group">
+                {/* The answers onboarding collects, kept editable afterwards. Your name is a
+                    plain setting; the rest live in the cross-agent user-fact store and reach
+                    every agent's prompt, so they are saved through useUserContext. */}
+                <div className="card" id="settings-about-you">
+                  <label className="row-field">
+                    <span>What should I call you?</span>
+                    <input
+                      type="text"
+                      value={settings.userName}
+                      onChange={(e) => onUpdate({ userName: e.target.value })}
+                      placeholder="Your name"
+                      autoComplete="off"
+                    />
+                  </label>
+                  {USER_CONTEXT_FIELDS.map((field) => (
+                    <label className="row-field" key={field.key}>
+                      <span>{field.label}</span>
+                      {field.options ? (
+                        <Combobox
+                          value={userContext.values[field.key]}
+                          options={[
+                            { value: "", label: "Not set" },
+                            ...field.options.map((option) => ({ value: option, label: option })),
+                          ]}
+                          onChange={(value) => void userContext.setValue(field.key, value)}
+                          ariaLabel={field.label}
+                        />
+                      ) : (
+                        <input
+                          type="text"
+                          value={userContext.values[field.key]}
+                          onChange={(e) => void userContext.setValue(field.key, e.target.value)}
+                          placeholder={field.placeholder}
+                          autoComplete="off"
+                        />
+                      )}
+                    </label>
+                  ))}
+                </div>
+                <div className="card">
+                  <div className="row">
+                    <span className="row-label">Voice input</span>
+                    <Toggle
+                      checked={settings.voiceInputEnabled}
+                      onChange={(checked) => onUpdate({ voiceInputEnabled: checked })}
+                      label="Toggle voice input"
+                    />
+                  </div>
+                  <div className="row">
+                    <span className="row-label">
+                      Voice output<small>Speak replies to voice messages</small>
+                    </span>
+                    <Toggle
+                      checked={settings.voiceOutputEnabled}
+                      onChange={(checked) => onUpdate({ voiceOutputEnabled: checked })}
+                      label="Toggle voice output"
+                    />
+                  </div>
+                  <div className="row">
+                    <span className="row-label">
+                      Sound effects<small>Subtle audio cues</small>
+                    </span>
+                    <Toggle
+                      checked={settings.soundFxEnabled}
+                      onChange={(checked) => onUpdate({ soundFxEnabled: checked })}
+                      label="Toggle sound effects"
+                    />
+                  </div>
+                  <div className="row">
+                    <span className="row-label">Background music</span>
+                    <Toggle
+                      checked={settings.bgMusicEnabled}
+                      onChange={(checked) => onUpdate({ bgMusicEnabled: checked })}
+                      label="Toggle background music"
+                    />
+                  </div>
+                  {settings.bgMusicEnabled && (
+                    <label className="row-field">
+                      <span>Background music volume</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={settings.bgMusicVolume}
+                        onChange={(e) => {
+                          const value = Number(e.target.value);
+                          if (!Number.isNaN(value)) onUpdate({ bgMusicVolume: Math.min(1, Math.max(0, value)) });
+                        }}
+                      />
+                    </label>
+                  )}
+                  <div className="row">
+                    <span className="row-label">Type anywhere to focus chat</span>
+                    <Toggle
+                      checked={settings.typeAnywhereEnabled}
+                      onChange={(checked) => onUpdate({ typeAnywhereEnabled: checked })}
+                      label="Toggle type-anywhere focus"
+                    />
+                  </div>
+                  <div className="row">
+                    <span className="row-label">
+                      Location access<small>Let agents look up where you are</small>
+                    </span>
+                    <Toggle
+                      checked={settings.locationEnabled}
+                      onChange={(checked) => onUpdate({ locationEnabled: checked })}
+                      label="Toggle location access"
+                    />
+                  </div>
+                  <div className="row">
+                    <span className="row-label">
+                      Load remote images automatically
+                      <small>
+                        Off is safer: a reply can be steered by a web page or email it read, and an
+                        image that loads on sight sends a request before you have read it
+                      </small>
+                    </span>
+                    <Toggle
+                      checked={settings.remoteImagesAutoLoad}
+                      onChange={(checked) => onUpdate({ remoteImagesAutoLoad: checked })}
+                      label="Toggle automatic remote image loading"
+                    />
+                  </div>
+                </div>
+
+                <div className="card">
+                  <label className="row-field">
+                    <span>Agent run timeout (seconds)</span>
+                    <input
+                      type="number"
+                      min={5}
+                      value={settings.agentRunTimeoutSeconds}
+                      onChange={(e) => {
+                        const value = Number(e.target.value);
+                        if (!Number.isNaN(value) && value > 0) onUpdate({ agentRunTimeoutSeconds: value });
+                      }}
+                    />
+                  </label>
+                  <label className="row-field">
+                    <span>Chat history sent to the orchestrator (messages)</span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={settings.chatHistoryMessageLimit}
+                      onChange={(e) => {
+                        const value = Number(e.target.value);
+                        if (!Number.isNaN(value) && value > 0) onUpdate({ chatHistoryMessageLimit: value });
+                      }}
+                    />
+                  </label>
+                  <label className="row-field">
+                    <span>
+                      System Status refresh interval (ms)<small>Applies after restarting the app</small>
+                    </span>
+                    <input
+                      type="number"
+                      min={500}
+                      step={500}
+                      value={settings.systemStatsPollIntervalMs}
+                      onChange={(e) => {
+                        const value = Number(e.target.value);
+                        if (!Number.isNaN(value) && value > 0) onUpdate({ systemStatsPollIntervalMs: value });
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {activeSection === "sounds" && (
+              <>
+                {SOUND_EVENT_GROUPS.map((group) => (
+                  <div className="group" key={group.label}>
+                    <div className="card">
+                      {group.events.map(({ event, settingKey, label, hint }) => (
+                        <div className="row" key={event}>
+                          <span className="row-label">
+                            {label}
+                            {hint && <small>{hint}</small>}
+                          </span>
+                          <div className="sound-fx-picker">
+                            <button
+                              type="button"
+                              className="btn btn-icon-only"
+                              onClick={() => previewSound(event, settings[settingKey])}
+                              aria-label={`Preview ${label}`}
+                            >
+                              <TablerIcon name="ti-player-play" />
+                            </button>
+                            <Combobox
+                              value={String(settings[settingKey])}
+                              options={SOUND_VARIANT_OPTIONS}
+                              onChange={(value) => onUpdate({ [settingKey]: Number(value) })}
+                              ariaLabel={`${label} variant`}
+                              size="sm"
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+
+            {activeSection === "danger" && (
+              <div className="group">
+                <div className="group-label">
+                  <span>Reset Everything</span>
+                </div>
+                <div className="card danger-card">
+                  <div className="row-field">
+                    <p>
+                      Wipes the entire database — settings, agents, chat history, memory, knowledge base, and token
+                      usage — and rebuilds it from scratch, just like a brand-new install. Takes you back through
+                      onboarding. This cannot be undone.
+                    </p>
+                    <span>
+                      Type <strong>{RESET_CONFIRM_WORD}</strong> to confirm
+                    </span>
+                    <input
+                      type="text"
+                      value={resetConfirmText}
+                      onChange={(e) => setResetConfirmText(e.target.value)}
+                      placeholder={RESET_CONFIRM_WORD}
+                      autoComplete="off"
+                      disabled={resetting}
+                    />
+                    <button
+                      className="danger-btn"
+                      disabled={resetConfirmText !== RESET_CONFIRM_WORD || resetting}
+                      onClick={handleReset}
+                    >
+                      {resetting ? "Resetting…" : "Reset to Default"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+      </div>
+    </Modal>
+  );
+}

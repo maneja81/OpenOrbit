@@ -1,0 +1,46 @@
+[
+  {
+    "id": "configAgent",
+    "name": "Cipher",
+    "icon": "ti-settings",
+    "tagline": "Build & Configure",
+    "description": "Handles onboarding and app settings — names, models, API key, and toggles.",
+    "model": "gpt-4.1-mini",
+    "tools": [],
+    "promptKey": "configAgent",
+    "system": true
+  },
+  {
+    "id": "knowledgeAgent",
+    "name": "Atlas",
+    "icon": "ti-brain",
+    "tagline": "Know & Reference",
+    "description": "Reads and searches the documents (Markdown, text, CSV, PDF, Word, Excel, PowerPoint, HTML, OpenDocument, legacy .doc/.xls, and code/data files) you've added to the knowledge base, and browses the folders you've attached to it.",
+    "model": "gpt-4.1-mini",
+    "tools": [],
+    "promptKey": "knowledgeAgent",
+    "system": true
+  },
+  {
+    "id": "explorerAgent",
+    "name": "Explorer",
+    "icon": "ti-world-search",
+    "tagline": "Search & Discover",
+    "description": "Searches the live web and reads pages for up-to-date information beyond your knowledge base.",
+    "model": "gpt-4.1-mini",
+    "tools": [],
+    "promptKey": "explorerAgent",
+    "system": true
+  },
+  {
+    "id": "taskAgent",
+    "name": "Chrono",
+    "icon": "ti-checklist",
+    "tagline": "Remind & Automate",
+    "description": "Manages reminders and prompt tasks — one-shot or recurring, with dynamic parameters — and notifies you when they're due.",
+    "model": "gpt-4.1-mini",
+    "tools": [],
+    "promptKey": "taskAgent",
+    "system": true
+  }
+]

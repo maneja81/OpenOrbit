@@ -7,5 +7,39 @@
 /0-cowork/
 /MEMORY.md
 
+# Per-machine Claude Code settings. The shared config belongs in CLAUDE.md;
+# anything under .claude/ that ends in .local.json is one developer's only.
+.claude/settings.local.json
+
+# Dependencies
+/node_modules/
+
+# Build output.
+# dist-electron/ holds all three electron-vite bundles (main, preload, renderer —
+# see electron.vite.config.ts). dist/ is used by two different commands: `npm run
+# build:web` (Vite's default outDir) and `npm run package` (electron-builder's
+# default output dir), so one entry covers both.
+/dist-electron/
+/dist/
+
+# Incremental build state from `tsc -b` — both tsconfigs set composite: true,
+# which writes a .tsbuildinfo next to them.
+*.tsbuildinfo
+
+# Coverage reports (@vitest/coverage-v8 writes here by default).
+/coverage/
+
+# Secrets. Never commit a real key — .env.bak already holds live provider and
+# OAuth credentials. The example template is the one exception, since it carries
+# placeholder values and documents which variables exist.
+.env
+.env.*
+!.env.example
+
 # macOS
 .DS_Store
+
+# Claude
+Claude.md
+./claude
+MEMORY.md

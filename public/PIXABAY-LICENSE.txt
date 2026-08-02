@@ -1,0 +1,30 @@
+Pixabay Content License
+=======================
+
+Applies to the bundled media shipped with OpenOrbit:
+
+  public/bg.mp4
+  public/audio/bg.mp3
+  public/audio/start-sound.mp3
+  public/audio/sfx/**/*.wav
+
+These files were obtained from Pixabay (https://pixabay.com) and are used under the
+Pixabay Content License. The license has no SPDX identifier.
+
+The canonical, authoritative text is published by Pixabay and is not reproduced here:
+
+  https://pixabay.com/service/license-summary/
+  https://pixabay.com/service/terms/
+
+Summary of the terms this project relies on (not a substitute for the licence above):
+
+  - Content may be used free of charge, for commercial and non-commercial purposes,
+    without permission from or attribution to the contributor, though attribution is
+    appreciated.
+  - Content may not be redistributed or sold in unaltered form, including on other
+    stock media platforms.
+  - Content may not be used in a way that portrays identifiable people in a bad light
+    or in a manner they would find offensive.
+
+If you are auditing this project's licensing, read the canonical URLs above rather
+than this file.
