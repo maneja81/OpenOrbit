@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const devLogMock = vi.hoisted(() => vi.fn());
 vi.mock("../devLog", () => ({ devLog: devLogMock }));
 
-import { parseJsonColumn, UNPARSEABLE } from "./jsonColumn";
+import { parseIdList, parseJsonColumn, parseStringMap, UNPARSEABLE } from "./jsonColumn";
 
 describe("parseJsonColumn", () => {
   beforeEach(() => {
@@ -59,5 +59,45 @@ describe("parseJsonColumn", () => {
   it("stays silent when the value parses", () => {
     parseJsonColumn("x", "1");
     expect(devLogMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("parseIdList", () => {
+  beforeEach(() => devLogMock.mockClear());
+
+  it("returns the ids for a well-formed list", () => {
+    expect(parseIdList("x", '["a","b"]')).toEqual(["a", "b"]);
+    expect(parseIdList("x", "[]")).toEqual([]);
+  });
+
+  it("degrades to nothing attached when the column is corrupt", () => {
+    expect(parseIdList("x", "{not json")).toEqual([]);
+  });
+
+  it("degrades when the value parses but isn't an array of ids", () => {
+    // Callers .includes() or iterate the result, so a parsed non-array would throw a line later.
+    for (const bad of ["null", '"gmail"', "{}", '["ok",3]']) {
+      expect(parseIdList("x", bad), bad).toEqual([]);
+    }
+  });
+
+  it("says which column it ignored", () => {
+    parseIdList("agents cipher/connector_ids", "null");
+    expect(String(devLogMock.mock.calls.at(-1)?.[0])).toContain("agents cipher/connector_ids");
+  });
+});
+
+describe("parseStringMap", () => {
+  beforeEach(() => devLogMock.mockClear());
+
+  it("returns the map for a well-formed object", () => {
+    expect(parseStringMap("x", '{"a":"1"}')).toEqual({ a: "1" });
+    expect(parseStringMap("x", "{}")).toEqual({});
+  });
+
+  it("degrades to an empty map on anything else", () => {
+    for (const bad of ["{not json", "null", "[]", '"a=1"', "42"]) {
+      expect(parseStringMap("x", bad), bad).toEqual({});
+    }
   });
 });

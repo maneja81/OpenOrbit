@@ -13,6 +13,7 @@ import { buildOrchestrator, listAgents } from "../ai/agents";
 import { closeMcpServers } from "../ai/mcp";
 import { getDueTasks, recordTaskRun, TaskRow } from "../db/tasksStore";
 import { devLog } from "../devLog";
+import { parseStringMap } from "../db/jsonColumn";
 
 const POLL_INTERVAL_MS = 30_000;
 // Truncated in the OS notification body so a long agent reply doesn't overflow the
@@ -76,7 +77,7 @@ async function runPromptTask(task: TaskRow): Promise<string> {
       if (match) runTarget = match;
     }
     const now = new Date();
-    const prompt = renderTaskPrompt(task.prompt!, JSON.parse(task.recurrence_params) as Record<string, string>, {
+    const prompt = renderTaskPrompt(task.prompt!, parseStringMap(`tasks ${task.id}/recurrence_params`, task.recurrence_params), {
       lastResult: task.last_result ?? "",
       currentDateTime: now.toLocaleString(),
     });

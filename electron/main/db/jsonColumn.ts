@@ -31,3 +31,35 @@ export function parseJsonColumn(label: string, raw: string): unknown {
     return UNPARSEABLE;
   }
 }
+
+/**
+ * A JSON id-array column, degrading to an empty list.
+ *
+ * Four tables store attachments this way (agents.mcp_server_ids, connector_ids,
+ * http_tool_collection_ids). Callers immediately `.includes()` or iterate the result, so a
+ * corrupt row is not just unparseable — a parsed non-array would throw one line later. "Nothing
+ * attached" is the safe reading of both.
+ */
+export function parseIdList(label: string, raw: string): string[] {
+  const parsed = parseJsonColumn(label, raw);
+  if (parsed === UNPARSEABLE) return [];
+  if (!Array.isArray(parsed) || !parsed.every((id) => typeof id === "string")) {
+    devLog(`[db] ignoring ${label}: not an array of ids`);
+    return [];
+  }
+  return parsed;
+}
+
+/**
+ * A JSON string-map column, degrading to an empty map. Used for the encrypted header/env maps and
+ * a task's recurrence params, all of which are iterated by their callers.
+ */
+export function parseStringMap(label: string, raw: string): Record<string, string> {
+  const parsed = parseJsonColumn(label, raw);
+  if (parsed === UNPARSEABLE) return {};
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    devLog(`[db] ignoring ${label}: not an object`);
+    return {};
+  }
+  return parsed as Record<string, string>;
+}

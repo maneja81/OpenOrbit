@@ -1,5 +1,6 @@
 import { getDb } from "./index";
 import { encryptSecret, decryptSecret } from "../security/secretStorage";
+import { parseIdList, parseStringMap } from "./jsonColumn";
 
 /** One user-declared input to an HTTP tool. `location` decides where the value ends up in
  * the outgoing request — see ai/httpToolRequest.ts, which is the only place that reads it. */
@@ -143,7 +144,7 @@ function encryptHeaders(headers: Record<string, string>): string {
 }
 
 function decryptHeaders(headersJson: string): Record<string, string> {
-  const stored = JSON.parse(headersJson) as Record<string, string>;
+  const stored = parseStringMap("http_tools.headers", headersJson);
   const decrypted: Record<string, string> = {};
   for (const [key, value] of Object.entries(stored)) {
     decrypted[key] = decryptSecret(value);
@@ -265,7 +266,7 @@ export function deleteHttpToolCollection(id: string): void {
     http_tool_collection_ids: string;
   }[];
   for (const agent of agents) {
-    const ids = JSON.parse(agent.http_tool_collection_ids) as string[];
+    const ids = parseIdList(`agents ${agent.id}/http_tool_collection_ids`, agent.http_tool_collection_ids);
     if (!ids.includes(id)) continue;
     db.prepare("UPDATE agents SET http_tool_collection_ids = ? WHERE id = ?").run(
       JSON.stringify(ids.filter((existingId) => existingId !== id)),
