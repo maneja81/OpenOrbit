@@ -8,11 +8,30 @@ const VALIDATION_PATTERNS = [/requires/i, /must be/i, /is required/i];
 
 const BRIDGE_UNAVAILABLE_PATTERNS = [/bridge unavailable/i, /window\.agentsAPI/i];
 
+/**
+ * Electron wraps every rejected `ipcRenderer.invoke` as
+ * `Error invoking remote method '<channel>': <ErrorName>: <message>`.
+ *
+ * That wrapper defeated the categories below, which is worse than it looks. `Access denied:` is
+ * thrown by ipc/filesystem.ts and so always arrives wrapped — the startsWith check never matched,
+ * and the user got the generic "Something went wrong" instead of the one message that tells them
+ * what to actually do about it. Nearly every error this function sees comes over IPC.
+ *
+ * The plain `Error:` left behind is dropped too, since it says nothing. A named class
+ * (`SqliteError:`) is kept — that one is worth showing.
+ */
+const IPC_WRAPPER = /^Error invoking remote method '[^']*':\s*/;
+const PLAIN_ERROR_PREFIX = /^Error:\s*/;
+
+function unwrap(message: string): string {
+  return message.replace(IPC_WRAPPER, "").replace(PLAIN_ERROR_PREFIX, "").trim();
+}
+
 function rawMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (typeof error === "string") return error;
+  if (error instanceof Error) return unwrap(error.message);
+  if (typeof error === "string") return unwrap(error);
   try {
-    return String(error);
+    return unwrap(String(error));
   } catch {
     return "Unknown error";
   }
@@ -62,8 +81,12 @@ export function humanizeError(error: unknown): HumanizedError {
   };
 }
 
-/** Joins a HumanizedError into one string for surfaces that only render plain text. */
+/** Joins a HumanizedError into one string for surfaces that only render plain text.
+ *
+ * The message is punctuated before the next steps are appended — most come from a thrown Error
+ * and end without any, which ran the two together: "database is locked Try again". */
 export function formatHumanizedError(h: HumanizedError): string {
-  const steps = h.nextSteps.length > 0 ? ` ${h.nextSteps.join(" ")}` : "";
-  return `${h.title}: ${h.message}${steps}`;
+  if (h.nextSteps.length === 0) return `${h.title}: ${h.message}`;
+  const message = /[.!?]$/.test(h.message.trim()) ? h.message.trim() : `${h.message.trim()}.`;
+  return `${h.title}: ${message} ${h.nextSteps.join(" ")}`;
 }
