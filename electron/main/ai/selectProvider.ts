@@ -1,7 +1,8 @@
 import { getDb } from "../db";
 import { setSetting } from "../db/settingsStore";
-import { saveProvider } from "../db/providersStore";
-import { findProvider } from "./providers";
+import { listVisibleProviders, saveProvider } from "../db/providersStore";
+import { findProvider, inferProviderId } from "./providers";
+import { readAppSetting } from "../appSettings";
 import { validateSettingValue } from "../settingsSchema";
 import { devLog } from "../devLog";
 
@@ -22,11 +23,13 @@ import { devLog } from "../devLog";
 export interface ChatProviderSelection {
   /** A registry id from ./providers. */
   providerId: string;
-  /** Omit to keep whatever URL is stored; the provider's own default fills a blank. */
+  /** Omit to keep the URL already stored for this provider; the provider's own default fills a
+   * blank. */
   apiUrl?: string;
   /** Omit to leave the stored key alone — see saveProvider's three-state apiKey. */
   apiKey?: string;
-  /** Omit to take the provider's default model. */
+  /** Omit to keep the current model when this provider is already the Chat slot, or to take the
+   * provider's default when switching to a different one. */
   model?: string;
 }
 
@@ -41,14 +44,32 @@ export function selectChatProvider(selection: ChatProviderSelection): ChatProvid
   const provider = findProvider(selection.providerId);
   if (!provider) throw new Error(`Unknown provider "${selection.providerId}".`);
 
-  const apiUrl = selection.apiUrl?.trim() ?? provider.baseUrl;
+  // Which provider the Chat slot is on *before* this call. An install that predates the registry
+  // has no id stored, so it is inferred from the legacy URL — the same rule useProviders.chatSlot
+  // uses to decide what to show selected, so the UI and this function agree about what counts as
+  // a switch.
+  const currentProviderId = readAppSetting("chatProviderId") || inferProviderId(readAppSetting("chatApiUrl"));
+  const switchingProvider = currentProviderId !== provider.id;
+  const storedUrl = listVisibleProviders().find((row) => row.id === provider.id)?.apiUrl ?? "";
+
+  // Omitted fields keep what is already stored rather than snapping back to the registry default.
+  //
+  // They used to fall through to `provider.baseUrl` / `provider.defaultChatModel` unconditionally,
+  // which made every partial write destructive: the Settings panel saves the key on its own, so
+  // rotating a key reset a custom model *and* a custom API URL. On a setup pointed at a private
+  // gateway that silently re-aimed the slot at api.openai.com and sent the user's key there.
+  const apiUrl = selection.apiUrl?.trim() || storedUrl || provider.baseUrl;
   // A hosted provider always has a default URL to fall back on; `local` does not, because only
   // the user knows where their server is.
   if (apiUrl === "") throw new Error(`${provider.label} needs an API URL.`);
   const urlCheck = validateSettingValue("chatApiUrl", apiUrl);
   if (!urlCheck.ok) throw new Error(`That API URL ${urlCheck.reason}.`);
 
-  const model = selection.model?.trim() || provider.defaultChatModel;
+  // Switching provider still moves the model — that is the whole point of this function, and a
+  // model id from the old host is exactly what breaks against the new one. Staying put keeps it.
+  const model =
+    selection.model?.trim() ||
+    (switchingProvider ? provider.defaultChatModel : readAppSetting("orchestratorModel"));
   if (model === "") throw new Error(`${provider.label} needs a model id.`);
   const modelCheck = validateSettingValue("orchestratorModel", model);
   if (!modelCheck.ok) throw new Error(`That model id ${modelCheck.reason}.`);
