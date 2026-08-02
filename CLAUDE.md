@@ -90,6 +90,45 @@ Four built-in sub-agents ship seeded from `electron/main/ai/defaultAgents.json`:
 - ⚠ **Never launch the app from a worktree without `--user-data-dir`.** `app.getPath("userData")` resolves to the same `~/Library/Application Support/OpenOrbit` from *every* checkout and worktree, so an exploratory launch writes into the real database — settings, chat history, agents, encrypted API keys. The `run-openorbit` driver sandboxes it and aborts if the isolation doesn't take; use it rather than launching by hand.
 - **Env required**: none at runtime. Credentials are entered in-app and stored encrypted in SQLite — chat/voice API key + base URL under `appSettings.*` (`ai/provider.ts`), per-connector OAuth client id/secret in the `connectors` table (`connectors/registry.ts`, migration 26). Optional at build time: `GITHUB_RELEASE_REPO` (`scripts/releaseInfo.ts`); `PORT` overrides the dev renderer port.
 
+## Worktrees
+
+- ⚠ **Branch every new worktree from `develop`.** `develop` is the default working branch and carries the entire app. `main` sits at `ca1f8d8` — a README-only "idea phase" commit with no `src/`, no `electron/`, no `package.json`. A worktree cut from `main` (or from whatever HEAD happened to be) reads as an *empty project*, and has now misled three separate sessions into concluding the feature they were sent to fix doesn't exist.
+
+  ```bash
+  git worktree add -b <branch> .claude/worktrees/<name> develop
+  ```
+
+- **Check the base before trusting an existing worktree** — one command, before reading anything into its contents:
+
+  ```bash
+  git log --oneline <branch> ^develop     # empty = no unique commits, safe to reset onto develop
+  git merge-base develop <branch>         # should be develop's tip or an ancestor of it
+  ```
+
+  Recovery, when the tree is clean and nothing unique is on the branch: `git fetch origin && git reset --hard origin/develop`.
+
+- **`node_modules` and `dist-electron/` are per-worktree** and untracked — a fresh worktree needs its own install (see the Electron caveat below). `0-cowork/`, `MEMORY.md` and `.env` are gitignored and exist **only in the main checkout** at `/Users/mohitaneja/Projects/OpenOrbit`; write shared plans, fixes and memory to that absolute path or the workspace silently forks.
+
+## Verify Gate
+
+- **Run all four, every time, before reporting work done** — a green vitest run alone is not validation:
+
+  ```bash
+  npx eslint src electron     # exit 0
+  npx tsc -b                  # exit 0
+  npm run build               # exit 0
+  npm test                    # all pass
+  ```
+
+- **eslint and `tsc -b` print nothing when they pass**, so "no output" proves nothing on its own — check the exit code. Capture `$?` on its own line: `${PIPESTATUS[0]}` is bash-only and expands to an empty string under zsh, which renders as `lint exit:` and reads exactly like success.
+- **Green baseline — `a2fa46f`, verified 2026-08-03: 106 test files / 1070 tests**, eslint 0, `tsc -b` 0, build 0. A materially *lower* test count almost always means a broken Electron binary rather than a removed test — see below.
+- ⚠ **`npm ci` in a fresh worktree regularly leaves Electron unusable while still exiting 0.** Two observed variants: no binary at all (`node_modules/electron/dist` and `path.txt` both absent), or a half-extracted app (`failed to create directory …/Electron.app/Contents/Resources/kn.lproj: File exists`). Either way `electron/main/ai/agents.test.ts` — **45 tests** — fails with "Electron failed to install correctly" or disappears from the run. It reads as one broken suite; it is ~4% of the suite. Verify and repair:
+
+  ```bash
+  ls node_modules/electron/path.txt node_modules/electron/dist    # both must exist
+  rm -rf node_modules/electron/dist node_modules/electron/path.txt && node node_modules/electron/install.js
+  ```
+
 ## Conventions
 
 - TypeScript strict throughout, two project refs: `tsconfig.node.json` (electron/, scripts/, configs) and `tsconfig.web.json` (src/). `@/*` → `./src`, aliased in both electron-vite and vitest.
