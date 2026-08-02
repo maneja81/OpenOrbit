@@ -158,6 +158,8 @@ const agentsAPI = {
         toolName: string;
         agentName?: string;
         args?: string;
+        /** Absolute epoch ms at which main declines this call on the user's behalf. */
+        expiresAt: number;
       }) => void
     ): (() => void) => subscribeWithPayload("agent:stream-approval", callback),
     /** Fires when an approval was resolved without the user — the 5-minute timeout expiring,

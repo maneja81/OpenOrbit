@@ -580,8 +580,11 @@ export default function AgentsApp() {
   const [approvalQueue, setApprovalQueue] = useState<PendingToolApproval[]>([]);
   useEffect(() => {
     if (!hasAgentsAPI()) return;
-    return window.agentsAPI.agent.onToolApproval(({ approvalId, toolName, agentName, args }) => {
-      setApprovalQueue((prev) => [...prev, { approvalId, toolName, agentName, args }]);
+    return window.agentsAPI.agent.onToolApproval(({ approvalId, toolName, agentName, args, expiresAt }) => {
+      // requestedAt is read here, in the IPC callback, rather than inside the state updater —
+      // a clock read in an updater body is impure and StrictMode double-invokes it.
+      const requestedAt = Date.now();
+      setApprovalQueue((prev) => [...prev, { approvalId, toolName, agentName, args, expiresAt, requestedAt }]);
     });
   }, []);
 
@@ -605,7 +608,7 @@ export default function AgentsApp() {
       setApprovalQueue((prev) => prev.filter((item) => item.approvalId !== approvalId));
       appendMessage({
         role: "assistant",
-        text: approvalSettledMessage(settled.toolName, reason),
+        text: approvalSettledMessage(settled.toolName, reason, settled.expiresAt - settled.requestedAt),
         avatarLabel: settings.agentName[0]?.toUpperCase() || "A",
       });
     });
