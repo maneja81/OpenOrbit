@@ -6,6 +6,7 @@ import SettingsPanel, { SettingsSection } from "@/components/organisms/SettingsP
 import KnowledgeModal from "@/components/organisms/KnowledgeModal";
 import ChatHistoryModal from "@/components/organisms/ChatHistoryModal";
 import HttpToolApprovalModal, { type PendingToolApproval } from "@/components/molecules/HttpToolApprovalModal";
+import { approvalSettledMessage } from "@/lib/approvalSettledMessage";
 import ToolApprovalCard from "@/components/molecules/ToolApprovalCard";
 import OnboardingScreen, { type OnboardingAnswers } from "@/components/organisms/OnboardingScreen";
 import { useOrbitScene } from "@/hooks/useOrbitScene";
@@ -583,6 +584,32 @@ export default function AgentsApp() {
       setApprovalQueue((prev) => [...prev, { approvalId, toolName, agentName, args }]);
     });
   }, []);
+
+  // Mirrors approvalQueue so the settled handler below can name the tool that went away
+  // without taking the queue as a dependency — which would tear down and re-subscribe the
+  // IPC listener on every approval.
+  const approvalQueueRef = useRef<PendingToolApproval[]>([]);
+  useEffect(() => {
+    approvalQueueRef.current = approvalQueue;
+  }, [approvalQueue]);
+
+  // Main answers on the user's behalf when the 5-minute timeout expires or the run is
+  // abandoned. Nothing used to tell the renderer, so the prompt stayed up with the call
+  // already declined — and Approve then resolved nothing, which reads as the button being
+  // broken. Drop it here and say what happened, rather than letting it vanish silently.
+  useEffect(() => {
+    if (!hasAgentsAPI()) return;
+    return window.agentsAPI.agent.onToolApprovalSettled(({ approvalId, reason }) => {
+      const settled = approvalQueueRef.current.find((item) => item.approvalId === approvalId);
+      if (!settled) return;
+      setApprovalQueue((prev) => prev.filter((item) => item.approvalId !== approvalId));
+      appendMessage({
+        role: "assistant",
+        text: approvalSettledMessage(settled.toolName, reason),
+        avatarLabel: settings.agentName[0]?.toUpperCase() || "A",
+      });
+    });
+  }, [appendMessage, settings.agentName]);
 
   const pendingApproval = approvalQueue[0] ?? null;
 

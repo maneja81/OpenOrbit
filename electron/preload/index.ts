@@ -160,6 +160,12 @@ const agentsAPI = {
         args?: string;
       }) => void
     ): (() => void) => subscribeWithPayload("agent:stream-approval", callback),
+    /** Fires when an approval was resolved without the user — the 5-minute timeout expiring,
+     * or the run being abandoned. The prompt must come down: main has already answered on the
+     * user's behalf, so a later Approve resolves nothing and reads as the click doing nothing. */
+    onToolApprovalSettled: (
+      callback: (payload: { approvalId: string; reason: "timeout" | "abandoned" }) => void
+    ): (() => void) => subscribeWithPayload("agent:stream-approval-settled", callback),
     respondToApproval: (approvalId: string, approved: boolean): Promise<void> =>
       ipcRenderer.invoke("agent:approveTool", approvalId, approved),
     list: (): Promise<AgentDisplayRow[]> => ipcRenderer.invoke("agent:list"),

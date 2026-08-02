@@ -263,19 +263,37 @@ function createPausableDeadline(ms: number, message: string) {
   };
 }
 
+/** Why an approval was resolved by something other than the user answering it. */
+export type ApprovalSettledReason = "timeout" | "abandoned";
+
 /** Approvals awaiting a decision from the renderer, keyed by a main-generated approvalId.
  * Main-generated rather than reusing the SDK's callId so a renderer reply can only ever
- * resolve an approval this process actually asked for. */
+ * resolve an approval this process actually asked for.
+ *
+ * `sender` is held so the two paths that settle an approval *without* the user — the 5-minute
+ * timeout and run abandonment — can say so. Without that the prompt stayed on screen with the
+ * call already declined, and Approve became a silent no-op via the `!pending` guard below. */
 const pendingApprovals = new Map<
   string,
-  { requestId: string; resolve: (approved: boolean) => void; timer: NodeJS.Timeout }
+  {
+    requestId: string;
+    resolve: (approved: boolean) => void;
+    timer: NodeJS.Timeout;
+    sender: Electron.WebContents;
+  }
 >();
 
-function settleApproval(approvalId: string, approved: boolean): void {
+function settleApproval(approvalId: string, approved: boolean, reason?: ApprovalSettledReason): void {
   const pending = pendingApprovals.get(approvalId);
   if (!pending) return;
   clearTimeout(pending.timer);
   pendingApprovals.delete(approvalId);
+  // Only when something other than the user decided. A renderer that answered already knows,
+  // and telling it again would race its own queue removal. `isDestroyed` because a window
+  // closed mid-run is exactly when abandonment fires.
+  if (reason && !pending.sender.isDestroyed()) {
+    pending.sender.send("agent:stream-approval-settled", { approvalId, reason });
+  }
   pending.resolve(approved);
 }
 
@@ -284,9 +302,7 @@ function settleApproval(approvalId: string, approved: boolean): void {
 function abandonApprovalsFor(requestId: string): void {
   for (const [approvalId, pending] of pendingApprovals) {
     if (pending.requestId !== requestId) continue;
-    clearTimeout(pending.timer);
-    pendingApprovals.delete(approvalId);
-    pending.resolve(false);
+    settleApproval(approvalId, false, "abandoned");
   }
 }
 
@@ -395,8 +411,8 @@ export function registerAgentHandlers() {
         devLog(`[agent:runStream] requestId=${requestId} awaiting approval for tool=${meta.toolName ?? "(unknown)"}`);
         deadline.pause();
         return new Promise<boolean>((resolve) => {
-          const timer = setTimeout(() => settleApproval(approvalId, false), APPROVAL_TIMEOUT_MS);
-          pendingApprovals.set(approvalId, { requestId, resolve, timer });
+          const timer = setTimeout(() => settleApproval(approvalId, false, "timeout"), APPROVAL_TIMEOUT_MS);
+          pendingApprovals.set(approvalId, { requestId, resolve, timer, sender: event.sender });
           event.sender.send("agent:stream-approval", {
             requestId,
             approvalId,
