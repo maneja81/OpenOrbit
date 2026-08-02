@@ -15,6 +15,18 @@ describe("USER_CONTEXT_FIELDS", () => {
     ]);
   });
 
+  // U13 — main drops a seeded fact silently when either side is blank (isValidFact in
+  // ipc/userInfo.ts:21-23) rather than throwing, deliberately, so a bad fact can't fail
+  // onboarding. That makes a non-empty factQuestion the thing standing between a real answer
+  // and a silent disappearance: the renderer already filters blank *answers* before sending
+  // (AgentsApp's onboarding handler), so a blank *question* here would be the only way a
+  // genuine answer could vanish with no error and no catch to report it.
+  it("never ships a blank factQuestion, which main would silently drop", () => {
+    for (const field of USER_CONTEXT_FIELDS) {
+      expect(field.factQuestion.trim().length, `field "${field.key}"`).toBeGreaterThan(0);
+    }
+  });
+
   it("gives every field a unique key and a label", () => {
     const keys = USER_CONTEXT_FIELDS.map((field) => field.key);
     expect(new Set(keys).size).toBe(keys.length);
