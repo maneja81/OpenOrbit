@@ -102,10 +102,10 @@ export default function ChatImage({ src, alt, title, autoLoadRemote = false }: C
     // An image inside a link would otherwise fire the anchor's handler too, opening twice.
     e.preventDefault();
     e.stopPropagation();
-    if (openable) window.open(src);
+    window.open(src);
   };
 
-  return (
+  const image = (
     <img
       className={openable ? "chat-image chat-image--openable" : "chat-image"}
       src={src}
@@ -113,8 +113,23 @@ export default function ChatImage({ src, alt, title, autoLoadRemote = false }: C
       // long CDN path is worse than skipping a decorative image.
       alt={alt ?? ""}
       title={title}
-      onClick={open}
       onError={() => setFailedSrc(src)}
     />
+  );
+
+  if (!openable) return image;
+
+  // A real button rather than ARIA on the <img>: the image stays an image, and the
+  // open-externally action becomes a control the keyboard can reach. The button carries the
+  // whole accessible name because the img's alt is empty whenever the author gave none.
+  return (
+    <button
+      type="button"
+      className="chat-image-open"
+      onClick={open}
+      aria-label={alt ? `Open image in browser: ${alt}` : "Open image in browser"}
+    >
+      {image}
+    </button>
   );
 }
