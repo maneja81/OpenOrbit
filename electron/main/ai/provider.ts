@@ -217,6 +217,16 @@ export async function synthesizeSpeech(text: string): Promise<{ audio: string; f
     throw new Error(`Speech synthesis failed (${response.status}): ${detail || response.statusText}`);
   }
 
+  // A 200 status isn't necessarily audio — some providers/proxies return an error page or
+  // JSON body with a success status. Without this check, that body gets base64-encoded and
+  // handed to the renderer as if it were valid mp3, where it fails silently at playback
+  // (Audio.onerror) with no indication of what actually went wrong.
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.startsWith("audio/")) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(`Speech synthesis returned non-audio content-type "${contentType}": ${detail.slice(0, 200)}`);
+  }
+
   const arrayBuffer = await response.arrayBuffer();
   return { audio: Buffer.from(arrayBuffer).toString("base64"), format };
 }

@@ -13,7 +13,7 @@ vi.mock("../security/secretStorage", () => ({
   decryptSecret: vi.fn(() => "test-key"),
 }));
 
-import { transcribeAudio, estimateGenerationCost } from "./provider";
+import { transcribeAudio, synthesizeSpeech, estimateGenerationCost } from "./provider";
 
 describe("transcribeAudio", () => {
   afterEach(() => {
@@ -91,6 +91,51 @@ describe("transcribeAudio", () => {
       })
     );
     await expect(transcribeAudio("base64audio", "webm")).rejects.toThrow(/Transcription failed \(400\)/);
+  });
+});
+
+describe("synthesizeSpeech", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("returns base64 audio when the provider responds with an audio content-type", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ "content-type": "audio/mpeg" }),
+        arrayBuffer: async () => new TextEncoder().encode("fake-mp3-bytes").buffer,
+      })
+    );
+    const result = await synthesizeSpeech("hello");
+    expect(result.format).toBe("mp3");
+    expect(Buffer.from(result.audio, "base64").toString()).toBe("fake-mp3-bytes");
+  });
+
+  it("throws with response detail on a non-ok response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        statusText: "Bad Request",
+        text: async () => "bad voice",
+      })
+    );
+    await expect(synthesizeSpeech("hello")).rejects.toThrow(/Speech synthesis failed \(400\)/);
+  });
+
+  it("throws when a 200 response isn't actually audio", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ "content-type": "application/json" }),
+        text: async () => '{"error":"upstream unavailable"}',
+      })
+    );
+    await expect(synthesizeSpeech("hello")).rejects.toThrow(/non-audio content-type "application\/json"/);
   });
 });
 
