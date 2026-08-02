@@ -8,6 +8,7 @@ import AgentAccordion from "@/components/molecules/AgentAccordion";
 import SettingsAccordion from "@/components/molecules/SettingsAccordion";
 import AddAgentForm from "@/components/molecules/AddAgentForm";
 import ApiKeyField from "@/components/molecules/ApiKeyField";
+import TextField from "@/components/molecules/TextField";
 import NumberField from "@/components/molecules/NumberField";
 import FilesAppsTab from "@/components/organisms/FilesAppsTab";
 import McpServersTab from "@/components/organisms/McpServersTab";
@@ -424,29 +425,19 @@ export default function SettingsPanel({
                         isSet={settings.chatApiKeySet}
                         onSave={(key) => onUpdate({ chatApiKey: key })}
                       />
-                      <label className="row-field">
-                        <span>API URL</span>
-                        <input
-                          type="text"
-                          value={settings.chatApiUrl}
-                          onChange={(e) => onUpdate({ chatApiUrl: e.target.value })}
-                          placeholder="https://api.openai.com/v1"
-                          autoComplete="off"
-                        />
-                        {providerUrlWarning(settings.chatApiUrl) && (
-                          <p className="settings-warning">{providerUrlWarning(settings.chatApiUrl)}</p>
-                        )}
-                      </label>
-                      <label className="row-field">
-                        <span>Model ID</span>
-                        <input
-                          type="text"
-                          value={settings.orchestratorModel}
-                          onChange={(e) => onUpdate({ orchestratorModel: e.target.value })}
-                          placeholder={DEFAULT_ORCHESTRATOR_MODEL}
-                          autoComplete="off"
-                        />
-                      </label>
+                      <TextField
+                        label="API URL"
+                        value={settings.chatApiUrl}
+                        placeholder="https://api.openai.com/v1"
+                        warningFor={providerUrlWarning}
+                        onCommit={(chatApiUrl) => onUpdate({ chatApiUrl })}
+                      />
+                      <TextField
+                        label="Model ID"
+                        value={settings.orchestratorModel}
+                        placeholder={DEFAULT_ORCHESTRATOR_MODEL}
+                        onCommit={(orchestratorModel) => onUpdate({ orchestratorModel })}
+                      />
                     </div>
                   </div>
                 </SettingsAccordion>
@@ -486,39 +477,25 @@ export default function SettingsPanel({
                         isSet={settings.voiceApiKeySet}
                         onSave={(key) => onUpdate({ voiceApiKey: key })}
                       />
-                      <label className="row-field">
-                        <span>API URL</span>
-                        <input
-                          type="text"
-                          value={settings.voiceApiUrl}
-                          onChange={(e) => onUpdate({ voiceApiUrl: e.target.value })}
-                          placeholder="https://api.openai.com/v1"
-                          autoComplete="off"
-                        />
-                        {providerUrlWarning(settings.voiceApiUrl) && (
-                          <p className="settings-warning">{providerUrlWarning(settings.voiceApiUrl)}</p>
-                        )}
-                      </label>
-                      <label className="row-field">
-                        <span>Transcription model</span>
-                        <input
-                          type="text"
-                          value={settings.voiceTranscriptionModel}
-                          onChange={(e) => onUpdate({ voiceTranscriptionModel: e.target.value })}
-                          placeholder="whisper-1"
-                          autoComplete="off"
-                        />
-                      </label>
-                      <label className="row-field">
-                        <span>Speech (TTS) model</span>
-                        <input
-                          type="text"
-                          value={settings.voiceTtsModel}
-                          onChange={(e) => onUpdate({ voiceTtsModel: e.target.value })}
-                          placeholder="gpt-4o-mini-tts"
-                          autoComplete="off"
-                        />
-                      </label>
+                      <TextField
+                        label="API URL"
+                        value={settings.voiceApiUrl}
+                        placeholder="https://api.openai.com/v1"
+                        warningFor={providerUrlWarning}
+                        onCommit={(voiceApiUrl) => onUpdate({ voiceApiUrl })}
+                      />
+                      <TextField
+                        label="Transcription model"
+                        value={settings.voiceTranscriptionModel}
+                        placeholder="whisper-1"
+                        onCommit={(voiceTranscriptionModel) => onUpdate({ voiceTranscriptionModel })}
+                      />
+                      <TextField
+                        label="Speech (TTS) model"
+                        value={settings.voiceTtsModel}
+                        placeholder="gpt-4o-mini-tts"
+                        onCommit={(voiceTtsModel) => onUpdate({ voiceTtsModel })}
+                      />
                       <label className="row-field">
                         <span>Speech (TTS) voice</span>
                         <Combobox
@@ -683,16 +660,12 @@ export default function SettingsPanel({
                     plain setting; the rest live in the cross-agent user-fact store and reach
                     every agent's prompt, so they are saved through useUserContext. */}
                 <div className="card" id="settings-about-you">
-                  <label className="row-field">
-                    <span>What should I call you?</span>
-                    <input
-                      type="text"
-                      value={settings.userName}
-                      onChange={(e) => onUpdate({ userName: e.target.value })}
-                      placeholder="Your name"
-                      autoComplete="off"
-                    />
-                  </label>
+                  <TextField
+                    label="What should I call you?"
+                    value={settings.userName}
+                    placeholder="Your name"
+                    onCommit={(userName) => onUpdate({ userName })}
+                  />
                   {USER_CONTEXT_FIELDS.map((field) => (
                     <label className="row-field" key={field.key}>
                       <span>{field.label}</span>
