@@ -28,7 +28,7 @@ export default function AgentInfoModal({
   connectorToolCount,
 }: AgentInfoModalProps) {
   return (
-    <Modal open={open} onClose={onClose}>
+    <Modal open={open} onClose={onClose} label={name}>
       <div className="km-header">
         <span className="km-title">
           {icon && <TablerIcon name={icon} />} {name}

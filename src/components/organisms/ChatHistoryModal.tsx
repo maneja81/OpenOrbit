@@ -52,7 +52,7 @@ export default function ChatHistoryModal({ open, onClose, autoLoadRemoteImages }
   const newerDisabled = loading || safePage <= 0;
 
   return (
-    <Modal open={open} onClose={onClose} className="modal-panel--chat-history">
+    <Modal open={open} onClose={onClose} className="modal-panel--chat-history" label="Chat History">
       <div className="km-header">
         <span className="km-title">Chat History</span>
         <div className="widget-header-actions">

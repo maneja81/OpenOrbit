@@ -70,7 +70,7 @@ export default function KnowledgeModal({ open, onClose }: KnowledgeModalProps) {
   };
 
   return (
-    <Modal open={open} onClose={handleClose}>
+    <Modal open={open} onClose={handleClose} label="Knowledge">
       <div className="km-header">
         <span className="km-title">Knowledge</span>
         <div className="widget-header-actions">

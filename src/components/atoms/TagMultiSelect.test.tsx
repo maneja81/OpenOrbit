@@ -29,7 +29,7 @@ describe("TagMultiSelect", () => {
   it("does not close the modal it is opened inside", () => {
     const onClose = vi.fn();
     render(
-      <Modal open onClose={onClose}>
+      <Modal open onClose={onClose} label="Settings">
         <TagMultiSelect values={[]} options={OPTIONS} onChange={vi.fn()} ariaLabel="Tools" />
       </Modal>
     );

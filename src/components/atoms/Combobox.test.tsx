@@ -30,7 +30,7 @@ describe("Combobox", () => {
   it("does not close the modal it is opened inside", () => {
     const onClose = vi.fn();
     render(
-      <Modal open onClose={onClose}>
+      <Modal open onClose={onClose} label="Settings">
         <Combobox value="docs" options={OPTIONS} onChange={vi.fn()} ariaLabel="Category" />
       </Modal>
     );
@@ -47,7 +47,7 @@ describe("Combobox", () => {
   it("leaves Escape to the modal once its menu is closed", () => {
     const onClose = vi.fn();
     render(
-      <Modal open onClose={onClose}>
+      <Modal open onClose={onClose} label="Settings">
         <Combobox value="docs" options={OPTIONS} onChange={vi.fn()} ariaLabel="Category" />
       </Modal>
     );

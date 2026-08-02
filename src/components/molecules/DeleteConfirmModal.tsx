@@ -27,7 +27,7 @@ export default function DeleteConfirmModal({ open, itemLabel, onConfirm, onCance
   };
 
   return (
-    <Modal open={open} onClose={handleCancel}>
+    <Modal open={open} onClose={handleCancel} label={`Delete ${itemLabel}?`}>
       <div className="delete-confirm-modal danger-zone">
         <h3>Delete {itemLabel}?</h3>
         <p className="danger-zone-desc">This cannot be undone.</p>
