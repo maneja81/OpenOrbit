@@ -29,8 +29,9 @@ import {
 import { formatUserInfoForPrompt, readUserInfoFacts } from "./userInfoStore";
 import defaultAgentsConfig from "./defaultAgents.json";
 import { getDb } from "../db";
-import { getSetting, setSetting } from "../db/settingsStore";
-import { MODEL_ID_PATTERN, validateSettingValue } from "../settingsSchema";
+import { setSetting } from "../db/settingsStore";
+import { MODEL_ID_PATTERN, SETTING_DEFAULTS, validateSettingValue } from "../settingsSchema";
+import { readAppSetting } from "../appSettings";
 import { getCurrentLocation } from "../ipc/location";
 import { encryptSecret } from "../security/secretStorage";
 import { connectMcpServersForAgent } from "./mcp";
@@ -47,13 +48,13 @@ import {
   disconnectConnector,
 } from "../db/connectorsStore";
 
-export const DEFAULT_MODEL = "gpt-4.1-mini";
-const DEFAULT_AGENT_DESCRIPTION = "Your personal AI orchestrator.";
-// Mirrors the same-named private constants in provider.ts (not exported from there,
-// and importing them would pull provider.ts's OpenAI-client setup into this module for
-// no reason) — only used here as get_settings' display defaults, same values.
-const DEFAULT_VOICE_TRANSCRIPTION_MODEL = "whisper-1";
-const DEFAULT_VOICE_TTS_MODEL = "tts-1";
+// Derived rather than re-declared: this used to be a fourth hand-maintained copy of the same
+// string. Still exported because ipc/settings.ts uses it as the "blank means default" fallback
+// when a model field is cleared. (skillDistill.ts keeps its own copy — that's finding S7.)
+export const DEFAULT_MODEL = SETTING_DEFAULTS.orchestratorModel;
+// The agent-description and voice-model defaults that used to live here — duplicated from
+// provider.ts, with a comment saying so — are now read from SETTING_DEFAULTS along with
+// everything else. That duplication is what finding S1 was about.
 
 // Prompts are seeded/imported with {{agentName}}/{{userName}}/{{currentDateTime}}
 // placeholders still in them so a rename doesn't require rewriting stored prompt text —
@@ -281,26 +282,26 @@ const getSettingsTool = tool({
   parameters: z.object({}),
   execute: async () => {
     devLog("[get_settings] called");
-    const agentName = getSetting<string>("appSettings.agentName", "Orbit");
-    const agentDescription = getSetting<string>("appSettings.agentDescription", DEFAULT_AGENT_DESCRIPTION);
-    const userName = getSetting<string>("appSettings.userName", "");
-    const orchestratorModel = getSetting<string>("appSettings.orchestratorModel", DEFAULT_MODEL) || DEFAULT_MODEL;
-    const voiceInputEnabled = getSetting<boolean>("appSettings.voiceInputEnabled", false);
-    const typeAnywhereEnabled = getSetting<boolean>("appSettings.typeAnywhereEnabled", false);
-    const locationEnabled = getSetting<boolean>("appSettings.locationEnabled", false);
-    const bgMusicEnabled = getSetting<boolean>("appSettings.bgMusicEnabled", false);
-    const soundFxEnabled = getSetting<boolean>("appSettings.soundFxEnabled", true);
-    const voiceOutputEnabled = getSetting<boolean>("appSettings.voiceOutputEnabled", true);
-    const voiceTranscriptionModel = getSetting<string>("appSettings.voiceTranscriptionModel", DEFAULT_VOICE_TRANSCRIPTION_MODEL);
-    const voiceTtsModel = getSetting<string>("appSettings.voiceTtsModel", DEFAULT_VOICE_TTS_MODEL);
-    const chatApiUrl = getSetting<string>("appSettings.chatApiUrl", "");
-    const voiceApiUrl = getSetting<string>("appSettings.voiceApiUrl", "");
-    const chatApiKey = getSetting<string | null>("appSettings.chatApiKey", null);
-    const voiceApiKey = getSetting<string | null>("appSettings.voiceApiKey", null);
-    const httpToolApprovalPost = getSetting<boolean>("appSettings.httpToolApprovalPost", true);
-    const httpToolApprovalPutPatch = getSetting<boolean>("appSettings.httpToolApprovalPutPatch", true);
-    const httpToolApprovalDelete = getSetting<boolean>("appSettings.httpToolApprovalDelete", true);
-    const toolApprovalDisplay = getSetting<string>("appSettings.toolApprovalDisplay", "modal");
+    const agentName = readAppSetting("agentName");
+    const agentDescription = readAppSetting("agentDescription");
+    const userName = readAppSetting("userName");
+    const orchestratorModel = readAppSetting("orchestratorModel") || DEFAULT_MODEL;
+    const voiceInputEnabled = readAppSetting("voiceInputEnabled");
+    const typeAnywhereEnabled = readAppSetting("typeAnywhereEnabled");
+    const locationEnabled = readAppSetting("locationEnabled");
+    const bgMusicEnabled = readAppSetting("bgMusicEnabled");
+    const soundFxEnabled = readAppSetting("soundFxEnabled");
+    const voiceOutputEnabled = readAppSetting("voiceOutputEnabled");
+    const voiceTranscriptionModel = readAppSetting("voiceTranscriptionModel");
+    const voiceTtsModel = readAppSetting("voiceTtsModel");
+    const chatApiUrl = readAppSetting("chatApiUrl");
+    const voiceApiUrl = readAppSetting("voiceApiUrl");
+    const chatApiKey = readAppSetting("chatApiKey");
+    const voiceApiKey = readAppSetting("voiceApiKey");
+    const httpToolApprovalPost = readAppSetting("httpToolApprovalPost");
+    const httpToolApprovalPutPatch = readAppSetting("httpToolApprovalPutPatch");
+    const httpToolApprovalDelete = readAppSetting("httpToolApprovalDelete");
+    const toolApprovalDisplay = readAppSetting("toolApprovalDisplay");
     return {
       httpToolApprovalPost,
       httpToolApprovalPutPatch,
@@ -575,7 +576,7 @@ const getCurrentLocationTool = tool({
     "Get the user's approximate last known location (city-level latitude/longitude, from an IP-based lookup — not GPS-precise), if location access is enabled in Settings.",
   parameters: z.object({}),
   execute: async () => {
-    const enabled = getSetting<boolean>("appSettings.locationEnabled", false);
+    const enabled = readAppSetting("locationEnabled");
     if (!enabled) return "Location access is disabled in Settings.";
     const location = getCurrentLocation();
     if (!location) return "No location available yet — the app hasn't captured the user's location this session.";
@@ -585,13 +586,13 @@ const getCurrentLocationTool = tool({
 
 /** Returns the user's saved override if set (via Settings → Agents), else the built-in orchestrator.md template. */
 function getOrchestratorPromptTemplate(): string {
-  const override = getSetting<string>("appSettings.orchestratorPromptOverride", "");
+  const override = readAppSetting("orchestratorPromptOverride");
   return override.trim().length > 0 ? override : orchestratorPrompt;
 }
 
 export function getOrchestratorPrompt(): string {
-  const agentName = getSetting<string>("appSettings.agentName", "Orbit");
-  const userName = getSetting<string>("appSettings.userName", "");
+  const agentName = readAppSetting("agentName");
+  const userName = readAppSetting("userName");
   return renderPrompt(getOrchestratorPromptTemplate(), { agentName, userName, currentDateTime: getCurrentDateTime() });
 }
 
@@ -612,8 +613,8 @@ export interface AgentDisplayRow extends AgentRow {
 // literally (see renderPrompt) — rendered here so the read-only Settings → AI display
 // shows the live name instead of the raw template.
 export function listAgentsForDisplay(): AgentDisplayRow[] {
-  const agentName = getSetting<string>("appSettings.agentName", "Orbit");
-  const userName = getSetting<string>("appSettings.userName", "");
+  const agentName = readAppSetting("agentName");
+  const userName = readAppSetting("userName");
   const currentDateTime = getCurrentDateTime();
   return listAgents().map((row) => ({
     ...row,
@@ -930,15 +931,12 @@ export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
   const db = getDb();
   ensureDefaultAgentsSeeded(db);
 
-  const agentName = getSetting<string>("appSettings.agentName", "Orbit");
-  const userName = getSetting<string>("appSettings.userName", "");
-  const orchestratorModel = getSetting<string>("appSettings.orchestratorModel", DEFAULT_MODEL) || DEFAULT_MODEL;
-  const orchestratorMcpServerIds = getSetting<string[]>("appSettings.orchestratorMcpServerIds", []);
-  const orchestratorConnectorIds = getSetting<string[]>("appSettings.orchestratorConnectorIds", []);
-  const orchestratorHttpToolCollectionIds = getSetting<string[]>(
-    "appSettings.orchestratorHttpToolCollectionIds",
-    []
-  );
+  const agentName = readAppSetting("agentName");
+  const userName = readAppSetting("userName");
+  const orchestratorModel = readAppSetting("orchestratorModel") || DEFAULT_MODEL;
+  const orchestratorMcpServerIds = readAppSetting("orchestratorMcpServerIds");
+  const orchestratorConnectorIds = readAppSetting("orchestratorConnectorIds");
+  const orchestratorHttpToolCollectionIds = readAppSetting("orchestratorHttpToolCollectionIds");
   const promptVars = { agentName, userName, currentDateTime: getCurrentDateTime() };
 
   const allConnected: MCPServerStdio[] = [];

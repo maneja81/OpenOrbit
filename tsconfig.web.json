@@ -18,5 +18,11 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src"]
+  // settingsSchema.ts is main-process code, listed here only so
+  // src/lib/settingsDefaults.test.ts can assert that the renderer's DEFAULT_SETTINGS and main's
+  // SETTING_DEFAULTS still agree — the two are separate projects, so nothing else stops them
+  // drifting, and they already had (finding S1). It is deliberately dependency-free, so pulling
+  // it into this program adds no Electron surface. This is not an invitation for renderer code
+  // to import from electron/: everything else there reaches the Electron API.
+  "include": ["src", "electron/main/settingsSchema.ts"]
 }

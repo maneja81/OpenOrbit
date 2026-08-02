@@ -1,14 +1,12 @@
 import OpenAI from "openai";
 import { setDefaultOpenAIClient } from "@openai/agents";
-import { getSetting, getSettingsByPrefix } from "../db/settingsStore";
+import { getSettingsByPrefix } from "../db/settingsStore";
+import { readAppSetting } from "../appSettings";
 import { decryptSecret } from "../security/secretStorage";
 
 export const OPENAI_BASE_URL = "https://api.openai.com/v1";
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const NAMESPACE = "appSettings.";
-const DEFAULT_VOICE_TRANSCRIPTION_MODEL = "whisper-1";
-const DEFAULT_VOICE_TTS_MODEL = "tts-1";
-const DEFAULT_VOICE_TTS_VOICE = "alloy";
 
 /** Chat and Voice are independent credential slots (Settings → AI Models) — a user can
  * point either at OpenAI (the default), OpenRouter, Ollama, or any other OpenAI-compatible
@@ -30,7 +28,9 @@ function getDecryptedKey(slot: CredentialSlot): string {
  * OpenAI's, same "blank means use the default" pattern as orchestratorModel. */
 function getConfiguredUrl(slot: CredentialSlot): string {
   const settingKey = slot === "chat" ? "chatApiUrl" : "voiceApiUrl";
-  return getSetting<string>(`${NAMESPACE}${settingKey}`, OPENAI_BASE_URL) || OPENAI_BASE_URL;
+  // One of the few places an explicit fallback is right rather than lazy: the schema default for
+  // these is "" (the field is genuinely unset), but an unset URL has to resolve to OpenAI's here.
+  return readAppSetting(settingKey, OPENAI_BASE_URL) || OPENAI_BASE_URL;
 }
 
 export function getDecryptedChatApiKey(): string {
@@ -156,7 +156,7 @@ interface WhisperSegment {
  * OpenAI-compatible surface accepts, so this works unchanged for either default. */
 export async function transcribeAudio(base64Audio: string, format: string): Promise<string> {
   const apiKey = getDecryptedKey("voice");
-  const model = getSetting<string>(`${NAMESPACE}voiceTranscriptionModel`, DEFAULT_VOICE_TRANSCRIPTION_MODEL);
+  const model = readAppSetting("voiceTranscriptionModel");
 
   const audioBuffer = Buffer.from(base64Audio, "base64");
   const formData = new FormData();
@@ -195,7 +195,7 @@ export async function transcribeAudio(base64Audio: string, format: string): Prom
  * useSpeak (renderer) falls back to the browser's speechSynthesis rather than going silent. */
 export async function synthesizeSpeech(text: string): Promise<{ audio: string; format: string }> {
   const apiKey = getDecryptedKey("voice");
-  const model = getSetting<string>(`${NAMESPACE}voiceTtsModel`, DEFAULT_VOICE_TTS_MODEL);
+  const model = readAppSetting("voiceTtsModel");
   const format = "mp3";
 
   const response = await fetch(`${getConfiguredUrl("voice")}/audio/speech`, {
@@ -207,7 +207,7 @@ export async function synthesizeSpeech(text: string): Promise<{ audio: string; f
     body: JSON.stringify({
       model,
       input: text,
-      voice: getSetting<string>(`${NAMESPACE}voiceTtsVoice`, DEFAULT_VOICE_TTS_VOICE),
+      voice: readAppSetting("voiceTtsVoice"),
       response_format: format,
     }),
   });
