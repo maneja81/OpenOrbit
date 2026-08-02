@@ -2096,6 +2096,17 @@ svg#oc {
   margin-top: 2px;
 }
 
+/* An action that belongs to one setting rather than to the section — the per-slot "Test" button
+   and the result it produces. Sits inside the .row-field's column flow, so it lines up under the
+   fields it tests instead of competing for space in the accordion header. */
+.group .card .row-field-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
 .group .card .row-field input,
 .group .card .row-field select {
   background: rgba(0, 4, 12, 0.4);

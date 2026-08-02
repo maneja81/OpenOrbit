@@ -302,6 +302,12 @@ export const PROTECTED_SETTING_KEYS = [
   // go to, so an agent able to write these can redirect the user's key just as surely as if it
   // had written the URL itself.
   "chatProviderId",
+  // Note: nothing writes `voiceProviderId` today — not the Settings panel, not a migration, and
+  // not selectChatProvider, which only ever sets chatProviderId. It stays "" on every install, so
+  // resolveSlot("voice") always takes the legacy chatApiUrl/voiceApiUrl branch. It is read at
+  // ai/provider.ts:99 and kept for the day a second `supportsVoice` provider exists; until then
+  // there is deliberately no picker, because voiceProviders() would offer a list of one. Listed
+  // here anyway so it cannot become agent-writable ahead of that.
   "voiceProviderId",
 ] as const;
 

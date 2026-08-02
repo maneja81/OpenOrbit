@@ -444,39 +444,137 @@ export default function SettingsPanel({
           <div className="detail-body">
             {activeSection === "models" && (
               <div className="agent-accordion-list">
-                <SettingsAccordion
-                  title="Chat"
-                  headerActions={
-                    <>
-                      {chatTestResult && (
-                        <span
-                          className={`settings-test-status ${chatTestResult.ok ? "settings-success" : "settings-error"}`}
-                          title={chatTestResult.detail}
-                        >
-                          {chatTestResult.detail}
-                        </span>
-                      )}
-                      <button
-                        type="button"
-                        className="settings-action-btn-sm settings-action-btn-ghost"
-                        onClick={() => runTestChat()}
-                        disabled={testingChat}
-                      >
-                        <TablerIcon name="ti-plug-connected" />
-                        <span>{testingChat ? "Testing…" : "Test"}</span>
-                      </button>
-                    </>
-                  }
-                >
+                <SettingsAccordion title="API keys" defaultOpen>
                   <p className="group-hint">
-                    Powers the orchestrator and every agent's chat/tool calls. Defaults to OpenAI — point it at
-                    OpenRouter, Ollama, or any other OpenAI-compatible host if you want a different model catalog.
+                    One key per provider. The Chat slot uses whichever provider is selected under
+                    Default models, and an agent pinned to a provider in Settings → Agents uses that
+                    provider's key.
+                  </p>
+                  <div className="group">
+                    <div className="card">
+                      {AI_PROVIDERS.map((provider) => {
+                        // The Chat provider's credentials still go through selectChat rather than a
+                        // plain save: the slot, its key and every inheriting agent's model are one
+                        // change, and a half-applied one is what selectChatProvider exists to prevent.
+                        const isChat = provider.id === chatSlotView.providerId;
+                        const row = providers.configured.find((entry) => entry.id === provider.id);
+                        const keySet = isChat ? chatSlotView.keySet : (row?.keySet ?? false);
+                        const saveKey = (apiKey: string) =>
+                          isChat
+                            ? void applyChat({ providerId: provider.id, apiKey })
+                            : void providers.save({ providerId: provider.id, apiKey });
+                        return (
+                          <div key={provider.id} className="row-field">
+                            <span>
+                              {provider.label}
+                              <small>
+                                {isChat ? "Chat provider · " : ""}
+                                {keySet
+                                  ? "Key saved"
+                                  : provider.keyRequired
+                                    ? "No API key yet"
+                                    : "No key needed — set the URL below"}
+                              </small>
+                            </span>
+                            <ApiKeyField
+                              label={`${provider.label} API key`}
+                              isSet={keySet}
+                              onSave={saveKey}
+                              onClear={keySet ? () => saveKey("") : undefined}
+                            />
+                            <TextField
+                              label={`${provider.label} API URL`}
+                              value={isChat ? chatSlotView.apiUrl : (row?.apiUrl ?? "")}
+                              placeholder={provider.baseUrl || "http://localhost:11434/v1"}
+                              warningFor={providerUrlWarning}
+                              onCommit={(apiUrl) =>
+                                isChat
+                                  ? void applyChat({ providerId: provider.id, apiUrl })
+                                  : void providers.save({ providerId: provider.id, apiUrl })
+                              }
+                            />
+                            {/* Only the Chat provider gets a Test button: the check resolves a
+                                credential *slot*, so there is nothing to test a provider that
+                                nothing is currently pointed at against. */}
+                            {isChat && (
+                              <div className="row-field-action">
+                                <button
+                                  type="button"
+                                  className="settings-action-btn-sm settings-action-btn-ghost"
+                                  onClick={() => runTestChat()}
+                                  disabled={testingChat}
+                                >
+                                  <TablerIcon name="ti-plug-connected" />
+                                  <span>{testingChat ? "Testing…" : "Test"}</span>
+                                </button>
+                                {chatTestResult && (
+                                  <span
+                                    className={`settings-test-status ${chatTestResult.ok ? "settings-success" : "settings-error"}`}
+                                    title={chatTestResult.detail}
+                                  >
+                                    {chatTestResult.detail}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                            {isChat && chatError && <p className="settings-error">{chatError}</p>}
+                          </div>
+                        );
+                      })}
+                      <div className="row-field">
+                        <span>
+                          Voice
+                          <small>
+                            {settings.voiceApiKeySet ? "Key saved · " : "No API key yet · "}
+                            Its own key, so speech can run on a different account from Chat
+                          </small>
+                        </span>
+                        <ApiKeyField
+                          label="Voice API key"
+                          isSet={settings.voiceApiKeySet}
+                          onSave={(key) => onUpdate({ voiceApiKey: key })}
+                        />
+                        <TextField
+                          label="Voice API URL"
+                          value={settings.voiceApiUrl}
+                          placeholder="https://api.openai.com/v1"
+                          warningFor={providerUrlWarning}
+                          onCommit={(voiceApiUrl) => onUpdate({ voiceApiUrl })}
+                        />
+                        <div className="row-field-action">
+                          <button
+                            type="button"
+                            className="settings-action-btn-sm settings-action-btn-ghost"
+                            onClick={() => runTestVoice()}
+                            disabled={testingVoice}
+                          >
+                            <TablerIcon name="ti-plug-connected" />
+                            <span>{testingVoice ? "Testing…" : "Test"}</span>
+                          </button>
+                          {voiceTestResult && (
+                            <span
+                              className={`settings-test-status ${voiceTestResult.ok ? "settings-success" : "settings-error"}`}
+                              title={voiceTestResult.detail}
+                            >
+                              {voiceTestResult.detail}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </SettingsAccordion>
+
+                <SettingsAccordion title="Default models" defaultOpen>
+                  <p className="group-hint">
+                    Which model each part of the app reaches for. An agent can name its own in
+                    Settings → Agents; every agent that doesn't follows the chat model here.
                   </p>
                   <div className="group">
                     <div className="card">
                       <label className="row-field">
                         <span>
-                          Provider
+                          Chat provider
                           <small>Switching also moves every agent that follows this slot</small>
                         </span>
                         <Combobox
@@ -486,132 +584,23 @@ export default function SettingsPanel({
                           ariaLabel="Chat provider"
                         />
                       </label>
-                      <ApiKeyField
-                        label="API Key"
-                        isSet={chatSlotView.keySet}
-                        onSave={(apiKey) => void applyChat({ providerId: chatSlotView.providerId, apiKey })}
-                        onClear={
-                          chatSlotView.keySet
-                            ? () => void applyChat({ providerId: chatSlotView.providerId, apiKey: "" })
-                            : undefined
-                        }
-                      />
                       <TextField
-                        label="API URL"
-                        value={chatSlotView.apiUrl}
-                        placeholder={chatProvider?.baseUrl || "http://localhost:11434/v1"}
-                        warningFor={providerUrlWarning}
-                        onCommit={(apiUrl) => void applyChat({ providerId: chatSlotView.providerId, apiUrl })}
-                      />
-                      <TextField
-                        label="Model ID"
+                        label="Chat model"
+                        hint="Powers the orchestrator and every agent's chat and tool calls"
                         value={settings.orchestratorModel}
                         placeholder={chatProvider?.defaultChatModel || DEFAULT_ORCHESTRATOR_MODEL}
                         onCommit={(model) => void applyChat({ providerId: chatSlotView.providerId, model })}
                       />
-                      {chatError && <p className="settings-error">{chatError}</p>}
-                    </div>
-                  </div>
-                </SettingsAccordion>
-
-                <SettingsAccordion title="Other providers">
-                  <p className="group-hint">
-                    Credentials for providers an individual agent can be pointed at, without making
-                    them your Chat provider. Set one up here, then pick it on the agent in Settings →
-                    Agents.
-                  </p>
-                  <div className="group">
-                    <div className="card">
-                      {AI_PROVIDERS.filter((provider) => provider.id !== chatSlotView.providerId).map(
-                        (provider) => {
-                          const row = providers.configured.find((entry) => entry.id === provider.id);
-                          return (
-                            <div key={provider.id} className="row-field">
-                              <span>
-                                {provider.label}
-                                <small>
-                                  {row?.keySet
-                                    ? "Configured"
-                                    : provider.keyRequired
-                                      ? "No API key yet"
-                                      : "No API URL yet"}
-                                </small>
-                              </span>
-                              <ApiKeyField
-                                label={`${provider.label} API key`}
-                                isSet={row?.keySet ?? false}
-                                onSave={(apiKey) => void providers.save({ providerId: provider.id, apiKey })}
-                                onClear={
-                                  row?.keySet
-                                    ? () => void providers.save({ providerId: provider.id, apiKey: "" })
-                                    : undefined
-                                }
-                              />
-                              <TextField
-                                label={`${provider.label} API URL`}
-                                value={row?.apiUrl ?? ""}
-                                placeholder={provider.baseUrl || "http://localhost:11434/v1"}
-                                warningFor={providerUrlWarning}
-                                onCommit={(apiUrl) => void providers.save({ providerId: provider.id, apiUrl })}
-                              />
-                            </div>
-                          );
-                        }
-                      )}
-                    </div>
-                  </div>
-                </SettingsAccordion>
-
-                <SettingsAccordion
-                  title="Voice"
-                  headerActions={
-                    <>
-                      {voiceTestResult && (
-                        <span
-                          className={`settings-test-status ${voiceTestResult.ok ? "settings-success" : "settings-error"}`}
-                          title={voiceTestResult.detail}
-                        >
-                          {voiceTestResult.detail}
-                        </span>
-                      )}
-                      <button
-                        type="button"
-                        className="settings-action-btn-sm settings-action-btn-ghost"
-                        onClick={() => runTestVoice()}
-                        disabled={testingVoice}
-                      >
-                        <TablerIcon name="ti-plug-connected" />
-                        <span>{testingVoice ? "Testing…" : "Test"}</span>
-                      </button>
-                    </>
-                  }
-                >
-                  <p className="group-hint">
-                    Powers speech transcription and spoken replies. Defaults to OpenAI, same as Chat — an
-                    independent key/URL here in case you want voice on a different provider.
-                  </p>
-                  <div className="group">
-                    <div className="card">
-                      <ApiKeyField
-                        label="API Key"
-                        isSet={settings.voiceApiKeySet}
-                        onSave={(key) => onUpdate({ voiceApiKey: key })}
-                      />
-                      <TextField
-                        label="API URL"
-                        value={settings.voiceApiUrl}
-                        placeholder="https://api.openai.com/v1"
-                        warningFor={providerUrlWarning}
-                        onCommit={(voiceApiUrl) => onUpdate({ voiceApiUrl })}
-                      />
                       <TextField
                         label="Transcription model"
+                        hint="Turns what you say into text"
                         value={settings.voiceTranscriptionModel}
                         placeholder="whisper-1"
                         onCommit={(voiceTranscriptionModel) => onUpdate({ voiceTranscriptionModel })}
                       />
                       <TextField
                         label="Speech (TTS) model"
+                        hint="Reads replies out loud"
                         value={settings.voiceTtsModel}
                         placeholder="gpt-4o-mini-tts"
                         onCommit={(voiceTtsModel) => onUpdate({ voiceTtsModel })}
