@@ -8,6 +8,7 @@ import ChatHistoryModal from "@/components/organisms/ChatHistoryModal";
 import HttpToolApprovalModal, { type PendingToolApproval } from "@/components/molecules/HttpToolApprovalModal";
 import ToolApprovalCard from "@/components/molecules/ToolApprovalCard";
 import OnboardingScreen, { type OnboardingAnswers } from "@/components/organisms/OnboardingScreen";
+import { findProvider } from "@/lib/providers";
 import { useOrbitScene } from "@/hooks/useOrbitScene";
 import { useWindowControls } from "@/hooks/useWindowControls";
 import { useGlobalTypingFocus } from "@/hooks/useGlobalTypingFocus";
@@ -626,16 +627,38 @@ export default function AgentsApp() {
 
   const handleOnboardingComplete = useCallback(
     (answers: OnboardingAnswers) => {
-      // The single onboarding key seeds both Chat and Voice credential slots — each
-      // remains independently editable afterward in Settings → AI Models without
-      // affecting the other.
       updateSettings({
         agentName: answers.agentName,
         userName: answers.userName,
-        chatApiKey: answers.apiKey,
-        voiceApiKey: answers.apiKey,
+        // Voice is seeded from the same key only when the chosen provider can actually serve
+        // speech. Copying it unconditionally — which is what this used to do — configures Voice
+        // against a host with no /audio endpoints at all, so the mic appears to work and then
+        // fails at call time. Only OpenAI serves them today; see supportsVoice in lib/providers.
+        ...(findProvider(answers.providerId)?.supportsVoice
+          ? { voiceApiKey: answers.apiKey, voiceApiUrl: answers.apiUrl }
+          : {}),
         onboardingDone: true,
       });
+
+      // The provider is one call rather than a handful of settings writes, because it is one
+      // change: credentials, the Chat slot, and the models of every agent that follows it. Doing
+      // it piecemeal is what leaves four system agents naming a model the new host has never
+      // heard of. See electron/main/ai/selectProvider.ts.
+      if (hasAgentsAPI()) {
+        void window.agentsAPI.providers
+          .selectChat({
+            providerId: answers.providerId,
+            apiUrl: answers.apiUrl,
+            apiKey: answers.apiKey,
+            model: answers.model,
+          })
+          .catch((error: unknown) => {
+            // Non-fatal by design: the user is already through the door, and Settings → AI Models
+            // is where they would fix it anyway. Swallowing it silently would be worse than the
+            // log line, which is what a bug report will carry.
+            window.agentsAPI.dev.log("[onboarding] selectChat failed", error);
+          });
+      }
 
       // The optional context answers go into the shared user-fact store so every agent
       // has them from the first turn. Fire-and-forget: the entrance animation below must
