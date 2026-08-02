@@ -8,6 +8,11 @@ import ChatHistoryModal from "@/components/organisms/ChatHistoryModal";
 import HttpToolApprovalModal, { type PendingToolApproval } from "@/components/molecules/HttpToolApprovalModal";
 import { approvalSettledMessage } from "@/lib/approvalSettledMessage";
 import ErrorBoundary from "@/components/atoms/ErrorBoundary";
+
+/** How long the entrance animation runs before the greeting lands. Named because the
+ * onboarding-failure notice below has to queue behind it — a warning that arrives before
+ * "Hi, I'm Orbit" reads as though something broke on launch. */
+const GREETING_DELAY_MS = 1400;
 import ToolApprovalCard from "@/components/molecules/ToolApprovalCard";
 import OnboardingScreen, { type OnboardingAnswers } from "@/components/organisms/OnboardingScreen";
 import { findProvider } from "@/lib/providers";
@@ -583,6 +588,9 @@ export default function AgentsApp() {
   // here. Queued rather than kept as a single value: one turn can interrupt on several
   // tool calls, and the SDK hands them over one at a time — dropping any would strand the
   // run until its 5-minute approval timeout declined it.
+  /** Set when the onboarding answers failed to persist, so the notice can be queued behind the
+   * greeting rather than racing it. */
+  const [onboardingFactsFailed, setOnboardingFactsFailed] = useState(false);
   const [approvalQueue, setApprovalQueue] = useState<PendingToolApproval[]>([]);
   useEffect(() => {
     if (!hasAgentsAPI()) return;
@@ -714,6 +722,12 @@ export default function AgentsApp() {
         if (facts.length > 0) {
           void window.agentsAPI.userInfo.seedFacts(facts).catch((error: unknown) => {
             window.agentsAPI.dev.log("[onboarding] seedFacts failed", error);
+            // The user typed these answers a moment ago. Losing them silently is the worst
+            // outcome: nothing on screen changes, so there is no reason to suspect anything and
+            // no reason to visit the one screen where they could be re-entered. Unlike the
+            // selectChat failure above — which announces itself the first time a message is
+            // sent — a missing fact never surfaces on its own.
+            setOnboardingFactsFailed(true);
           });
         }
       }
@@ -730,11 +744,27 @@ export default function AgentsApp() {
     const timer = setTimeout(() => {
       appendMessage({ role: "assistant", text: greeting, avatarLabel: settings.agentName[0]?.toUpperCase() || "A" });
       speak(greeting);
-    }, 1400);
+    }, GREETING_DELAY_MS);
     return () => clearTimeout(timer);
     // Fires once when onboarding hands off into the main UI.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entering]);
+
+  // Queued behind the greeting rather than appended from the catch directly: the rejection
+  // usually lands within milliseconds, which would put "I couldn't save your details" above
+  // "Hi, I'm Orbit". Cleared as it fires so a later re-render cannot repeat it.
+  useEffect(() => {
+    if (!onboardingFactsFailed) return;
+    const timer = setTimeout(() => {
+      appendMessage({
+        role: "assistant",
+        text: "I couldn't save the details you just gave me, so I don't have them yet. You can add them again in Settings → General → About you.",
+        avatarLabel: settings.agentName[0]?.toUpperCase() || "A",
+      });
+      setOnboardingFactsFailed(false);
+    }, GREETING_DELAY_MS + 600);
+    return () => clearTimeout(timer);
+  }, [onboardingFactsFailed, appendMessage, settings.agentName]);
 
   if (!loaded) return null;
 
