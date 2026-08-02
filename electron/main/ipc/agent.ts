@@ -624,6 +624,13 @@ export function registerAgentHandlers() {
     if (typeof input.name !== "string" || input.name.trim().length === 0) {
       throw new Error("agent:create requires a non-empty name");
     }
+    // Shape only — whether the id names a provider this build knows is createAgent's call, the
+    // same division agent:update uses.
+    for (const field of ["icon", "tagline", "description", "model", "providerId", "prompt"] as const) {
+      if (input[field] !== undefined && typeof input[field] !== "string") {
+        throw new Error(`agent:create input.${field} must be a string`);
+      }
+    }
     return createAgent(input);
   });
 

@@ -24,6 +24,10 @@ interface AgentAccordionProps {
   onChangeTagline?: (tagline: string) => void;
   onChangeDescription?: (description: string) => void;
   onChangeModel?: (model: string) => void;
+  /** What a blank Model ID resolves to for *this* agent — its provider's default, or the Chat
+   * model when it follows the slot. Shown as the placeholder and stated under the label, because
+   * a field advertising `gpt-4.1-mini` while the agent runs on Claude reads as a fact. */
+  modelPlaceholder?: string;
   /** Registry id this agent runs on, or "" to follow the Chat slot. Omitted for the
    * orchestrator, which *is* the Chat slot. */
   providerId?: string;
@@ -61,6 +65,7 @@ export default function AgentAccordion({
   tagline,
   description,
   model,
+  modelPlaceholder,
   providerId,
   onChangeProviderId,
   providerWarning,
@@ -248,7 +253,10 @@ export default function AgentAccordion({
           )}
           {onChangeModel !== undefined && (
             <label className="settings-field">
-              <span>Model ID</span>
+              <span>
+                <span>Model ID</span>
+                <small>Leave blank to use {modelPlaceholder || DEFAULT_ORCHESTRATOR_MODEL}</small>
+              </span>
               <input
                 type="text"
                 value={modelDraft}
@@ -259,7 +267,8 @@ export default function AgentAccordion({
                   if (modelDraft !== (model ?? "")) onChangeModel(modelDraft);
                 }}
                 onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-                placeholder={DEFAULT_ORCHESTRATOR_MODEL}
+                placeholder={modelPlaceholder || DEFAULT_ORCHESTRATOR_MODEL}
+                aria-label="Model ID"
                 autoComplete="off"
               />
             </label>

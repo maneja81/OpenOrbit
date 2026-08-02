@@ -149,3 +149,38 @@ export function inferProviderId(url: string): string {
 export function voiceProviders(): AiProvider[] {
   return AI_PROVIDERS.filter((provider) => provider.supportsVoice);
 }
+
+/**
+ * Whether a model id looks like one the given provider actually serves.
+ *
+ * Advisory only — it drives a warning, never a refused write. A model catalogue is not something
+ * this app holds, and OpenRouter alone lists hundreds, so the honest thing is a shape check that
+ * is confident about the obvious mismatches and silent about everything else.
+ *
+ * It exists because switching an agent to a provider with no `defaultChatModel` leaves the old
+ * provider's id in place — deliberately, since only the user knows which model they pulled onto a
+ * local server — and nothing said so. An agent reading "Local AI" while still naming
+ * `claude-haiku-4-5-20251001` looks configured and 404s on first use.
+ *
+ * Returns true wherever a judgment would be guesswork: a blank id (that means "use the default"),
+ * an agent following the Chat slot, an unrecognised provider (which has its own warning), and
+ * `local`, where any id can be legitimate because the user names their own models.
+ */
+export function modelBelongsToProvider(providerId: string, modelId: string): boolean {
+  const model = modelId.trim().toLowerCase();
+  if (model === "" || providerId === "" || !findProvider(providerId)) return true;
+
+  switch (providerId) {
+    // OpenRouter namespaces every id as `vendor/model`, optionally behind its `~latest` marker.
+    case "openrouter":
+      return model.includes("/") || model.startsWith("~");
+    case "anthropic":
+      return model.startsWith("claude");
+    // Their catalogue is families rather than a single prefix: chat (gpt-, chatgpt-), reasoning
+    // (o1/o3/o4-), and the audio models the Voice slot uses.
+    case "openai":
+      return /^(gpt-|chatgpt-|o\d+-|whisper-|tts-)/.test(model);
+    default:
+      return true;
+  }
+}
