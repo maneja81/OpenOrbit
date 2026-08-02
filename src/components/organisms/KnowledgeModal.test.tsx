@@ -37,6 +37,8 @@ function setFiles(files: KnowledgebaseFileRecord[]) {
   useSharedKnowledgeFiles.mockReturnValue({
     files,
     error: null,
+    loading: false,
+    pendingIds: new Set<number>(),
     removeFile: vi.fn(),
     updateCategory: vi.fn(),
     syncOne: vi.fn(),

@@ -3,7 +3,7 @@ import { useSharedKnowledgeFiles } from "@/hooks/useKnowledgeFiles";
 import { entryIcon } from "@/lib/knowledgeEntryIcon";
 
 export default function FilesAppsTab() {
-  const { files, error, addFolder, pickAndAdd, removeFile } = useSharedKnowledgeFiles();
+  const { files, error, loading, pendingIds, addFolder, pickAndAdd, removeFile } = useSharedKnowledgeFiles();
 
   const folders = files.filter((f) => f.kind === "folder");
   // Documents and saved web pages share this list: both are app-owned copies the user manages
@@ -17,6 +17,7 @@ export default function FilesAppsTab() {
         <button
           type="button"
           className="settings-action-btn-sm settings-action-btn-ghost"
+          disabled={loading}
           onClick={() => void addFolder()}
         >
           <TablerIcon name="ti-folder-plus" />
@@ -38,6 +39,7 @@ export default function FilesAppsTab() {
               className="settings-icon-btn"
               // Removing a folder revokes access; it never deletes anything from disk.
               aria-label={`Remove access to ${folder.path}`}
+              disabled={pendingIds.has(folder.id)}
               onClick={() => void removeFile(folder.id)}
             >
               <TablerIcon name="ti-x" />
@@ -51,6 +53,7 @@ export default function FilesAppsTab() {
         <button
           type="button"
           className="settings-action-btn-sm settings-action-btn-ghost"
+          disabled={loading}
           onClick={() => void pickAndAdd()}
         >
           <TablerIcon name="ti-file-plus" />
@@ -76,6 +79,7 @@ export default function FilesAppsTab() {
             <button
               className="settings-icon-btn"
               aria-label={`Remove ${doc.originalName}`}
+              disabled={pendingIds.has(doc.id)}
               onClick={() => void removeFile(doc.id)}
             >
               <TablerIcon name="ti-x" />

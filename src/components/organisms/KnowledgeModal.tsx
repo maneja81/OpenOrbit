@@ -17,7 +17,7 @@ interface KnowledgeModalProps {
 }
 
 export default function KnowledgeModal({ open, onClose }: KnowledgeModalProps) {
-  const { files, error, removeFile, updateCategory, syncOne, openFile, addFolder, pickAndAdd } =
+  const { files, error, pendingIds, removeFile, updateCategory, syncOne, openFile, addFolder, pickAndAdd } =
     useSharedKnowledgeFiles();
   const [activeTab, setActiveTab] = useState("All");
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -40,16 +40,30 @@ export default function KnowledgeModal({ open, onClose }: KnowledgeModalProps) {
     });
   };
 
+  // `bulkBusy` rather than reading pendingIds: the loops below are sequential, so only one id
+  // is ever in flight and pendingIds would let the toolbar re-arm between rows.
+  const [bulkBusy, setBulkBusy] = useState(false);
+
   const bulkRemove = async () => {
-    for (const id of selected) await removeFile(id);
-    setSelected(new Set());
+    setBulkBusy(true);
+    try {
+      for (const id of selected) await removeFile(id);
+      setSelected(new Set());
+    } finally {
+      setBulkBusy(false);
+    }
   };
 
   // Folder rows are skipped rather than passed through: syncing one is already a no-op in the
   // main process, but sending them would make the button look like it did something.
   const bulkSync = async () => {
-    const syncable = files.filter((f) => selected.has(f.id) && f.kind !== "folder");
-    for (const file of syncable) await syncOne(file.id);
+    setBulkBusy(true);
+    try {
+      const syncable = files.filter((f) => selected.has(f.id) && f.kind !== "folder");
+      for (const file of syncable) await syncOne(file.id);
+    } finally {
+      setBulkBusy(false);
+    }
   };
 
   const reveal = (path: string) => {
@@ -105,10 +119,10 @@ export default function KnowledgeModal({ open, onClose }: KnowledgeModalProps) {
             {selected.size > 0 && (
               <div className="km-bulk-toolbar">
                 <span>{selected.size} selected</span>
-                <button className="widget-icon-btn" aria-label="Bulk re-sync" onClick={bulkSync}>
+                <button className="widget-icon-btn" aria-label="Bulk re-sync" disabled={bulkBusy} onClick={bulkSync}>
                   <TablerIcon name="ti-refresh" />
                 </button>
-                <button className="widget-icon-btn" aria-label="Bulk remove" onClick={bulkRemove}>
+                <button className="widget-icon-btn" aria-label="Bulk remove" disabled={bulkBusy} onClick={bulkRemove}>
                   <TablerIcon name="ti-trash" />
                 </button>
               </div>
@@ -184,6 +198,7 @@ export default function KnowledgeModal({ open, onClose }: KnowledgeModalProps) {
                       <button
                         className="widget-icon-btn"
                         aria-label={`Re-sync ${file.originalName}`}
+                        disabled={pendingIds.has(file.id)}
                         onClick={() => void syncOne(file.id)}
                       >
                         <TablerIcon name="ti-refresh" />
@@ -194,6 +209,7 @@ export default function KnowledgeModal({ open, onClose }: KnowledgeModalProps) {
                       aria-label={
                         isFolder ? `Remove access to ${file.path}` : `Remove ${file.originalName}`
                       }
+                      disabled={pendingIds.has(file.id)}
                       onClick={() => void removeFile(file.id)}
                     >
                       <TablerIcon name="ti-x" />
