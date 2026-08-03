@@ -40,6 +40,13 @@ without, looks up real reference material for the domain, drafts a full system p
 shows you a plain-language summary before creating anything. You can also add one by hand
 in Settings, and every agent's prompt stays editable afterwards.
 
+Settings work the same way — ask Cipher to turn on voice output or rename the orchestrator,
+and it makes the change directly rather than walking you to the right screen. A few settings
+are off-limits from chat entirely — the approval policy, provider URLs, and location access
+among them — precisely because a chat-driven change is the thing they exist to guard against.
+Rewriting an existing agent's prompt or attaching a connector to it pauses for your
+confirmation first, since either one persists past the conversation that requested it.
+
 ## What agents can reach
 
 - **Your machine** — files and folders you've explicitly granted, plus launching apps
@@ -122,8 +129,13 @@ Some deliberate hardening, and its limits:
 - Remote images in replies aren't fetched until you click to load them (the default, and a
   setting), so a prompt-injected tracking URL never fires on its own.
 - User-authored HTTP tools are checked against loopback, private, and link-local addresses,
-  including after DNS resolution to catch rebinding. Private hosts are opt-in per collection.
+  including after DNS resolution to catch rebinding, and the check still holds across a
+  redirect. Private hosts are opt-in per collection.
 - Agents only reach folders you've explicitly granted.
+- Rewriting an agent's prompt, attaching a connector to it, or creating a recurring prompt task
+  pauses for your approval — the same gate HTTP tool calls already go through. Renaming an
+  agent or picking a different model doesn't ask, since neither leaves anything running after
+  the conversation ends.
 - API keys, connector credentials, and MCP env vars are encrypted at rest with AES-256-GCM
   — but the key is stored in the same SQLite database. That's obfuscation against casual
   inspection, **not** protection against anyone with access to your machine's files. It's a

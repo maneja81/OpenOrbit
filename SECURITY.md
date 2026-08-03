@@ -2,20 +2,13 @@
 
 ## Supported Versions
 
-Use this section to tell people about which versions of your project are
-currently being supported with security updates.
-
-| Version | Supported          |
-| ------- | ------------------ |
-| 5.1.x   | :white_check_mark: |
-| 5.0.x   | :x:                |
-| 4.0.x   | :white_check_mark: |
-| < 4.0   | :x:                |
+Nothing has been tagged yet — see [CHANGELOG.md](CHANGELOG.md). Until the first release,
+`develop` is the only line that gets security fixes; there's no older version to support.
 
 ## Reporting a Vulnerability
 
-Use this section to tell people how to report a vulnerability.
-
-Tell them where to go, how often they can expect to get an update on a
-reported vulnerability, what to expect if the vulnerability is accepted or
-declined, etc.
+Please report security issues privately via
+[GitHub Security Advisories](https://github.com/maneja81/OpenOrbit/security/advisories/new)
+rather than a public issue. This is a personal side project with no support commitments (see
+[README.md](README.md)), so response time isn't guaranteed, but security reports get priority
+over everything else.

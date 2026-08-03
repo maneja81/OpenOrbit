@@ -122,6 +122,30 @@ attaches them to a GitHub Release.
 
 ### Fixed
 
+- **`getDb()` could cache a half-migrated database connection.** If a migration threw, the
+  singleton was already assigned, so every call after the first silently returned the broken
+  connection instead of retrying — reads and writes proceeded against a schema that might be
+  missing tables or columns.
+  ([#76](https://github.com/maneja81/OpenOrbit/pull/76))
+- **The web search daemon's force-kill on quit could never fire**, a failed daemon start left it
+  poisoned for the rest of the session with the orphaned process still running, an unspawnable
+  daemon could crash the whole app, and a slow health check could take the app down at launch on
+  a path meant to be non-blocking. All four fixed in the same pass.
+  ([#79](https://github.com/maneja81/OpenOrbit/pull/79),
+  [#80](https://github.com/maneja81/OpenOrbit/pull/80),
+  [#81](https://github.com/maneja81/OpenOrbit/pull/81),
+  [#82](https://github.com/maneja81/OpenOrbit/pull/82))
+- **A daemon error response threw a raw JSON parse error** instead of reporting what actually
+  failed, reading as a parsing bug in Explorer's tools or the knowledge base's "Add from URL"
+  rather than a failed request.
+  ([#87](https://github.com/maneja81/OpenOrbit/pull/87))
+- **Quitting mid-task abandoned it outright**, potentially orphaning MCP server subprocesses the
+  task had open. The app now waits for an in-flight scheduled task (capped at 10s) before it
+  actually quits.
+  ([#88](https://github.com/maneja81/OpenOrbit/pull/88))
+- A scheduled task's OS notification truncated the body to a safe length but not the title,
+  which is user- or agent-authored with no cap of its own.
+  ([#92](https://github.com/maneja81/OpenOrbit/pull/92))
 - **Browse Registry returned nothing for every MCP query.** The registry wraps
   each entry as `{ server, _meta }` and the parser read the fields off the
   wrapper, so a healthy response carrying 30 servers produced an empty list — for
@@ -238,6 +262,62 @@ attaches them to a GitHub Release.
 
 ### Security
 
+- **A redirect could bypass the SSRF guard.** User-authored HTTP tools, the HTTP Tools test
+  button, and sitemap discovery all validated a URL before fetching it, but `fetch()` follows
+  redirects by default — so a `302` to a cloud-metadata or localhost address was followed and
+  its body handed to the agent (or, for sitemaps, silently trusted). All three now follow
+  redirects manually, re-validating every hop.
+  ([#74](https://github.com/maneja81/OpenOrbit/pull/74))
+- **`update_agent` could rewrite any agent's system prompt or attach a connector with no
+  approval**, the same way settings once could (see below) — a rewritten prompt paired with a
+  newly attached Gmail connector is durable persistence plus an exfiltration path. Changing an
+  agent's prompt, MCP servers, or connectors now pauses for approval; renaming an agent or
+  changing its model does not, since neither grants lasting capability.
+  ([#75](https://github.com/maneja81/OpenOrbit/pull/75))
+- **Creating a recurring or one-shot prompt task required no approval.** A prompt task runs
+  through a full orchestrator — every MCP server, connector, and HTTP tool the agent has —
+  whenever it's due, with no user present to review it. Creating or editing one now pauses for
+  approval when it carries a prompt; a plain reminder (just a notification) still doesn't.
+  ([#77](https://github.com/maneja81/OpenOrbit/pull/77))
+- **A scheduled task that hit one of the new approval gates silently did nothing.** The
+  scheduler's run loop never inspected the approval interruption a headless run can't answer,
+  so the task recorded as complete with no result and no signal it was ever blocked. It now
+  declines the call explicitly and records why.
+  ([#78](https://github.com/maneja81/OpenOrbit/pull/78))
+- **A stored OAuth token missing an expiry was treated as never expiring**, converting a
+  connector into one that fails every call with no automatic recovery. Latent today — Google
+  always returns an expiry — but the flow is generic and reusable by any future connector.
+  ([#83](https://github.com/maneja81/OpenOrbit/pull/83))
+- **An HTTP tool parameter name was interpolated unescaped into a RegExp.** A name like `.*`
+  silently substituted one value across every placeholder in a path; an unbalanced `(` threw an
+  opaque failure. Parameter names are now restricted to a safe identifier pattern at
+  creation/edit time.
+  ([#84](https://github.com/maneja81/OpenOrbit/pull/84))
+- **The HTTP Tools test button skipped its protocol check when private hosts were allowed.**
+  "Allow private addresses" is meant to widen which hosts are reachable, never which protocols
+  — the agent-facing path already enforced this; the test button now matches it.
+  ([#85](https://github.com/maneja81/OpenOrbit/pull/85))
+- **Every Chromium permission was granted unconditionally**, not just the microphone access
+  voice input actually needs — notifications, clipboard-read, midi, and anything a future
+  Electron upgrade adds would have arrived pre-approved. Now an explicit allowlist of one.
+  ([#86](https://github.com/maneja81/OpenOrbit/pull/86))
+- **Seven IPC channels reachable from the renderer had no caller anywhere in the app** —
+  `fs.readFile`, `fs.writeFile`, `fs.listAllowedRoots`, `fs.removeAllowedRoot`, `agent.run`,
+  `memory.add`, `memory.list`. `fs.writeFile` in particular could write arbitrary content to any
+  path inside a granted folder from any script that reached the renderer. Removed, along with
+  the now-fully-unused `memory` feature they backed.
+  ([#89](https://github.com/maneja81/OpenOrbit/pull/89))
+- **A corrupted or tampered secret failed with a raw crypto exception** instead of a message a
+  user could act on, and the module holding every API key, OAuth token, and MCP env var had no
+  test coverage at all. Both fixed together.
+  ([#90](https://github.com/maneja81/OpenOrbit/pull/90))
+- **The OAuth consent callback told the browser "success" before checking whether it actually
+  was.** A failed state/code check rejected the connection in the app while the browser kept
+  showing the success page. The response is now written after validation and varies by outcome,
+  with `Referrer-Policy`/`Cache-Control` added since the callback URL carries the authorization
+  code. A failed token exchange or refresh also no longer echoes the provider's raw error body
+  into the agent's context — only the status does.
+  ([#91](https://github.com/maneja81/OpenOrbit/pull/91))
 - **An agent could disable the approval gate governing it.** The config agent's
   allowlist included the three HTTP approval settings, the approval display mode,
   and location access — so "set httpToolApprovalDelete to false" was a sentence
