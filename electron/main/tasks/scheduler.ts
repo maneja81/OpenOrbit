@@ -20,6 +20,11 @@ const POLL_INTERVAL_MS = 30_000;
 // Truncated in the OS notification body so a long agent reply doesn't overflow the
 // notification UI — the full text is still readable via last_result in the Tasks widget.
 const NOTIFICATION_BODY_MAX_LENGTH = 200;
+// task.title is user- or agent-authored with no length cap of its own (it becomes
+// `${task.title} — failed` on a failure notification below), so it needs the same
+// treatment as the body — otherwise it overflows or gets truncated unpredictably by the
+// OS notification layer, differently per platform.
+const NOTIFICATION_TITLE_MAX_LENGTH = 100;
 
 let timer: NodeJS.Timeout | null = null;
 
@@ -57,12 +62,17 @@ function broadcastTasksUpdate(): void {
   }
 }
 
-function notify(title: string, body: string): void {
+/** Exported for testing the title/body truncation (KI-22) — otherwise only reachable via
+ * processDueTask, which needs the full poll-loop scaffolding to exercise. */
+export function notify(title: string, body: string): void {
   if (!Notification.isSupported()) {
     devLog(`[taskScheduler] Notification not supported on this platform — title="${title}"`);
     return;
   }
-  new Notification({ title, body: body.slice(0, NOTIFICATION_BODY_MAX_LENGTH) }).show();
+  new Notification({
+    title: title.slice(0, NOTIFICATION_TITLE_MAX_LENGTH),
+    body: body.slice(0, NOTIFICATION_BODY_MAX_LENGTH),
+  }).show();
 }
 
 /** Exported for testing — the interruption/auto-reject handling below is the KI-5 fix and is

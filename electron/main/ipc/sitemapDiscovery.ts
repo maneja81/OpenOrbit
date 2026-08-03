@@ -59,7 +59,11 @@ function extractLocs(xml: string, tag: "sitemap" | "url"): string[] {
   return locs;
 }
 
-async function fetchSitemapTree(url: string, depth: number, seen: Set<string>): Promise<string[]> {
+// Recursion is bounded by `seen` against MAX_CHILD_SITEMAPS, not by nesting depth — there is
+// no depth parameter here (there used to be one that was accepted, incremented, and passed
+// on every recursive call, but never actually read: a future reader could reasonably have
+// assumed nesting was capped by depth when it was capped by total fetch count).
+async function fetchSitemapTree(url: string, seen: Set<string>): Promise<string[]> {
   if (seen.has(url) || seen.size >= MAX_CHILD_SITEMAPS) return [];
   seen.add(url);
   const xml = await guardedFetchText(url);
@@ -70,7 +74,7 @@ async function fetchSitemapTree(url: string, depth: number, seen: Set<string>): 
     const results: string[] = [];
     for (const childUrl of childUrls) {
       if (results.length >= MAX_DISCOVERED_LINKS) break;
-      results.push(...(await fetchSitemapTree(childUrl, depth + 1, seen)));
+      results.push(...(await fetchSitemapTree(childUrl, seen)));
     }
     return results;
   }
@@ -90,7 +94,7 @@ export async function fetchSitemapUrls(originUrl: string): Promise<string[] | nu
   } catch {
     return null;
   }
-  const urls = await fetchSitemapTree(`${origin}/sitemap.xml`, 0, new Set());
+  const urls = await fetchSitemapTree(`${origin}/sitemap.xml`, new Set());
   if (urls.length === 0) return null;
   return urls.slice(0, MAX_DISCOVERED_LINKS);
 }
