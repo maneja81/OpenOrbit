@@ -1226,8 +1226,8 @@ svg#oc {
    corners follow the card radius — it's also why the slash menu is rendered as a sibling
    of this element rather than inside it. */
 .input-card {
-  background: rgba(4, 12, 40, 0.82);
-  border: 1px solid rgba(61, 143, 255, 0.26);
+  background: linear-gradient(160deg, rgba(10, 30, 60, 0.82) 0%, rgba(2, 10, 24, 0.88) 100%);
+  border: 1px solid rgba(100, 170, 255, 0.2);
   border-radius: 16px;
   overflow: hidden;
   backdrop-filter: blur(20px) saturate(160%);
@@ -1241,10 +1241,10 @@ svg#oc {
 }
 
 .input-card:focus-within {
-  border-color: rgba(61, 143, 255, 0.46);
+  border-color: rgba(100, 170, 255, 0.46);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.05),
-    0 0 0 3px rgba(61, 143, 255, 0.07),
+    0 0 0 3px rgba(100, 170, 255, 0.07),
     0 4px 24px rgba(0, 0, 0, 0.44);
 }
 
@@ -1307,8 +1307,8 @@ svg#oc {
   font-size: 11.5px;
   font-family: inherit;
   color: var(--text-lo);
-  background: rgba(61, 143, 255, 0.05);
-  border: 1px solid rgba(61, 143, 255, 0.1);
+  background: rgba(60, 140, 255, 0.05);
+  border: 1px solid rgba(60, 140, 255, 0.1);
   border-radius: 20px;
   padding: 3px 10px;
   cursor: pointer;
@@ -1317,8 +1317,8 @@ svg#oc {
 }
 
 .tb-chip:hover:not(:disabled) {
-  background: rgba(61, 143, 255, 0.1);
-  border-color: rgba(61, 143, 255, 0.22);
+  background: rgba(60, 140, 255, 0.1);
+  border-color: rgba(60, 140, 255, 0.22);
   color: var(--text-md);
 }
 
@@ -1548,13 +1548,14 @@ svg#oc {
   letter-spacing: 0.3px;
 }
 
-/* Bottom-left dock. left: 20px lines up with #widgets-left; bottom: 22px matches the
-   .input-bar's own bottom padding. z-index must clear #chat (30) — it spans the full window
-   width with no pointer-events: none, so at 30 or below these buttons look right and are
-   completely dead. Same reason .jump-bottom sits at 32. */
-#ctrls {
+/* Bottom-left dock (info + version) and bottom-right dock (help + settings). left/right:
+   20px lines up with #widgets-left/#widgets-right; bottom: 22px matches the .input-bar's
+   own bottom padding. z-index must clear #chat (30) — it spans the full window width with
+   no pointer-events: none, so at 30 or below these buttons look right and are completely
+   dead. Same reason .jump-bottom sits at 32. */
+#ctrls,
+#ctrls-right {
   position: absolute;
-  left: 20px;
   bottom: 22px;
   z-index: 32;
   display: flex;
@@ -1562,9 +1563,26 @@ svg#oc {
   align-items: center;
 }
 
+#ctrls {
+  left: 20px;
+}
+
+#ctrls-right {
+  right: 20px;
+}
+
+#app-version {
+  font-size: 11px;
+  color: #7ec8ff;
+  letter-spacing: 0.3px;
+  opacity: 0.7;
+}
+
 #setbtn,
 #tourbtn,
-#aboutbtn {
+#aboutbtn,
+#helpbtn {
+  position: relative;
   width: 34px;
   height: 34px;
   border-radius: 50%;
@@ -1578,21 +1596,38 @@ svg#oc {
   padding: 7px;
 }
 
+/* A newer release than this build has been published (AppControls.tsx). Positioned against
+   #aboutbtn's own `position: relative` above rather than a wrapping element, so it tracks the
+   icon exactly. */
+.update-dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #50a0ff;
+  border: 1.5px solid #00060f;
+  box-shadow: 0 0 4px rgba(80, 160, 255, 0.8);
+}
+
 #setbtn:hover {
   background: rgba(80, 160, 255, 0.12);
   transform: rotate(45deg);
 }
 
-/* No rotate here — that gesture reads as a turning gear on #setbtn, but as a tilted
-   question mark on this one, and as a tipped-over "i" on #aboutbtn. */
+/* No rotate here — that gesture reads as a turning gear on #setbtn, but as a tipped-over
+   route line on #tourbtn, a tipped-over "i" on #aboutbtn, and a tipped-over "?" on #helpbtn. */
 #tourbtn:hover,
-#aboutbtn:hover {
+#aboutbtn:hover,
+#helpbtn:hover {
   background: rgba(80, 160, 255, 0.12);
 }
 
 #setbtn i,
 #tourbtn i,
-#aboutbtn i {
+#aboutbtn i,
+#helpbtn i {
   font-size: 16px;
   color: #7ec8ff;
   transition: transform 0.2s;
@@ -4426,6 +4461,15 @@ svg#oc {
 
 .slash-menu-item.active {
   background: rgba(60, 140, 255, 0.18);
+}
+
+.slash-menu-group-label {
+  padding: 8px 10px 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgba(150, 190, 230, 0.5);
 }
 
 .slash-menu-icon {
