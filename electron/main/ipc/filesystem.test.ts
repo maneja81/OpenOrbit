@@ -22,7 +22,7 @@ vi.mock("../appDirs", () => ({
 
 import { ipcMain, shell } from "electron";
 import { getSetting } from "../db/settingsStore";
-import { registerFilesystemHandlers } from "./filesystem";
+import { readFolderFile, registerFilesystemHandlers } from "./filesystem";
 
 type Handler = (event: unknown, ...args: unknown[]) => unknown;
 
@@ -64,11 +64,17 @@ describe("filesystem IPC allowlist (assertAllowed)", () => {
     rmSync(tmpRoot, { recursive: true, force: true });
   });
 
+  // fs:readFile and fs:writeFile were removed as unreachable renderer surface (KI-16) — no
+  // hook or component ever called them, and fs:writeFile in particular could write
+  // arbitrary content to any path inside a granted root from any renderer script.
+  // readFolderFile/assertAllowed stay in-process, used directly by the folder-access agent
+  // tools (see ai/tools/folderAccessTools.ts), so the access-control guarantees below are
+  // exercised through that same exported function rather than a removed IPC handler.
   it("allows reading a file inside an allowed root", async () => {
     const filePath = path.join(allowedDir, "note.txt");
     writeFileSync(filePath, "hello");
 
-    const content = await handlers["fs:readFile"](null, filePath);
+    const content = await readFolderFile(filePath);
     expect(content).toBe("hello");
   });
 
@@ -76,7 +82,7 @@ describe("filesystem IPC allowlist (assertAllowed)", () => {
     const filePath = path.join(allowedDir, "page.html");
     writeFileSync(filePath, "<html><body><h1>Title</h1><p>Body text</p></body></html>");
 
-    const content = await handlers["fs:readFile"](null, filePath);
+    const content = await readFolderFile(filePath);
     expect(content).toBe("Title\nBody text");
   });
 
@@ -84,14 +90,14 @@ describe("filesystem IPC allowlist (assertAllowed)", () => {
     const filePath = path.join(outsideDir, "secret.txt");
     writeFileSync(filePath, "nope");
 
-    await expect(handlers["fs:readFile"](null, filePath)).rejects.toThrow("Access denied");
+    await expect(readFolderFile(filePath)).rejects.toThrow("Access denied");
   });
 
   it("denies a path that escapes the allowed root via ../ traversal", async () => {
     const traversal = path.join(allowedDir, "..", "outside", "secret.txt");
     writeFileSync(path.join(outsideDir, "secret.txt"), "nope");
 
-    await expect(handlers["fs:readFile"](null, traversal)).rejects.toThrow("Access denied");
+    await expect(readFolderFile(traversal)).rejects.toThrow("Access denied");
   });
 
   it("denies a symlink inside the allowed root that points outside it", async () => {
@@ -100,13 +106,7 @@ describe("filesystem IPC allowlist (assertAllowed)", () => {
     const linkPath = path.join(allowedDir, "escape-link");
     symlinkSync(targetFile, linkPath);
 
-    await expect(handlers["fs:readFile"](null, linkPath)).rejects.toThrow("Access denied");
-  });
-
-  it("allows writing a new file inside the allowed root", async () => {
-    const filePath = path.join(allowedDir, "new-file.txt");
-    await handlers["fs:writeFile"](null, filePath, "content");
-    expect(await handlers["fs:readFile"](null, filePath)).toBe("content");
+    await expect(readFolderFile(linkPath)).rejects.toThrow("Access denied");
   });
 
   it("reveals a file inside an allowed root via shell.showItemInFolder", async () => {
