@@ -302,6 +302,51 @@ describe("startExplorerDaemon browser fallback config", () => {
   });
 });
 
+describe("startExplorerDaemon health-check failure recovery", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.useFakeTimers();
+    spawnMock.mockClear();
+    resolveMock.mockReset().mockImplementation((specifier: string) =>
+      specifier.startsWith("playwright-core") ? "/fake/playwright-core/package.json" : "/fake/open-websearch/package.json"
+    );
+    existsSyncMock.mockReset().mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  // KI-8: daemonProcess/daemonPort/daemonReady were all assigned before waitForHealthy, so a
+  // health-check timeout left every one of them set — `if (daemonReady) return daemonReady`
+  // then handed every future call the same rejection forever, with the orphaned child still
+  // running. This asserts both halves: the failed child is killed, and a fresh call retries
+  // (spawns again) instead of reusing the dead promise.
+  it("kills the orphaned child and lets the next call retry after a health-check timeout", async () => {
+    fetchMock.mockReset().mockResolvedValue({ ok: false });
+    vi.stubGlobal("fetch", fetchMock);
+    const { startExplorerDaemon } = await import("./webSearchDaemon");
+
+    const firstAttempt = startExplorerDaemon();
+    // Swallow the rejection here so it doesn't count as an unhandled promise rejection while
+    // the timers below advance — the assertion on it happens after.
+    firstAttempt.catch(() => {});
+    await vi.advanceTimersByTimeAsync(15_000);
+    await expect(firstAttempt).rejects.toThrow(/did not become healthy/);
+
+    const firstChild = spawnMock.mock.results[0].value as MockChild;
+    expect(firstChild.kill).toHaveBeenCalledWith("SIGKILL");
+
+    // Second call must spawn a new child rather than returning the same dead promise.
+    fetchMock.mockReset().mockResolvedValue({ ok: true });
+    const secondAttempt = startExplorerDaemon();
+    await vi.advanceTimersByTimeAsync(300);
+    await expect(secondAttempt).resolves.toBeUndefined();
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("stopExplorerDaemon", () => {
   beforeEach(() => {
     vi.resetModules();

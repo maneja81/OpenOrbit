@@ -184,7 +184,19 @@ export function startExplorerDaemon(): Promise<void> {
     });
     daemonProcess = child;
     daemonPort = port;
-    await waitForHealthy(port);
+    try {
+      await waitForHealthy(port);
+    } catch (e) {
+      // A health-check timeout previously left daemonProcess/daemonPort/daemonReady all set,
+      // so `if (daemonReady) return daemonReady` on the next call returned this same
+      // rejection forever — no retry possible for the rest of the session, and the child kept
+      // running, orphaned. Kill it and null out every field so the next call starts fresh.
+      child.kill("SIGKILL");
+      daemonProcess = null;
+      daemonPort = null;
+      daemonReady = null;
+      throw e;
+    }
   })();
 
   return daemonReady;
