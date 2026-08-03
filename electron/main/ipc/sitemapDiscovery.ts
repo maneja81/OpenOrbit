@@ -1,4 +1,4 @@
-import { assertPublicHttpUrl } from "../net/urlSafety";
+import { safeFetch } from "../net/urlSafety";
 import { MAX_DISCOVERED_LINKS } from "./knowledgeUrlDiscovery";
 
 const SITEMAP_FETCH_TIMEOUT_MS = 10_000;
@@ -12,15 +12,12 @@ const MAX_CHILD_SITEMAPS = 20;
  * in this environment) — a direct guarded fetch keeps this independently testable without
  * depending on undocumented daemon internals. */
 async function guardedFetchText(url: string): Promise<string | null> {
-  try {
-    await assertPublicHttpUrl(url);
-  } catch {
-    return null;
-  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SITEMAP_FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(url, { signal: controller.signal });
+    // safeFetch validates the URL and re-validates every redirect hop, so a sitemap host
+    // that 302s to a private/metadata address is refused rather than followed blind.
+    const res = await safeFetch(url, { signal: controller.signal });
     if (!res.ok) return null;
     return await res.text();
   } catch {

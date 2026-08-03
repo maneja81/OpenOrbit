@@ -10,7 +10,7 @@ import {
   type HttpToolParam,
   type HttpToolRow,
 } from "../db/httpToolsStore";
-import { assertPublicHttpUrl } from "../net/urlSafety";
+import { safeFetch } from "../net/urlSafety";
 import { buildHttpRequest, toolParamsSchema, type HttpToolArgValue } from "./httpToolRequest";
 import { requiresApproval, type ApprovalPolicy } from "./approvalPolicy";
 import { readAppSetting } from "../appSettings";
@@ -68,21 +68,23 @@ async function executeHttpTool(
     bodyTemplate: row.body_template,
   });
 
-  if (collection.allow_private_hosts) {
-    assertHttpProtocol(request.url);
-  } else {
-    // Also re-checks DNS-resolved addresses, so a public-looking hostname that resolves
-    // into private space at request time is still refused (rebinding defense).
-    await assertPublicHttpUrl(request.url);
-  }
-
   devLog(`[http-tool] ${row.tool_name} -> ${request.method} ${request.url}`);
-  const response = await fetch(request.url, {
+  const fetchInit: RequestInit = {
     method: request.method,
     headers: request.headers,
     body: request.body,
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-  });
+  };
+  let response: Response;
+  if (collection.allow_private_hosts) {
+    assertHttpProtocol(request.url);
+    response = await fetch(request.url, fetchInit);
+  } else {
+    // Also re-checks DNS-resolved addresses, so a public-looking hostname that resolves
+    // into private space at request time is still refused (rebinding defense). safeFetch
+    // re-validates every redirect hop too, so a 302 to private space is caught as well.
+    response = await safeFetch(request.url, fetchInit);
+  }
 
   const raw = await response.text();
   const truncated = raw.length > MAX_RESPONSE_CHARS;
