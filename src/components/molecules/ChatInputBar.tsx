@@ -10,6 +10,10 @@ export interface DirectableAgent {
   name: string;
   icon: string;
   tagline?: string;
+  /** SQLite boolean convention (0/1), matching AgentRow.system — 1 for the four built-in
+   * agents (Cipher, Atlas, Explorer, Chrono), 0 for anything the user created. Used to group
+   * the @ agent-mention menu into "System" / "Custom". */
+  system: number;
 }
 
 interface ChatInputBarProps {
@@ -66,7 +70,10 @@ export default function ChatInputBar({
   // clearing the input, so a bare "/" is left behind — keying this off hasText alone would
   // leave the chip dead until the field was cleared by hand.
   const [canOpenCommands, setCanOpenCommands] = useState(true);
-  const [slashMode, setSlashMode] = useState<"commands" | "apps" | null>(null);
+  // Same predicate shape as canOpenCommands, mirrored for "@" — the two are mutually
+  // exclusive by construction since a value starts with at most one of "/"/"@".
+  const [canOpenAgents, setCanOpenAgents] = useState(true);
+  const [slashMode, setSlashMode] = useState<"commands" | "apps" | "agents" | null>(null);
   const [slashQuery, setSlashQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const { apps, launch } = useAppLauncher();
@@ -88,6 +95,22 @@ export default function ChatInputBar({
 
   const allCommands = useMemo(() => [...COMMANDS, ...agentCommands], [agentCommands]);
 
+  // Feeds the @ agent-mention menu — same insert-text shape as agentCommands above (plain
+  // name mention, no @ sigil stored), but keyed by plain name instead of a /slug and tagged
+  // with a group so the menu can render "System" / "Custom" headers.
+  const directableAgentItems: SlashMenuItem[] = useMemo(
+    () =>
+      agents.map((a) => ({
+        id: `mention-${a.id}`,
+        icon: a.icon,
+        label: a.name,
+        sublabel: a.tagline,
+        insertText: `${a.name}, `,
+        group: a.system ? "System" : "Custom",
+      })),
+    [agents]
+  );
+
   const commandItems = useMemo(
     () => allCommands.filter((c) => c.label.slice(1).toLowerCase().startsWith(slashQuery.toLowerCase())),
     [allCommands, slashQuery]
@@ -102,7 +125,25 @@ export default function ChatInputBar({
     [apps, slashQuery]
   );
 
-  const activeItems = slashMode === "apps" ? appItems : slashMode === "commands" ? commandItems : [];
+  // System agents first, then Custom — directableAgentItems inherits DB insertion order from
+  // `agents`, which has no explicit sort by `system`, so the grouping must sort explicitly or
+  // the two groups could interleave and produce more than one header per group.
+  const agentItems = useMemo(
+    () =>
+      directableAgentItems
+        .filter((a) => a.label.toLowerCase().startsWith(slashQuery.toLowerCase()))
+        .sort((a, b) => (a.group === b.group ? 0 : a.group === "System" ? -1 : 1)),
+    [directableAgentItems, slashQuery]
+  );
+
+  const activeItems =
+    slashMode === "apps"
+      ? appItems
+      : slashMode === "commands"
+        ? commandItems
+        : slashMode === "agents"
+          ? agentItems
+          : [];
 
   const resize = () => {
     const el = inputRef.current;
@@ -125,6 +166,12 @@ export default function ChatInputBar({
       setSelectedIndex(0);
       return;
     }
+    if (value.startsWith("@") && !value.includes(" ")) {
+      setSlashMode("agents");
+      setSlashQuery(value.slice(1));
+      setSelectedIndex(0);
+      return;
+    }
     if (value.startsWith("/") && !value.includes(" ")) {
       setSlashMode("commands");
       setSlashQuery(value.slice(1));
@@ -138,6 +185,7 @@ export default function ChatInputBar({
     const value = e.currentTarget.value;
     setHasText(value.trim().length > 0);
     setCanOpenCommands(value.trim().length === 0 || value.startsWith("/"));
+    setCanOpenAgents(value.trim().length === 0 || value.startsWith("@"));
     parseSlashState(value);
     resize();
   };
@@ -153,6 +201,10 @@ export default function ChatInputBar({
   const selectSlashItem = (item: SlashMenuItem) => {
     if (slashMode === "commands") {
       setInputValue(item.insertText ?? `/${item.id} `);
+      return;
+    }
+    if (slashMode === "agents") {
+      setInputValue(item.insertText ?? `${item.label}, `);
       return;
     }
     if (slashMode === "apps") {
@@ -200,6 +252,7 @@ export default function ChatInputBar({
       onSend();
       setHasText(false);
       setCanOpenCommands(true);
+      setCanOpenAgents(true);
       closeSlashMenu();
       resize();
     }
@@ -210,6 +263,7 @@ export default function ChatInputBar({
     onSend();
     setHasText(false);
     setCanOpenCommands(true);
+    setCanOpenAgents(true);
     closeSlashMenu();
     resize();
   };
@@ -224,6 +278,13 @@ export default function ChatInputBar({
     if (!canOpenCommands) return;
     const current = inputRef.current?.value ?? "";
     setInputValue(current.startsWith("/") ? current : "/");
+  };
+
+  // Same shortcut pattern as openCommandMenu, seeding "@" instead of "/".
+  const openAgentMenu = () => {
+    if (!canOpenAgents) return;
+    const current = inputRef.current?.value ?? "";
+    setInputValue(current.startsWith("@") ? current : "@");
   };
 
   return (
@@ -298,6 +359,15 @@ export default function ChatInputBar({
             >
               <TablerIcon name="ti-terminal-2" />
               <span>Commands</span>
+            </IconButton>
+            <IconButton
+              className="tb-chip"
+              aria-label="Show agent mentions"
+              disabled={!canOpenAgents}
+              onClick={openAgentMenu}
+            >
+              <TablerIcon name="ti-at" />
+              <span>Agents</span>
             </IconButton>
           </div>
         </div>

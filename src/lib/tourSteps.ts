@@ -66,7 +66,7 @@ export const TOUR_STEPS: TourStep[] = [
     element: "#inp",
     title: "Slash commands",
     description:
-      "Type / and scroll the menu — there are more commands than fit on screen, and each explains itself on the right. Open apps, browse past chats and costs, manage knowledge, or direct a message to one agent.",
+      "Type / and scroll the menu — there are more commands than fit on screen, and each explains itself on the right. Open apps, browse past chats and costs, or manage knowledge. Type @ to mention one agent directly.",
   },
   {
     element: "#vbtn",
