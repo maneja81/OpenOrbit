@@ -91,6 +91,7 @@ export function useHttpTools() {
 
   const getCollectionHeaders = useCallback(async (id: string): Promise<Record<string, string>> => {
     if (!hasAgentsAPI()) return {};
+    setError(null);
     try {
       return await window.agentsAPI.httpTools.getCollectionHeaders(id);
     } catch (e) {
@@ -101,6 +102,7 @@ export function useHttpTools() {
 
   const getToolHeaders = useCallback(async (id: string): Promise<Record<string, string>> => {
     if (!hasAgentsAPI()) return {};
+    setError(null);
     try {
       return await window.agentsAPI.httpTools.getToolHeaders(id);
     } catch (e) {
@@ -113,6 +115,7 @@ export function useHttpTools() {
   const testTool = useCallback(
     async (input: HttpToolTestInput): Promise<HttpToolTestResult | null> => {
       if (!hasAgentsAPI()) return null;
+      setError(null);
       try {
         return await window.agentsAPI.httpTools.testTool(input);
       } catch (e) {
@@ -128,6 +131,8 @@ export function useHttpTools() {
     [tools]
   );
 
+  const clearError = useCallback(() => setError(null), []);
+
   return {
     collections,
     tools,
@@ -142,5 +147,6 @@ export function useHttpTools() {
     getCollectionHeaders,
     getToolHeaders,
     testTool,
+    clearError,
   };
 }
