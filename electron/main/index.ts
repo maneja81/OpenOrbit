@@ -27,7 +27,7 @@ import { registerUserInfoHandlers } from "./ipc/userInfo";
 import { registerAppInfoHandlers } from "./ipc/appInfo";
 import { ensureAppDirectories, migrateLegacyUserData } from "./appDirs";
 import { startExplorerDaemon, stopExplorerDaemon } from "./ai/webSearchDaemon";
-import { startTaskScheduler, stopTaskScheduler } from "./tasks/scheduler";
+import { startTaskScheduler, stopTaskScheduler, waitForInFlightPoll } from "./tasks/scheduler";
 
 function applyContentSecurityPolicy() {
   const policy = contentSecurityPolicy(is.dev);
@@ -152,7 +152,24 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-app.on("before-quit", () => {
+// A task already mid-run when the user quits (an LLM call, possibly using MCP tools) was
+// previously abandoned outright — stopTaskScheduler only clears the poll interval, it
+// never waited for an in-flight run, so its `finally { await closeMcpServers(mcpServers) }`
+// (tasks/scheduler.ts) could be skipped entirely, orphaning MCP subprocesses. Capped so a
+// stuck task can't block quitting indefinitely.
+const QUIT_TASK_WAIT_TIMEOUT_MS = 10_000;
+let readyToQuit = false;
+
+app.on("before-quit", (event) => {
   stopExplorerDaemon();
   stopTaskScheduler();
+  if (readyToQuit) return;
+  event.preventDefault();
+  Promise.race([
+    waitForInFlightPoll(),
+    new Promise((resolve) => setTimeout(resolve, QUIT_TASK_WAIT_TIMEOUT_MS)),
+  ]).finally(() => {
+    readyToQuit = true;
+    app.quit();
+  });
 });

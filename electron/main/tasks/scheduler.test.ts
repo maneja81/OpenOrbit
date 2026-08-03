@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 const runMock = vi.hoisted(() => vi.fn());
 vi.mock("@openai/agents", () => ({ run: runMock }));
@@ -12,7 +12,29 @@ vi.mock("../ai/agents", () => ({
 const closeMcpServersMock = vi.hoisted(() => vi.fn());
 vi.mock("../ai/mcp", () => ({ closeMcpServers: closeMcpServersMock }));
 
-import { computeNextRunAt, renderTaskPrompt, runPromptTask } from "./scheduler";
+const getDueTasksMock = vi.hoisted(() => vi.fn<(nowIso: string) => import("../db/tasksStore").TaskRow[]>(() => []));
+const recordTaskRunMock = vi.hoisted(() => vi.fn());
+vi.mock("../db/tasksStore", () => ({ getDueTasks: getDueTasksMock, recordTaskRun: recordTaskRunMock }));
+
+vi.mock("electron", () => {
+  class MockNotification {
+    static isSupported = () => true;
+    show = vi.fn();
+  }
+  return {
+    Notification: MockNotification,
+    BrowserWindow: { getAllWindows: () => [] },
+  };
+});
+
+import {
+  computeNextRunAt,
+  renderTaskPrompt,
+  runPromptTask,
+  startTaskScheduler,
+  stopTaskScheduler,
+  waitForInFlightPoll,
+} from "./scheduler";
 import type { TaskRow } from "../db/tasksStore";
 
 function makeTask(overrides: Partial<TaskRow> = {}): TaskRow {
@@ -107,5 +129,55 @@ describe("computeNextRunAt", () => {
 
   it("computes from the passed-in time, not wall-clock now", () => {
     expect(computeNextRunAt("2020-01-01T00:00:00.000Z", 3_600_000)).toBe("2020-01-01T01:00:00.000Z");
+  });
+});
+
+// KI-15: stopTaskScheduler only ever cleared the poll interval — it never waited for a task
+// already mid-run, so app quit could abandon it before runPromptTask's
+// `finally { await closeMcpServers(mcpServers) }` ran, orphaning MCP subprocesses.
+describe("waitForInFlightPoll", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    getDueTasksMock.mockReset().mockReturnValue([]);
+    recordTaskRunMock.mockReset();
+  });
+
+  afterEach(() => {
+    stopTaskScheduler();
+    vi.useRealTimers();
+  });
+
+  it("resolves immediately when no poll is in flight", async () => {
+    await expect(waitForInFlightPoll()).resolves.toBeUndefined();
+  });
+
+  it("resolves only once the in-flight poll actually finishes", async () => {
+    let releaseRun: (value: { finalOutput: string; interruptions: never[] }) => void = () => {};
+    const runGate = new Promise((resolve) => {
+      releaseRun = resolve as typeof releaseRun;
+    });
+    // A prompt task's run() call is the awaited step in processDueTask (via runPromptTask),
+    // unlike a plain reminder's recordTaskRun, which isn't awaited — gating here is what
+    // actually keeps the poll in flight.
+    getDueTasksMock.mockReturnValue([makeTask({ prompt: "do the thing" })]);
+    buildOrchestratorMock.mockResolvedValue({ agent: { name: "Orbit" }, mcpServers: [], allAgents: [] });
+    runMock.mockReturnValue(runGate);
+
+    startTaskScheduler();
+    await vi.advanceTimersByTimeAsync(30_000); // POLL_INTERVAL_MS — fires the first tick
+
+    let resolved = false;
+    const waited = waitForInFlightPoll().then(() => {
+      resolved = true;
+    });
+
+    // Still pending — run()'s promise hasn't settled yet.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+
+    releaseRun({ finalOutput: "done", interruptions: [] });
+    await waited;
+    expect(resolved).toBe(true);
   });
 });
