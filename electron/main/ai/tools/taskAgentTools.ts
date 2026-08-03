@@ -8,13 +8,23 @@ import { tool } from "@openai/agents";
 import { z } from "zod";
 import { createTask, deleteTask, listTasks, updateTask } from "../../db/tasksStore";
 
+/** Shared by create_task and update_task: a prompt task — one-shot or recurring — runs
+ * unattended through a full orchestrator (MCP servers, connectors, HTTP tools all attached,
+ * see tasks/scheduler.ts) at a time the conversation that created it may no longer be open.
+ * A plain reminder just fires a notification, so it carries none of that risk. Exported so
+ * the invariant is unit-testable without invoking the SDK's tool-calling machinery. */
+export function promptTaskNeedsApproval(prompt: string | null): boolean {
+  return prompt !== null;
+}
+
 export const createTaskTool = tool({
   name: "create_task",
   description:
     "Create a reminder or prompt task. Omit prompt for a plain reminder (fires a notification when due). " +
     "Set prompt for a task that runs through an agent when due — set recurrenceIntervalMs to make it repeat " +
     "every that many milliseconds after each run, or omit it for a one-shot run. recurrenceParams are dynamic " +
-    "values substituted into {{key}} placeholders in the prompt at run time.",
+    "values substituted into {{key}} placeholders in the prompt at run time. Creating a prompt task pauses for " +
+    "the user's approval; a plain reminder (no prompt) does not.",
   parameters: z.object({
     title: z.string().min(1),
     notes: z.string().nullable(),
@@ -27,6 +37,7 @@ export const createTaskTool = tool({
     recurrenceIntervalMs: z.number().nullable().describe("Repeat interval in milliseconds. Null = one-shot."),
     recurrenceParams: z.record(z.string(), z.string()).nullable(),
   }),
+  needsApproval: async (_ctx, { prompt }) => promptTaskNeedsApproval(prompt),
   execute: async ({ title, notes, dueAt, prompt, promptTargetAgentId, recurrenceIntervalMs, recurrenceParams }) => {
     const created = createTask({
       title,
@@ -62,7 +73,10 @@ export const listTasksTool = tool({
 
 export const updateTaskTool = tool({
   name: "update_task",
-  description: "Update an existing task's fields. Use list_tasks first to get its id. Only supplied fields change.",
+  description:
+    "Update an existing task's fields. Use list_tasks first to get its id. Only supplied fields change. " +
+    "Setting prompt pauses for the user's approval, same as create_task — otherwise a plain reminder could be " +
+    "turned into a prompt task without ever going through that gate.",
   parameters: z.object({
     id: z.string(),
     title: z.string().nullable(),
@@ -73,6 +87,10 @@ export const updateTaskTool = tool({
     recurrenceIntervalMs: z.number().nullable(),
     recurrenceParams: z.record(z.string(), z.string()).nullable(),
   }),
+  // Mirrors create_task's gate: without this, a plain reminder created unattended could be
+  // turned into a prompt task by a second, equally-unattended update_task call — the same
+  // outcome as create_task's needsApproval, reached one step later.
+  needsApproval: async (_ctx, { prompt }) => promptTaskNeedsApproval(prompt),
   execute: async ({ id, ...rest }) => {
     const patch: Parameters<typeof updateTask>[1] = {};
     if (rest.title !== null) patch.title = rest.title;
