@@ -4,7 +4,6 @@ import type { LaunchableApp } from "../main/ipc/appLauncher";
 import type { SystemStats } from "../main/ipc/systemStats";
 import type { LocationData } from "../main/ipc/location";
 import type { ChatMessageRecord, ChatMessagePage } from "../main/ipc/chatHistory";
-import type { MemoryRecord } from "../main/ipc/memory";
 import type { AgentRow, AgentDisplayRow } from "../main/ipc/agent";
 import type { TokenUsageFilter, TokenUsageSummary, DailyTokenUsage, TraceUsage } from "../main/ipc/tokenUsage";
 import type { KnowledgebaseFileRecord } from "../main/ipc/knowledgeBase";
@@ -32,12 +31,7 @@ const agentsAPI = {
 
   fs: {
     pickFolder: (): Promise<string | null> => ipcRenderer.invoke("fs:pickFolder"),
-    listAllowedRoots: (): Promise<string[]> => ipcRenderer.invoke("fs:listAllowedRoots"),
-    removeAllowedRoot: (root: string): Promise<string[]> => ipcRenderer.invoke("fs:removeAllowedRoot", root),
     readDir: (dirPath: string): Promise<FsEntry[]> => ipcRenderer.invoke("fs:readDir", dirPath),
-    readFile: (filePath: string): Promise<string> => ipcRenderer.invoke("fs:readFile", filePath),
-    writeFile: (filePath: string, content: string): Promise<void> =>
-      ipcRenderer.invoke("fs:writeFile", filePath, content),
     revealInFolder: (filePath: string): Promise<void> => ipcRenderer.invoke("fs:revealInFolder", filePath),
     openPath: (filePath: string): Promise<void> => ipcRenderer.invoke("fs:openPath", filePath),
     openExternal: (url: string): Promise<void> => ipcRenderer.invoke("fs:openExternal", url),
@@ -140,12 +134,6 @@ const agentsAPI = {
     }): Promise<ChatMessageRecord> => ipcRenderer.invoke("chat:appendMessage", message),
   },
 
-  memory: {
-    list: (agentId?: string): Promise<MemoryRecord[]> => ipcRenderer.invoke("memory:list", agentId),
-    add: (entry: { agentId?: string | null; kind: string; content: string }): Promise<MemoryRecord> =>
-      ipcRenderer.invoke("memory:add", entry),
-  },
-
   userInfo: {
     seedFacts: (facts: Array<{ question: string; answer: string }>): Promise<void> =>
       ipcRenderer.invoke("userInfo:seedFacts", facts),
@@ -156,7 +144,6 @@ const agentsAPI = {
   },
 
   agent: {
-    run: (input: string): Promise<string> => ipcRenderer.invoke("agent:run", input),
     runStream: (input: string, requestId: string, targetAgentName?: string): Promise<string> =>
       ipcRenderer.invoke("agent:runStream", input, requestId, targetAgentName),
     onStreamChunk: (callback: (payload: { requestId: string; chunk: string }) => void): (() => void) =>

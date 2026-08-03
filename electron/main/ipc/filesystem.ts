@@ -107,25 +107,15 @@ export function registerFilesystemHandlers() {
     return chosen;
   });
 
-  ipcMain.handle("fs:listAllowedRoots", () => getAllowedRoots());
-
-  ipcMain.handle("fs:removeAllowedRoot", (_event, root: string) => removeAllowedRoot(root));
-
   // fs:readDir backs the knowledge base's folder browser (see useFolderBrowse) — one level per
-  // call, never recursive. fs:readFile/fs:writeFile remain unreachable from the renderer; no hook
-  // or component calls them. fs:listAllowedRoots is likewise renderer-unreachable now that granted
-  // folders reach the UI as knowledge_files rows, but stays registered because getAllowedRoots is
-  // still the authority reconcileFolderRows and assertAllowed read.
-  // listFolderEntries/readFolderFile above are also called directly, in-process, by the
-  // folder-access agent tools (see ai/tools/folderAccessTools.ts).
+  // call, never recursive. listFolderEntries/readFolderFile/getAllowedRoots/removeAllowedRoot
+  // above are also called directly, in-process, by the folder-access agent tools (see
+  // ai/tools/folderAccessTools.ts) and the knowledge base — that in-process use is why the
+  // functions stay even though their renderer-facing IPC handlers (fs:readFile, fs:writeFile,
+  // fs:listAllowedRoots, fs:removeAllowedRoot) were removed as unreachable dead surface: no
+  // hook or component ever called them (KI-16), and fs:writeFile in particular could write
+  // arbitrary content to any path inside a granted root from any renderer script.
   ipcMain.handle("fs:readDir", (_event, dirPath: string): Promise<FsEntry[]> => listFolderEntries(dirPath));
-
-  ipcMain.handle("fs:readFile", (_event, filePath: string): Promise<string> => readFolderFile(filePath));
-
-  ipcMain.handle("fs:writeFile", async (_event, filePath: string, content: string): Promise<void> => {
-    const resolved = await assertAllowed(filePath);
-    await fs.writeFile(resolved, content, "utf-8");
-  });
 
   // Knowledge-base files live in app-owned storage (see knowledgeBase.ts's
   // copyIntoStorage), not a user-allowlisted root — assertAllowed doesn't apply here.

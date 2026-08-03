@@ -211,13 +211,6 @@ function getAgentRunTimeoutMs(): number {
   return seconds * 1000;
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) => setTimeout(() => reject(new Error(message)), ms)),
-  ]);
-}
-
 /** How long an approval prompt waits for the user before giving up and rejecting the call.
  * Deliberately far longer than the run timeout — the run clock is paused while this one
  * runs, so the only thing it bounds is how long a forgotten dialog can pin a run open. */
@@ -226,10 +219,10 @@ const APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;
 /**
  * A run deadline that can be paused.
  *
- * `withTimeout` races a fixed timer, which is right when the only thing that can be slow
- * is the model — but a tool that needs the user's approval blocks on a human, and a human
- * will routinely take longer than the 60s default. Without pausing, enabling the
- * confirmation gate on any tool would make that tool's runs time out almost every time.
+ * A fixed-timer race is right when the only thing that can be slow is the model — but a
+ * tool that needs the user's approval blocks on a human, and a human will routinely take
+ * longer than the 60s default. Without pausing, enabling the confirmation gate on any tool
+ * would make that tool's runs time out almost every time.
  *
  * Only *waiting on a person* pauses the clock. Model latency, tool execution, and network
  * time all still count against it, so a genuinely stuck run still dies on schedule.
@@ -316,50 +309,10 @@ function abandonApprovalsFor(requestId: string): void {
 }
 
 export function registerAgentHandlers() {
-  // Non-streaming variant — currently unreachable from the renderer (ChatInputBar/AgentsApp
-  // only ever call agent.runStream). Kept registered for any future non-streaming caller;
-  // if it stays unused, consider removing rather than letting it drift out of sync with
-  // agent:runStream's logic (timeout handling, etc).
-  ipcMain.handle("agent:run", async (_event, input: string): Promise<string> => {
-    if (typeof input !== "string" || input.length === 0) {
-      throw new Error("agent:run requires non-empty text input");
-    }
-    configureChatClient();
-    const history = getRecentMessages(undefined, getHistoryMessageLimit());
-    appendMessage({ role: "user", text: input });
-    // Generated up-front rather than at the logTokenUsage call so the same id can be
-    // stamped on the assistant message below — that shared value is the only thing
-    // linking a message to what it cost.
-    const traceId = randomUUID();
-    const { agent: orchestrator, mcpServers } = await buildOrchestrator();
-    devLog(`[agent:run] input="${input}"`);
-    try {
-      const timeoutMs = getAgentRunTimeoutMs();
-      const result = await withTimeout(
-        run(orchestrator, buildInputWithHistory(history, input)),
-        timeoutMs,
-        `Agent run timed out after ${timeoutMs / 1000}s`
-      );
-      for (const item of result.newItems) {
-        devLog(`[agent:run] item=${describeRunItem(item)}`);
-      }
-      logTokenUsage(result, traceId);
-      broadcastSettingsUpdate();
-      broadcastConnectorsUpdate();
-      broadcastTasksUpdate();
-      const finalOutput = result.finalOutput ?? "";
-      devLog(`[agent:run] lastAgent=${result.lastAgent?.name ?? "none"} finalOutput="${finalOutput}"`);
-      appendMessage({
-        role: "assistant",
-        text: finalOutput || "(no response)",
-        agentId: result.lastAgent?.name ?? null,
-        traceId,
-      });
-      return finalOutput;
-    } finally {
-      await closeMcpServers(mcpServers);
-    }
-  });
+  // The non-streaming "agent:run" channel was unreachable from the renderer — no hook or
+  // component called it, ChatInputBar/AgentsApp only ever use agent:runStream below — and
+  // was removed as dead surface (KI-16) rather than left registered for a caller that never
+  // arrived.
 
   // Streaming variant: sends incremental text deltas over "agent:stream-chunk" and
   // structural events over "agent:stream-agent" (handoff) / "agent:stream-step" (tool
@@ -551,8 +504,8 @@ export function registerAgentHandlers() {
         }
       })();
 
-      // The deadline replaces withTimeout for this handler because it has to survive an
-      // approval pause; withTimeout stays in use by agent:run, which has no approval path.
+      // A PausableDeadline rather than a fixed-timer race because this run has to survive
+      // an approval pause — see its class comment.
       return await Promise.race([runPromise, deadline.promise])
         .catch((err) => {
           timedOut = true;

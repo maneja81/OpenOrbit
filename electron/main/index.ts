@@ -13,7 +13,6 @@ import { registerLocationHandlers } from "./ipc/location";
 import { registerSettingsHandlers } from "./ipc/settings";
 import { registerProviderHandlers } from "./ipc/providers";
 import { registerChatHistoryHandlers } from "./ipc/chatHistory";
-import { registerMemoryHandlers } from "./ipc/memory";
 import { registerAgentHandlers } from "./ipc/agent";
 import { registerAgentDataHandlers } from "./ipc/agentData";
 import { registerMcpHandlers } from "./ipc/mcp";
@@ -122,7 +121,6 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionCheckHandler((_webContents, permission) => permission === "media");
   registerSettingsHandlers();
   registerChatHistoryHandlers();
-  registerMemoryHandlers();
   registerAgentHandlers();
   registerAgentDataHandlers();
   registerMcpHandlers();

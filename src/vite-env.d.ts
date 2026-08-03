@@ -63,14 +63,6 @@ interface ChatMessagePage {
   total: number;
 }
 
-interface MemoryRecord {
-  id: number;
-  agentId: string | null;
-  kind: string;
-  content: string;
-  createdAt: string;
-}
-
 /** Mirrors KnowledgebaseKind in electron/main/ipc/knowledgeBase.ts. */
 type KnowledgebaseKind = "file" | "url" | "folder";
 
@@ -377,11 +369,7 @@ interface Window {
     ping: () => Promise<string>;
     fs: {
       pickFolder: () => Promise<string | null>;
-      listAllowedRoots: () => Promise<string[]>;
-      removeAllowedRoot: (root: string) => Promise<string[]>;
       readDir: (dirPath: string) => Promise<FsEntry[]>;
-      readFile: (filePath: string) => Promise<string>;
-      writeFile: (filePath: string, content: string) => Promise<void>;
       revealInFolder: (filePath: string) => Promise<void>;
       openPath: (filePath: string) => Promise<void>;
       openExternal: (url: string) => Promise<void>;
@@ -448,17 +436,12 @@ interface Window {
         conversationId?: number;
       }) => Promise<ChatMessageRecord>;
     };
-    memory: {
-      list: (agentId?: string) => Promise<MemoryRecord[]>;
-      add: (entry: { agentId?: string | null; kind: string; content: string }) => Promise<MemoryRecord>;
-    };
     userInfo: {
       seedFacts: (facts: Array<{ question: string; answer: string }>) => Promise<void>;
       list: () => Promise<Array<{ question: string; answer: string; askedBy: string; createdAt: string }>>;
       setFact: (question: string, answer: string) => Promise<void>;
     };
     agent: {
-      run: (input: string) => Promise<string>;
       runStream: (input: string, requestId: string, targetAgentName?: string) => Promise<string>;
       onStreamChunk: (callback: (payload: { requestId: string; chunk: string }) => void) => () => void;
       onStreamAgent: (callback: (payload: { requestId: string; agentName: string }) => void) => () => void;

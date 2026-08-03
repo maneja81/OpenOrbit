@@ -6,9 +6,10 @@
  * time instead of resetting per agent.
  *
  * Stored as a single flat JSON file under getUserInfoDir() rather than reviving the
- * dead `memory` DB table (electron/main/ipc/memory.ts) — that table's generic
- * kind/content shape wasn't a clearly better fit than a purpose-built fact list, and
- * would have needed the same amount of new plumbing either way.
+ * dead `memory` DB table (its unused ipc/memory.ts IPC surface was removed — see the
+ * KI-16 audit finding) — that table's generic kind/content shape wasn't a clearly
+ * better fit than a purpose-built fact list, and would have needed the same amount of
+ * new plumbing either way.
  *
  * Facts accumulate for the lifetime of the app and get injected into every agent's
  * prompt on every turn, so the stored list is capped (MAX_FACTS) rather than growing
