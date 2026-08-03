@@ -35,7 +35,7 @@ describe("testContactsConnection", () => {
       ok: true,
       json: async () => ({ emailAddresses: [{ value: "user@gmail.com" }] }),
     });
-    const result = await testContactsConnection({ accessToken: "at-1" });
+    const result = await testContactsConnection({ accessToken: "at-1", expiresAt: Date.now() + 3600_000 });
     expect(result).toEqual({ label: "user@gmail.com" });
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/people/me"),
@@ -48,7 +48,7 @@ describe("testContactsConnection", () => {
       ok: true,
       json: async () => ({ names: [{ displayName: "Jane Doe" }] }),
     });
-    const result = await testContactsConnection({ accessToken: "at-1" });
+    const result = await testContactsConnection({ accessToken: "at-1", expiresAt: Date.now() + 3600_000 });
     expect(result).toEqual({ label: "Jane Doe" });
   });
 
@@ -58,7 +58,7 @@ describe("testContactsConnection", () => {
       status: 403,
       text: async () => "Forbidden",
     });
-    await expect(testContactsConnection({ accessToken: "at-bad" })).rejects.toThrow(/403/);
+    await expect(testContactsConnection({ accessToken: "at-bad", expiresAt: Date.now() + 3600_000 })).rejects.toThrow(/403/);
   });
 
   it("uses a refreshed token when the stored credentials are expired", async () => {

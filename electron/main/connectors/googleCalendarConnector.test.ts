@@ -35,7 +35,7 @@ describe("testCalendarConnection", () => {
       ok: true,
       json: async () => ({ items: [{ id: "user@gmail.com" }] }),
     });
-    const result = await testCalendarConnection({ accessToken: "at-1" });
+    const result = await testCalendarConnection({ accessToken: "at-1", expiresAt: Date.now() + 3600_000 });
     expect(result).toEqual({ label: "user@gmail.com" });
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/calendarList"),
@@ -48,7 +48,7 @@ describe("testCalendarConnection", () => {
       ok: true,
       json: async () => ({ items: [] }),
     });
-    const result = await testCalendarConnection({ accessToken: "at-1" });
+    const result = await testCalendarConnection({ accessToken: "at-1", expiresAt: Date.now() + 3600_000 });
     expect(result).toEqual({ label: undefined });
   });
 
@@ -58,7 +58,7 @@ describe("testCalendarConnection", () => {
       status: 401,
       text: async () => "Unauthorized",
     });
-    await expect(testCalendarConnection({ accessToken: "at-bad" })).rejects.toThrow(/401/);
+    await expect(testCalendarConnection({ accessToken: "at-bad", expiresAt: Date.now() + 3600_000 })).rejects.toThrow(/401/);
   });
 
   it("uses a refreshed token when the stored credentials are expired", async () => {
