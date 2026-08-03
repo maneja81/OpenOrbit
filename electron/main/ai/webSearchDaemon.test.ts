@@ -109,7 +109,7 @@ describe("callDaemon", () => {
   it("resolves normally when the daemon responds before the timeout", async () => {
     fetchMock.mockImplementation((url: string) => {
       if (url.endsWith("/health")) return Promise.resolve({ ok: true });
-      return Promise.resolve({ json: async () => ({ status: "ok", data: { hello: "world" } }) });
+      return Promise.resolve({ ok: true, json: async () => ({ status: "ok", data: { hello: "world" } }) });
     });
 
     const { startExplorerDaemon, callDaemon } = await import("./webSearchDaemon");
@@ -118,6 +118,40 @@ describe("callDaemon", () => {
     await expect(callDaemon("/fetch-web", { url: "https://example.com" }, 5000)).resolves.toEqual({
       hello: "world",
     });
+  });
+
+  // KI-14: res.ok was never checked and res.json() ran unconditionally — a 5xx that returns
+  // HTML or an empty body threw a raw "Unexpected token < in JSON" SyntaxError instead of
+  // reporting the actual failed request.
+  it("reports the status and body on a non-ok response instead of throwing a raw JSON parse error", async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith("/health")) return Promise.resolve({ ok: true });
+      return Promise.resolve({ ok: false, status: 502, text: async () => "<html>Bad Gateway</html>" });
+    });
+
+    const { startExplorerDaemon, callDaemon } = await import("./webSearchDaemon");
+    await startExplorerDaemon();
+
+    await expect(callDaemon("/fetch-web", { url: "https://example.com" }, 5000)).rejects.toThrow(
+      /status 502.*Bad Gateway/s
+    );
+  });
+
+  it("reports a clear error when an ok response isn't valid JSON", async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith("/health")) return Promise.resolve({ ok: true });
+      return Promise.resolve({
+        ok: true,
+        json: async () => {
+          throw new SyntaxError("Unexpected token < in JSON at position 0");
+        },
+      });
+    });
+
+    const { startExplorerDaemon, callDaemon } = await import("./webSearchDaemon");
+    await startExplorerDaemon();
+
+    await expect(callDaemon("/fetch-web", { url: "https://example.com" }, 5000)).rejects.toThrow(/non-JSON response/);
   });
 });
 

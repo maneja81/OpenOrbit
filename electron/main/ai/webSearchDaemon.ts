@@ -261,7 +261,20 @@ export async function callDaemon<T>(
   } finally {
     clearTimeout(timer);
   }
-  const envelope = (await res.json()) as DaemonEnvelope<T>;
+  // res.ok was never checked and res.json() ran unconditionally — a 5xx that returns HTML
+  // or an empty body threw a raw "Unexpected token < in JSON" SyntaxError instead of the
+  // envelope's own error message, surfacing to Explorer's tools and the knowledge base's
+  // "Add from URL" as a parsing bug rather than a failed request.
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Request to ${endpoint} failed with status ${res.status}${text ? `: ${text}` : ""}`);
+  }
+  let envelope: DaemonEnvelope<T>;
+  try {
+    envelope = (await res.json()) as DaemonEnvelope<T>;
+  } catch {
+    throw new Error(`Request to ${endpoint} returned a non-JSON response despite status ${res.status}`);
+  }
   if (envelope.status === "error" || envelope.data === null) {
     throw new Error(envelope.error?.message ?? `Request to ${endpoint} failed with no error detail`);
   }
