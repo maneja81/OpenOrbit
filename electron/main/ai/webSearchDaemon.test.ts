@@ -2,7 +2,13 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
 
 type SpawnOptions = { env: Record<string, string>; stdio: unknown };
-type MockChild = EventEmitter & { kill: () => void; killed: boolean; stderr: EventEmitter };
+type MockChild = EventEmitter & {
+  kill: (signal?: string) => void;
+  killed: boolean;
+  exitCode: number | null;
+  signalCode: string | null;
+  stderr: EventEmitter;
+};
 
 // Typed on the mock rather than its implementation so `.mock.calls[0][2].env` is typed
 // without declaring parameters the fake child never reads.
@@ -10,6 +16,10 @@ const spawnMock = vi.fn<(command: string, args: string[], options: SpawnOptions)
   const child = new EventEmitter() as MockChild;
   child.kill = vi.fn();
   child.killed = false;
+  // Node's real ChildProcess sets these to non-null only once the process has actually
+  // exited — killed is a red herring, set true as soon as a signal is *sent*, not received.
+  child.exitCode = null;
+  child.signalCode = null;
   // The daemon's stderr is piped and forwarded to devLog, so the fake child needs one.
   child.stderr = new EventEmitter();
   return child;
@@ -275,5 +285,58 @@ describe("startExplorerDaemon browser fallback config", () => {
     child.stderr.emit("data", Buffer.from("\n"));
 
     expect(devLogMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("stopExplorerDaemon", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.useFakeTimers();
+    spawnMock.mockClear();
+    resolveMock.mockReset().mockImplementation((specifier: string) =>
+      specifier.startsWith("playwright-core") ? "/fake/playwright-core/package.json" : "/fake/open-websearch/package.json"
+    );
+    existsSyncMock.mockReset().mockReturnValue(false);
+    fetchMock.mockReset().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  // KI-6: child.killed is set to true as soon as SIGTERM is *sent*, not once the process has
+  // actually exited — so `if (!child.killed)` was always false and SIGKILL could never fire.
+  it("escalates to SIGKILL after the grace period when the process ignored SIGTERM", async () => {
+    const { startExplorerDaemon, stopExplorerDaemon } = await import("./webSearchDaemon");
+    await startExplorerDaemon();
+    const child = spawnMock.mock.results[0].value as MockChild;
+
+    stopExplorerDaemon();
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+    // Still alive — SIGTERM was sent but the process hasn't exited (unlike child.killed,
+    // which the old, buggy check relied on and which is already true at this point).
+    child.exitCode = null;
+    child.signalCode = null;
+
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+  });
+
+  it("does not escalate when the process already exited from SIGTERM", async () => {
+    const { startExplorerDaemon, stopExplorerDaemon } = await import("./webSearchDaemon");
+    await startExplorerDaemon();
+    const child = spawnMock.mock.results[0].value as MockChild;
+
+    stopExplorerDaemon();
+    // The process exited in response to SIGTERM before the grace period elapsed.
+    child.exitCode = null;
+    child.signalCode = "SIGTERM";
+
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    expect(child.kill).not.toHaveBeenCalledWith("SIGKILL");
   });
 });
