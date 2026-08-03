@@ -5,13 +5,12 @@ All notable changes to OpenOrbit are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] — Unreleased
+## [0.1.0] — 2026-08-03
 
-Everything below is the work leading up to the first release. Nothing has been
-tagged yet, so there are no packaged downloads — running OpenOrbit means
-[building from source](README.md#build-and-run). The pipeline for it is in
-place: pushing a `v*` tag builds installers for all three platforms and
-attaches them to a GitHub Release.
+The first release. Installers for macOS, Windows and Linux are attached to
+the [GitHub Release](https://github.com/maneja81/OpenOrbit/releases/tag/v0.1.0)
+for this tag — see [Build and run](README.md#build-and-run) if you'd rather
+build from source.
 
 ### Added
 
@@ -357,4 +356,4 @@ attaches them to a GitHub Release.
   low), `fast-csv` (denial of service, low), and `exceljs` 3.4.0 → 3.10.0.
   ([#5](https://github.com/maneja81/OpenOrbit/pull/5))
 
-[0.1.0]: https://github.com/maneja81/OpenOrbit/commits/develop
+[0.1.0]: https://github.com/maneja81/OpenOrbit/releases/tag/v0.1.0

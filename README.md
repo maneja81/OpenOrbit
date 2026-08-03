@@ -11,8 +11,9 @@ apps, and Google account.
 > **This is a personal side project — built evenings and weekends, around a full-time job.
 > No support, no roadmap commitments, no guarantees.**
 >
-> The app is built and works. There are no packaged downloads yet, so running it means
-> [building from source](#build-and-run). Dates aren't promised.
+> The app works. Grab a packaged build from the
+> [latest release](https://github.com/maneja81/OpenOrbit/releases/latest), or
+> [build from source](#build-and-run). Dates aren't promised.
 
 <img src="public/openorbit.webp" alt="OpenOrbit orbit UI screenshot">
 
@@ -79,8 +80,10 @@ YAML, TOML, SQL and a range of source files.
 
 ## Build and run
 
-There are no prebuilt binaries yet. You'll need [Node.js](https://nodejs.org) `^20.19.0`
-or `>=22.12.0` (what Vite 7 and electron-vite 5 require) and Git.
+Packaged builds for macOS, Windows and Linux are on the
+[releases page](https://github.com/maneja81/OpenOrbit/releases). To build from source
+you'll need [Node.js](https://nodejs.org) `^20.19.0` or `>=22.12.0` (what Vite 7 and
+electron-vite 5 require) and Git.
 
 ```bash
 git clone -b develop https://github.com/maneja81/OpenOrbit.git
@@ -101,8 +104,10 @@ npm run lint      # eslint
 On first run you'll be asked to name the orchestrator, introduce yourself, and enter an
 API key. Nothing else is required — there are no environment variables to set.
 
-`npm run package` uses electron-builder's defaults with no configuration file, so treat it
-as a starting point rather than a finished cross-platform pipeline.
+`npm run package` builds for your current platform only, using the `build` config in
+`package.json` (macOS `.dmg`, Windows `.exe` via NSIS, Linux `.AppImage`). Cross-platform
+builds happen in CI — see `.github/workflows/release.yml`, which builds all three and
+attaches them to a GitHub Release on every `v*` tag.
 
 ## Bring your own key
 
