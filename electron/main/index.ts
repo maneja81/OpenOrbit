@@ -132,7 +132,10 @@ app.whenReady().then(() => {
   registerAppInfoHandlers();
   // Fire-and-forget: Explorer's tools await getExplorerDaemonPort() themselves, so a
   // slow/failed daemon start doesn't block app launch — it just fails that tool call later.
-  void startExplorerDaemon();
+  // The .catch is required, not optional: Node's default disposition for an unhandled
+  // rejection is to terminate the process, so a health-check timeout here (see KI-8) could
+  // take the whole app down at launch on a path this comment already says is non-blocking.
+  startExplorerDaemon().catch((e) => devLog(`[startExplorerDaemon] failed to start: ${e instanceof Error ? e.message : String(e)}`));
   startTaskScheduler();
   createWindow();
 
