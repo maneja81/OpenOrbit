@@ -62,6 +62,24 @@ function isBlockedHost(host: string): boolean {
   return false;
 }
 
+/** Non-http(s) schemes are refused even when a collection opts into private hosts —
+ * "allow private addresses" widens which *hosts* are reachable, never which protocols
+ * (file:, data: etc. are not HTTP tools in any configuration). Shared by both HTTP-tool
+ * call sites (ai/httpTools.ts's agent-facing execute, ipc/httpTools.ts's testTool) so the
+ * two paths can't drift the way they did before KI-12 — testTool skipped this entirely
+ * when allowPrivateHosts was true. */
+export function assertHttpProtocol(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`"${url}" is not a valid URL`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`Refusing to call a non-http(s) URL: "${url}"`);
+  }
+}
+
 /** Validates a URL is safe to fetch from the knowledgebase "Add from URL"/discovery/sitemap flows:
  * http(s) only, and neither the literal hostname nor any of its DNS-resolved addresses
  * point at loopback/private/link-local space. The resolved-address check defends against

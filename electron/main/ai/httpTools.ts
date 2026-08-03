@@ -10,7 +10,7 @@ import {
   type HttpToolParam,
   type HttpToolRow,
 } from "../db/httpToolsStore";
-import { safeFetch } from "../net/urlSafety";
+import { assertHttpProtocol, safeFetch } from "../net/urlSafety";
 import { buildHttpRequest, toolParamsSchema, type HttpToolArgValue } from "./httpToolRequest";
 import { requiresApproval, type ApprovalPolicy } from "./approvalPolicy";
 import { readAppSetting } from "../appSettings";
@@ -32,21 +32,6 @@ export interface HttpToolResponse {
   contentType: string | null;
   body: string;
   truncated: boolean;
-}
-
-/** Non-http(s) schemes are refused even when a collection opts into private hosts —
- * "allow private addresses" widens which *hosts* are reachable, never which protocols
- * (file:, data: etc. are not HTTP tools in any configuration). */
-function assertHttpProtocol(url: string): void {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    throw new Error(`"${url}" is not a valid URL`);
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error(`Refusing to call a non-http(s) URL: "${url}"`);
-  }
 }
 
 async function executeHttpTool(

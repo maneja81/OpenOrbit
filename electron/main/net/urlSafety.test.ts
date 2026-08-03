@@ -8,7 +8,25 @@ vi.mock("node:dns", () => ({
 }));
 
 import dns from "node:dns";
-import { assertPublicHttpUrl, safeFetch } from "./urlSafety";
+import { assertHttpProtocol, assertPublicHttpUrl, safeFetch } from "./urlSafety";
+
+describe("assertHttpProtocol", () => {
+  it("accepts http(s) URLs regardless of host", () => {
+    expect(() => assertHttpProtocol("https://example.com/")).not.toThrow();
+    expect(() => assertHttpProtocol("http://127.0.0.1:8080/")).not.toThrow();
+  });
+
+  it.each(["file:///etc/passwd", "ftp://example.com", "javascript:alert(1)"])(
+    "rejects a non-http(s) URL: %s",
+    (url) => {
+      expect(() => assertHttpProtocol(url)).toThrow(/non-http/);
+    }
+  );
+
+  it("rejects an invalid URL string", () => {
+    expect(() => assertHttpProtocol("not a url")).toThrow(/not a valid URL/);
+  });
+});
 
 describe("assertPublicHttpUrl", () => {
   afterEach(() => {
