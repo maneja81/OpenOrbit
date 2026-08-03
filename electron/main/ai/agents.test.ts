@@ -27,6 +27,7 @@ import {
   listAgents,
   protectedSettingRefusal,
   updateAgent,
+  updateAgentNeedsApproval,
 } from "./agents";
 import { saveConnectorCredentials } from "../db/connectorsStore";
 import { setSetting } from "../db/settingsStore";
@@ -417,6 +418,27 @@ describe("buildUpdateAgentPatch (backs Cipher's update_agent tool)", () => {
   it("omits every field when all tool args are null", () => {
     expect(buildUpdateAgentPatch(allNull)).toEqual({});
   });
+
+  it("does not require approval when only harmless fields are set", () => {
+    expect(
+      updateAgentNeedsApproval({
+        ...allNull,
+        name: "New name",
+        tagline: "New tagline",
+        description: "New description",
+        model: "gpt-4.1-mini",
+        enabled: false,
+      })
+    ).toBe(false);
+  });
+
+  it.each(["prompt", "mcpServerIds", "connectorIds"] as const)(
+    "requires approval when %s is set",
+    (field) => {
+      const value = field === "prompt" ? "New prompt" : ["x"];
+      expect(updateAgentNeedsApproval({ ...allNull, [field]: value })).toBe(true);
+    }
+  );
 
   it("includes only the non-null fields, preserving their values", () => {
     const patch = buildUpdateAgentPatch({
