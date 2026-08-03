@@ -109,13 +109,17 @@ app.whenReady().then(() => {
   registerSystemStatsHandlers();
   startSystemStatsBroadcast();
   registerLocationHandlers();
-  // Location now comes from a main-process IP lookup (electron/main/ipc/location.ts),
-  // not Chromium's navigator.geolocation, so no permission type needs gating here anymore
-  // — this just keeps Electron's implicit-allow default explicit for everything else
-  // (e.g. microphone, used by voice input).
-  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
-    callback(true);
+  // Location now comes from a main-process IP lookup (electron/main/ipc/location.ts), not
+  // Chromium's navigator.geolocation. The app needs exactly one Chromium permission —
+  // "media", for voice input's microphone access — so this is an allowlist rather than
+  // Electron's implicit-allow default: a permission the app doesn't use (notifications,
+  // clipboard-read, midi, and anything Chromium adds in a future major) is denied, not
+  // granted for free. Denial is the cheap direction of error here — a wrong denial is
+  // immediately visible in voice input, whereas a wrong grant is invisible.
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    callback(permission === "media");
   });
+  session.defaultSession.setPermissionCheckHandler((_webContents, permission) => permission === "media");
   registerSettingsHandlers();
   registerChatHistoryHandlers();
   registerMemoryHandlers();
