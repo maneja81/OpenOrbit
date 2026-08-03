@@ -193,7 +193,11 @@ export function stopExplorerDaemon(): void {
   daemonReady = null;
   child.kill("SIGTERM");
   setTimeout(() => {
-    if (!child.killed) child.kill("SIGKILL");
+    // child.killed is set to true as soon as a signal is successfully *sent*, not when the
+    // process actually exits — checking it here meant this branch could never run, since
+    // SIGTERM above already set it. exitCode/signalCode are both null only while the process
+    // is still alive, so this is the check that actually reflects whether SIGTERM worked.
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
   }, STOP_GRACE_PERIOD_MS);
 }
 
