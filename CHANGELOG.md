@@ -8,8 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.0] — Unreleased
 
 Everything below is the work leading up to the first release. Nothing has been
-tagged or published yet, and there are no packaged downloads — running OpenOrbit
-means [building from source](README.md#build-and-run).
+tagged yet, so there are no packaged downloads — running OpenOrbit means
+[building from source](README.md#build-and-run). The pipeline for it is in
+place: pushing a `v*` tag builds installers for all three platforms and
+attaches them to a GitHub Release.
 
 ### Added
 
@@ -40,6 +42,11 @@ means [building from source](README.md#build-and-run).
   stored answers stay put and become the starting point; chat history, agents,
   memory and the knowledge base are untouched.
   ([#40](https://github.com/maneja81/OpenOrbit/pull/40))
+- **A release pipeline.** Pushing a `v*` tag builds installers on macOS, Windows
+  and Linux and attaches them to a GitHub Release. The tag is gated by the same
+  four checks every PR gets — by reference rather than a copied workflow, since a
+  tag can be pushed from a commit that never went through a PR.
+  ([#69](https://github.com/maneja81/OpenOrbit/pull/69))
 - Packaging configuration for electron-builder, including an explicit file
   allowlist — the default `files: ["**/*"]` would have packed the entire project
   directory, `.env` included, into a publicly downloadable installer.
@@ -60,6 +67,13 @@ means [building from source](README.md#build-and-run).
   the app will do without asking were previously split between the HTTP Tools tab
   and General, so nobody auditing the app had a single place to look.
   ([#34](https://github.com/maneja81/OpenOrbit/pull/34))
+- **Settings → Models is split into "API keys" and "Default models"**, cut by
+  what a field is rather than which slot it belongs to. Previously the Chat
+  provider's card was a different shape from every other provider's, so setting
+  up a key was two different tasks depending on which provider you were on, and
+  there was nowhere to see all your models at once. Each slot's Test button moves
+  in beside the credentials it actually checks.
+  ([#70](https://github.com/maneja81/OpenOrbit/pull/70))
 - **Text settings save on blur** rather than on every keystroke. Every text field
   in Settings previously made one IPC round trip and one SQLite write per
   character, and a value the write boundary refused snapped away mid-typing.
@@ -119,6 +133,22 @@ means [building from source](README.md#build-and-run).
   that agent used.** A blank model now resolves against the agent's own provider,
   or the live orchestrator model, instead of the build's compile-time default.
   ([#67](https://github.com/maneja81/OpenOrbit/pull/67))
+- **Rotating the Chat API key silently reset the model and the API URL.**
+  Settings saves the key, URL and model as three separate writes, and every
+  omitted field fell through to the provider's registry default — so changing one
+  reset the others, and because the slot re-points every inheriting agent, a key
+  rotation moved all of them onto a different model.
+  ([#68](https://github.com/maneja81/OpenOrbit/pull/68))
+- **An agent's Model ID placeholder advertised a model its provider didn't
+  serve** — an agent pinned to Claude still showed an OpenAI id as its default.
+  It now shows what a blank field would actually resolve to. A model left over
+  from a previous provider is also flagged rather than left looking configured,
+  by asking whether an id carries *another* provider's naming scheme rather than
+  checking it against a list of known-good prefixes — a list rejects every model
+  an OpenAI-compatible gateway serves, and a false warning telling someone their
+  working setup is broken is the more expensive error.
+  ([#71](https://github.com/maneja81/OpenOrbit/pull/71),
+  [#72](https://github.com/maneja81/OpenOrbit/pull/72))
 - **One corrupt database row could read as "my entire configuration was wiped."**
   An unguarded `JSON.parse` in the settings store made a single malformed row
   throw out of the whole read, falling back to every default, API keys included.
