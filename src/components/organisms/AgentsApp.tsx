@@ -31,6 +31,7 @@ import { useBackgroundMusic } from "@/hooks/useBackgroundMusic";
 import { useSystemStats } from "@/hooks/useSystemStats";
 import { useTokenUsage } from "@/hooks/useTokenUsage";
 import { hasAgentsAPI } from "@/lib/agentsApi";
+import { isUpdateAvailable } from "@/lib/semver";
 import { USER_CONTEXT_FIELDS } from "@/lib/userContext";
 import { formatHumanizedError, humanizeError } from "@/lib/humanizeError";
 import { AgentId, StepEvent, matchAgentSlashCommand } from "@/lib/agents";
@@ -222,6 +223,31 @@ export default function AgentsApp() {
     const start = Date.now();
     const interval = setInterval(() => setSessionElapsedMs(Date.now() - start), 60_000);
     return () => clearInterval(interval);
+  }, []);
+
+  // Checked once, on launch, against this build's own version — not the reverse of the old
+  // build-time check (see AboutTab.tsx / semver.ts), which could only ever compare a build
+  // against itself and so could never actually detect a release published afterward. No
+  // auto-download here, only the badge on #aboutbtn (AppControls.tsx) — see ipc/updateCheck.ts
+  // for why.
+  const [appVersion, setAppVersion] = useState("");
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  useEffect(() => {
+    if (!hasAgentsAPI()) return;
+    let cancelled = false;
+    Promise.all([window.agentsAPI.appInfo.get(), window.agentsAPI.appInfo.latestRelease()])
+      .then(([info, release]) => {
+        if (cancelled) return;
+        setAppVersion(info.packageVersion);
+        setUpdateAvailable(isUpdateAvailable(release.version, info.packageVersion));
+      })
+      .catch(() => {
+        // Version display and the update badge are both cosmetic — nothing here should
+        // interrupt launch or surface an error the user can't act on.
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // A time-of-day greeting by the user's own name reads as more "alive" than a static
@@ -819,7 +845,8 @@ export default function AgentsApp() {
         entering={entering}
         locationEnabled={settings.locationEnabled}
         cognitiveState={cognitiveState}
-        version={__APP_RELEASE_VERSION__}
+        version={appVersion}
+        updateAvailable={updateAvailable}
         sessionStats={sessionStats}
       >
         <ErrorBoundary fallbackTitle="The chat failed to load">
