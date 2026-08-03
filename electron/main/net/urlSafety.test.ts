@@ -8,7 +8,7 @@ vi.mock("node:dns", () => ({
 }));
 
 import dns from "node:dns";
-import { assertPublicHttpUrl } from "./urlSafety";
+import { assertPublicHttpUrl, safeFetch } from "./urlSafety";
 
 describe("assertPublicHttpUrl", () => {
   afterEach(() => {
@@ -58,5 +58,59 @@ describe("assertPublicHttpUrl", () => {
 
   it("rejects an invalid URL string", async () => {
     await expect(assertPublicHttpUrl("not a url")).rejects.toThrow(/not a valid URL/);
+  });
+});
+
+describe("safeFetch", () => {
+  afterEach(() => {
+    vi.mocked(dns.promises.lookup).mockReset();
+    vi.mocked(dns.promises.lookup).mockImplementation(async () => Promise.reject(new Error("ENOTFOUND")));
+    vi.unstubAllGlobals();
+  });
+
+  it("refuses a redirect to a private/metadata address instead of following it", async () => {
+    vi.mocked(dns.promises.lookup).mockResolvedValue([{ address: "93.184.216.34", family: 4 }] as never);
+    const fetchMock = vi.fn(async () =>
+      new Response(null, { status: 302, headers: { location: "http://169.254.169.254/latest/meta-data/" } })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(safeFetch("https://example.com/redirector")).rejects.toThrow(/local\/private/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("follows a redirect to a public address and re-validates it", async () => {
+    vi.mocked(dns.promises.lookup).mockResolvedValue([{ address: "93.184.216.34", family: 4 }] as never);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 302, headers: { location: "https://example.com/final" } }))
+      .mockResolvedValueOnce(new Response("ok", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await safeFetch("https://example.com/redirector");
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ redirect: "manual" });
+  });
+
+  it("caps the number of redirects it will follow", async () => {
+    vi.mocked(dns.promises.lookup).mockResolvedValue([{ address: "93.184.216.34", family: 4 }] as never);
+    const fetchMock = vi.fn(async () =>
+      new Response(null, { status: 302, headers: { location: "https://example.com/next" } })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(safeFetch("https://example.com/loop", {}, 2)).rejects.toThrow(/more than 2 redirects/);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("returns a non-redirect response directly", async () => {
+    vi.mocked(dns.promises.lookup).mockResolvedValue([{ address: "93.184.216.34", family: 4 }] as never);
+    const fetchMock = vi.fn(async () => new Response("body", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await safeFetch("https://example.com/docs");
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("body");
   });
 });

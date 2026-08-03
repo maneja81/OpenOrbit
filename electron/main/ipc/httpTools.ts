@@ -18,7 +18,7 @@ import {
   type HttpToolPatch,
 } from "../db/httpToolsStore";
 import { buildHttpRequest } from "../ai/httpToolRequest";
-import { assertPublicHttpUrl } from "../net/urlSafety";
+import { safeFetch } from "../net/urlSafety";
 
 export type { HttpToolCollectionRow, HttpToolRow, HttpToolParam } from "../db/httpToolsStore";
 
@@ -220,15 +220,17 @@ export function registerHttpToolHandlers() {
           collectionHeaders: input.headers,
           bodyTemplate: input.bodyTemplate,
         });
-        if (!input.allowPrivateHosts) {
-          await assertPublicHttpUrl(request.url);
-        }
-        const response = await fetch(request.url, {
+        const fetchInit: RequestInit = {
           method: request.method,
           headers: request.headers,
           body: request.body,
           signal: AbortSignal.timeout(15_000),
-        });
+        };
+        // safeFetch re-validates every redirect hop, so a 302 to private space is caught
+        // even though the initial URL passed assertPublicHttpUrl.
+        const response = input.allowPrivateHosts
+          ? await fetch(request.url, fetchInit)
+          : await safeFetch(request.url, fetchInit);
         const body = await response.text();
         return {
           ok: response.ok,

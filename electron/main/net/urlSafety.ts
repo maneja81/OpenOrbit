@@ -100,3 +100,22 @@ export async function assertPublicHttpUrl(url: string): Promise<URL> {
 
   return parsed;
 }
+
+/** Node's fetch defaults to `redirect: "follow"`, which only ever runs assertPublicHttpUrl
+ * against the *first* URL — a remote host can 302 to a private/metadata address and the
+ * guard never sees it. This follows redirects manually, re-validating every hop, so the
+ * guard holds for the URL actually fetched from, not just the one the caller supplied. */
+export async function safeFetch(url: string, init: RequestInit = {}, maxRedirects = 5): Promise<Response> {
+  let currentUrl = url;
+  for (let hop = 0; ; hop++) {
+    await assertPublicHttpUrl(currentUrl);
+    const response = await fetch(currentUrl, { ...init, redirect: "manual" });
+    const isRedirect = response.status >= 300 && response.status < 400;
+    const location = response.headers.get("location");
+    if (!isRedirect || !location) return response;
+    if (hop >= maxRedirects) {
+      throw new Error(`Refusing to follow more than ${maxRedirects} redirects for "${url}"`);
+    }
+    currentUrl = new URL(location, currentUrl).toString();
+  }
+}

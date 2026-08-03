@@ -2,6 +2,9 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("../net/urlSafety", () => ({
   assertPublicHttpUrl: async (url: string) => new URL(url),
+  // Redirect-following behavior is covered by urlSafety.test.ts — here it's a passthrough
+  // so these tests can keep asserting against the plain global `fetch` mock.
+  safeFetch: async (url: string, init?: RequestInit) => (globalThis.fetch as typeof fetch)(url, init),
 }));
 
 import { fetchSitemapUrls } from "./sitemapDiscovery";

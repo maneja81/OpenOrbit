@@ -22,7 +22,7 @@ vi.mock("../db/httpToolsStore", () => ({
 
 const buildHttpRequestMock = vi.hoisted(() => vi.fn());
 vi.mock("../ai/httpToolRequest", () => ({ buildHttpRequest: buildHttpRequestMock }));
-vi.mock("../net/urlSafety", () => ({ assertPublicHttpUrl: vi.fn() }));
+vi.mock("../net/urlSafety", () => ({ assertPublicHttpUrl: vi.fn(), safeFetch: vi.fn() }));
 
 import { ipcMain } from "electron";
 import { registerHttpToolHandlers } from "./httpTools";
