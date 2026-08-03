@@ -18,7 +18,7 @@ import {
   type HttpToolPatch,
 } from "../db/httpToolsStore";
 import { buildHttpRequest } from "../ai/httpToolRequest";
-import { safeFetch } from "../net/urlSafety";
+import { assertHttpProtocol, safeFetch } from "../net/urlSafety";
 
 export type { HttpToolCollectionRow, HttpToolRow, HttpToolParam } from "../db/httpToolsStore";
 
@@ -239,10 +239,17 @@ export function registerHttpToolHandlers() {
           signal: AbortSignal.timeout(15_000),
         };
         // safeFetch re-validates every redirect hop, so a 302 to private space is caught
-        // even though the initial URL passed assertPublicHttpUrl.
-        const response = input.allowPrivateHosts
-          ? await fetch(request.url, fetchInit)
-          : await safeFetch(request.url, fetchInit);
+        // even though the initial URL passed assertPublicHttpUrl. When private hosts are
+        // allowed, assertHttpProtocol still runs — "allow private addresses" widens which
+        // hosts are reachable, never which protocols — mirroring ai/httpTools.ts, which
+        // this branch previously did not (KI-12).
+        let response: Response;
+        if (input.allowPrivateHosts) {
+          assertHttpProtocol(request.url);
+          response = await fetch(request.url, fetchInit);
+        } else {
+          response = await safeFetch(request.url, fetchInit);
+        }
         const body = await response.text();
         return {
           ok: response.ok,

@@ -22,7 +22,12 @@ vi.mock("../db/httpToolsStore", () => ({
 
 const buildHttpRequestMock = vi.hoisted(() => vi.fn());
 vi.mock("../ai/httpToolRequest", () => ({ buildHttpRequest: buildHttpRequestMock }));
-vi.mock("../net/urlSafety", () => ({ assertPublicHttpUrl: vi.fn(), safeFetch: vi.fn() }));
+const assertHttpProtocolMock = vi.hoisted(() => vi.fn());
+vi.mock("../net/urlSafety", () => ({
+  assertPublicHttpUrl: vi.fn(),
+  assertHttpProtocol: assertHttpProtocolMock,
+  safeFetch: vi.fn(async () => ({ ok: true, status: 200, statusText: "OK", text: async () => "{}" })),
+}));
 
 import { ipcMain } from "electron";
 import { registerHttpToolHandlers } from "./httpTools";
@@ -52,6 +57,7 @@ describe("httpTools:testTool argument names", () => {
   beforeEach(() => {
     vi.mocked(ipcMain.handle).mockClear();
     buildHttpRequestMock.mockReset();
+    assertHttpProtocolMock.mockReset();
     buildHttpRequestMock.mockReturnValue({
       url: "https://api.example.com/things/1",
       method: "GET",
@@ -89,6 +95,27 @@ describe("httpTools:testTool argument names", () => {
       allowPrivateHosts: false,
     });
     expect(buildHttpRequestMock).toHaveBeenCalledTimes(1);
+  });
+
+  // KI-12: allowPrivateHosts widens which *hosts* are reachable, never which protocols —
+  // this branch previously skipped assertPublicHttpUrl (correctly, since private hosts are
+  // allowed) but also assertHttpProtocol, unlike ai/httpTools.ts's equivalent branch.
+  it("still runs the protocol check when private hosts are allowed", async () => {
+    await testTool({ ...VALID, allowPrivateHosts: true });
+    expect(assertHttpProtocolMock).toHaveBeenCalledWith("https://api.example.com/things/1");
+  });
+
+  it("does not run the protocol check when private hosts are not allowed (safeFetch covers it)", async () => {
+    await testTool({ ...VALID, allowPrivateHosts: false });
+    expect(assertHttpProtocolMock).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a rejected protocol as a returned error rather than a thrown one", async () => {
+    assertHttpProtocolMock.mockImplementation(() => {
+      throw new Error('Refusing to call a non-http(s) URL: "file:///etc/passwd"');
+    });
+    const result = await testTool({ ...VALID, allowPrivateHosts: true });
+    expect(result).toEqual({ ok: false, error: expect.stringContaining("Refusing to call a non-http(s) URL") });
   });
 
   it("still accepts an input carrying only the required key", async () => {
