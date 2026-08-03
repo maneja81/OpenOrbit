@@ -1548,13 +1548,14 @@ svg#oc {
   letter-spacing: 0.3px;
 }
 
-/* Bottom-left dock. left: 20px lines up with #widgets-left; bottom: 22px matches the
-   .input-bar's own bottom padding. z-index must clear #chat (30) — it spans the full window
-   width with no pointer-events: none, so at 30 or below these buttons look right and are
-   completely dead. Same reason .jump-bottom sits at 32. */
-#ctrls {
+/* Bottom-left dock (info + version) and bottom-right dock (help + settings). left/right:
+   20px lines up with #widgets-left/#widgets-right; bottom: 22px matches the .input-bar's
+   own bottom padding. z-index must clear #chat (30) — it spans the full window width with
+   no pointer-events: none, so at 30 or below these buttons look right and are completely
+   dead. Same reason .jump-bottom sits at 32. */
+#ctrls,
+#ctrls-right {
   position: absolute;
-  left: 20px;
   bottom: 22px;
   z-index: 32;
   display: flex;
@@ -1562,9 +1563,25 @@ svg#oc {
   align-items: center;
 }
 
+#ctrls {
+  left: 20px;
+}
+
+#ctrls-right {
+  right: 20px;
+}
+
+#app-version {
+  font-size: 11px;
+  color: #7ec8ff;
+  letter-spacing: 0.3px;
+  opacity: 0.7;
+}
+
 #setbtn,
 #tourbtn,
-#aboutbtn {
+#aboutbtn,
+#helpbtn {
   width: 34px;
   height: 34px;
   border-radius: 50%;
@@ -1583,16 +1600,18 @@ svg#oc {
   transform: rotate(45deg);
 }
 
-/* No rotate here — that gesture reads as a turning gear on #setbtn, but as a tilted
-   question mark on this one, and as a tipped-over "i" on #aboutbtn. */
+/* No rotate here — that gesture reads as a turning gear on #setbtn, but as a tipped-over
+   route line on #tourbtn, a tipped-over "i" on #aboutbtn, and a tipped-over "?" on #helpbtn. */
 #tourbtn:hover,
-#aboutbtn:hover {
+#aboutbtn:hover,
+#helpbtn:hover {
   background: rgba(80, 160, 255, 0.12);
 }
 
 #setbtn i,
 #tourbtn i,
-#aboutbtn i {
+#aboutbtn i,
+#helpbtn i {
   font-size: 16px;
   color: #7ec8ff;
   transition: transform 0.2s;
