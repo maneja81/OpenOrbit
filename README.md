@@ -164,7 +164,8 @@ whatever that turns up feeds back into OpenOrbit's own design.
 [Discussions](https://github.com/maneja81/OpenOrbit/discussions) is the place to talk about
 it. I read everything that gets posted, but replies land when they land — often a few days.
 
-Development happens on `develop`. `main` tracks stable.
+Development happens on `develop`. `main` tracks stable. What's changed is in
+[CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
