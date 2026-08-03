@@ -16,10 +16,14 @@ const getDueTasksMock = vi.hoisted(() => vi.fn<(nowIso: string) => import("../db
 const recordTaskRunMock = vi.hoisted(() => vi.fn());
 vi.mock("../db/tasksStore", () => ({ getDueTasks: getDueTasksMock, recordTaskRun: recordTaskRunMock }));
 
+const notificationConstructorMock = vi.hoisted(() => vi.fn());
 vi.mock("electron", () => {
   class MockNotification {
     static isSupported = () => true;
     show = vi.fn();
+    constructor(options: { title: string; body: string }) {
+      notificationConstructorMock(options);
+    }
   }
   return {
     Notification: MockNotification,
@@ -29,6 +33,7 @@ vi.mock("electron", () => {
 
 import {
   computeNextRunAt,
+  notify,
   renderTaskPrompt,
   runPromptTask,
   startTaskScheduler,
@@ -179,5 +184,34 @@ describe("waitForInFlightPoll", () => {
     releaseRun({ finalOutput: "done", interruptions: [] });
     await waited;
     expect(resolved).toBe(true);
+  });
+});
+
+// KI-22: notify() truncated the body but not the title, even though task.title is user- or
+// agent-authored with no length cap of its own — and becomes `${task.title} — failed` on a
+// failure notification, making an already-long title longer still.
+describe("notify", () => {
+  beforeEach(() => {
+    notificationConstructorMock.mockReset();
+  });
+
+  it("truncates a long title the same way it already truncates the body", () => {
+    const longTitle = "x".repeat(500);
+    const longBody = "y".repeat(500);
+
+    notify(longTitle, longBody);
+
+    expect(notificationConstructorMock).toHaveBeenCalledTimes(1);
+    const [{ title, body }] = notificationConstructorMock.mock.calls[0];
+    expect(title.length).toBeLessThan(longTitle.length);
+    expect(body.length).toBeLessThan(longBody.length);
+  });
+
+  it("leaves a short title and body untouched", () => {
+    notify("Reminder", "Time to check in.");
+
+    const [{ title, body }] = notificationConstructorMock.mock.calls[0];
+    expect(title).toBe("Reminder");
+    expect(body).toBe("Time to check in.");
   });
 });

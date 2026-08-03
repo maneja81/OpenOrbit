@@ -182,6 +182,21 @@ describe("ChatBubble", () => {
     expect(container.querySelector(".mb")?.textContent).toContain("click");
   });
 
+  // KI-23: urlTransform={(url) => url} disables react-markdown's own scheme filter, so
+  // safety depends entirely on isSafeHref (anchors, above) and isDisplayable (images, here)
+  // staying in front of every URL-bearing construct react-markdown/remark-gfm can emit. This
+  // is the image half of that invariant — if a future plugin or react-markdown upgrade added
+  // a new URL-bearing node without an equivalent gate, this is the test that would need a
+  // matching case, making the gap visible instead of silent.
+  it("refuses to render a javascript: URL as an image src", () => {
+    const { container } = render(
+      <ChatBubble role="assistant" text="![alt](javascript:alert(1))" avatarLabel="A" />
+    );
+    const img = container.querySelector("img");
+    expect(img).toBeNull();
+    expect(container.querySelector(".chat-image-fallback")).not.toBeNull();
+  });
+
   it("does not render raw HTML from either role", () => {
     // No rehype-raw is configured; this test is what stops someone adding it without
     // thinking about model- or user-supplied markup.
