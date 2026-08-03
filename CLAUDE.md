@@ -122,6 +122,12 @@ Four built-in sub-agents ship seeded from `electron/main/ai/defaultAgents.json`:
 
 - **`node_modules` and `dist-electron/` are per-worktree** and untracked — a fresh worktree needs its own install (see the Electron caveat below). `0-cowork/`, `MEMORY.md` and `.env` are gitignored and exist **only in the main checkout** at `/Users/mohitaneja/Projects/OpenOrbit`; write shared plans, fixes and memory to that absolute path or the workspace silently forks.
 
+## Branching & Releases
+
+- **`develop` is where all work happens — feature PRs, fixes, chores, docs — every time, no exceptions.** `main` tracks the released, stable line and moves only at a release cut (fast-forwarded to `develop`'s tip) or for a hotfix.
+- **Hotfixing a released version:** branch off `main` (not `develop`), fix, verify gate, PR *into `main`*. Once merged, **immediately** bring the same fix into `develop` too (cherry-pick the hotfix commit, or merge `main` into `develop` — whichever is cleaner for that fix) so the next release cut from `develop` doesn't silently regress it. A hotfix that only lands on `main` is a fix that vanishes the next time `main` is fast-forwarded to `develop`.
+- **Cutting a release:** finalize the CHANGELOG entry on `develop` first (dated header, corrected compare-link) via the normal PR flow, fast-forward `main` to `develop`'s new tip, then tag `vX.Y.Z` on `main`. `package.json`'s `version` field must match the tag exactly — `.github/workflows/release.yml` checks this and fails the build otherwise. The release workflow triggers on any `v*` tag push regardless of branch, but tagging from `main` keeps the tagged commit and the stable branch pointer identical.
+
 ## Verify Gate
 
 - **Run all four, every time, before reporting work done** — a green vitest run alone is not validation:
