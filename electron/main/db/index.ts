@@ -31,19 +31,24 @@ export function getDb(): Database.Database {
   migrateLegacyDbLocation(path.join(getLegacyAppRoot(), "alex.db"), dbPath);
   migrateLegacyDbLocation(path.join(app.getPath("userData"), "alex.db"), dbPath);
   migrateLegacyDbLocation(path.join(getDatabaseDir(), "alex.db"), dbPath);
-  db = new Database(dbPath);
-  db.pragma("journal_mode = WAL");
+  // Assigned to a local first, and only promoted to the module-level singleton once
+  // runMigrations returns successfully — otherwise a migration that throws leaves `db`
+  // already set, and the `if (db) return db` guard above hands every subsequent call the
+  // half-migrated connection instead of retrying or failing loudly.
+  const opened = new Database(dbPath);
+  opened.pragma("journal_mode = WAL");
   // SQLite has FK enforcement off per-connection by default — without this, messages.conversation_id's
   // REFERENCES/ON DELETE CASCADE in the schema would silently not be enforced.
-  db.pragma("foreign_keys = ON");
+  opened.pragma("foreign_keys = ON");
   // Migration v31 re-points knowledge_files.path rows after an app rename moves the
   // knowledge-files directory. The paths are resolved here rather than inside migrations.ts,
   // which stays free of runtime imports so it can run against a bare in-memory database.
   const knowledgeFilesDir = getKnowledgeFilesDir();
   const knowledgeDirName = path.basename(knowledgeFilesDir);
-  runMigrations(db, {
+  runMigrations(opened, {
     knowledgeFilesDir,
     legacyKnowledgeFilesDirs: getLegacyAppRoots().map((legacyRoot) => path.join(legacyRoot, knowledgeDirName)),
   });
+  db = opened;
   return db;
 }
