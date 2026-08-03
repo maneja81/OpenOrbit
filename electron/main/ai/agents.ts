@@ -523,10 +523,21 @@ export function buildUpdateAgentPatch(args: UpdateAgentToolArgs): AgentUpdatePat
   return patch;
 }
 
+// A rewritten prompt, or a newly attached MCP server/connector, outlasts the conversation
+// that produced it — the same threat model PROTECTED_SETTING_KEYS documents above (a reply
+// is assembled from text this app did not author, and any of it can carry an instruction the
+// model acts on). Renaming an agent or flipping enabled/model carries no such persistence, so
+// only the fields that grant durable capability or rewrite behavior pause for approval.
+const SENSITIVE_UPDATE_AGENT_FIELDS = ["prompt", "mcpServerIds", "connectorIds"] as const;
+
+export function updateAgentNeedsApproval(args: UpdateAgentToolArgs): boolean {
+  return SENSITIVE_UPDATE_AGENT_FIELDS.some((key) => args[key] !== null);
+}
+
 const updateAgentTool = tool({
   name: "update_agent",
   description:
-    "Update an existing agent's name, tagline, description, prompt, model, enabled state, connected MCP servers, or connected connectors (e.g. Gmail). Only call this after confirming the specific change(s) with the user in plain language. Use list_agents first if you need to find the agent's id or see its current fields. Note: system agents cannot be disabled, and which AI provider an agent runs on cannot be changed here — that decides where its API key is sent, so the user sets it in Settings → Agents.",
+    "Update an existing agent's name, tagline, description, prompt, model, enabled state, connected MCP servers, or connected connectors (e.g. Gmail). Only call this after confirming the specific change(s) with the user in plain language. Use list_agents first if you need to find the agent's id or see its current fields. Note: system agents cannot be disabled, and which AI provider an agent runs on cannot be changed here — that decides where its API key is sent, so the user sets it in Settings → Agents. Changing the prompt, MCP servers, or connectors pauses for the user's approval.",
   parameters: z.object({
     id: z.string(),
     name: z.string().nullable(),
@@ -538,6 +549,9 @@ const updateAgentTool = tool({
     mcpServerIds: z.array(z.string()).nullable(),
     connectorIds: z.array(z.string()).nullable(),
   }),
+  // Same SDK-native human-in-the-loop as ai/httpTools.ts: the run stops with an interruption
+  // before execute() ever runs, and only resumes once ipc/agent.ts approves it.
+  needsApproval: async (_ctx, args) => updateAgentNeedsApproval(args),
   execute: async ({ id, ...rest }) => {
     const patch = buildUpdateAgentPatch(rest);
     devLog(`[update_agent] called with id="${id}" fields=${Object.keys(patch).join(",")}`);
@@ -637,8 +651,12 @@ function patchAgentConnectorIds(agentId: string, mutate: (ids: string[]) => stri
 const attachConnectorToAgentTool = tool({
   name: "attach_connector_to_agent",
   description:
-    "Attach an already-connected connector (e.g. Gmail) to a specific agent, giving that agent's chat turns access to its tools (e.g. sending email). The connector must already be connected — use connect_connector first if it isn't. Use list_agents to find the target agent's id.",
+    "Attach an already-connected connector (e.g. Gmail) to a specific agent, giving that agent's chat turns access to its tools (e.g. sending email). The connector must already be connected — use connect_connector first if it isn't. Use list_agents to find the target agent's id. Pauses for the user's approval before attaching.",
   parameters: z.object({ agentId: z.string(), connectorId: z.string() }),
+  // Same reasoning as update_agent's prompt/mcpServerIds/connectorIds gate above: this grants
+  // an agent durable access to a connected account (Gmail, Drive, Calendar), which outlasts
+  // the conversation that requested it.
+  needsApproval: async () => true,
   execute: async ({ agentId, connectorId }) => {
     if (!getConnectorDefinition(connectorId)) {
       throw new Error(`Unknown connector: ${connectorId}`);
