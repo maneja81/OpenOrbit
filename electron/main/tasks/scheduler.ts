@@ -14,6 +14,7 @@ import { closeMcpServers } from "../ai/mcp";
 import { getDueTasks, recordTaskRun, TaskRow } from "../db/tasksStore";
 import { devLog } from "../devLog";
 import { parseStringMap } from "../db/jsonColumn";
+import { extractApprovalMeta } from "../ai/runItemMeta";
 
 const POLL_INTERVAL_MS = 30_000;
 // Truncated in the OS notification body so a long agent reply doesn't overflow the
@@ -64,7 +65,9 @@ function notify(title: string, body: string): void {
   new Notification({ title, body: body.slice(0, NOTIFICATION_BODY_MAX_LENGTH) }).show();
 }
 
-async function runPromptTask(task: TaskRow): Promise<string> {
+/** Exported for testing — the interruption/auto-reject handling below is the KI-5 fix and is
+ * otherwise only reachable through the poll loop's setInterval callback. */
+export async function runPromptTask(task: TaskRow): Promise<string> {
   const { agent: orchestrator, mcpServers, allAgents } = await buildOrchestrator();
   try {
     let runTarget = orchestrator;
@@ -83,6 +86,25 @@ async function runPromptTask(task: TaskRow): Promise<string> {
     });
     devLog(`[taskScheduler] running task id=${task.id} target=${runTarget.name}`);
     const result = await run(runTarget, prompt);
+
+    // A headless run has no renderer to show the approval UI ipc/agent.ts's interactive path
+    // uses — result.interruptions was previously never inspected here, so a call to an
+    // approval-gated tool (an HTTP write, update_agent's prompt field, create_task) stopped
+    // the run and left finalOutput undefined, which this returned as "" — recorded as a
+    // completed run with no signal the work never happened. There is no user to ask, so this
+    // declines the call(s) rather than leaving the run stuck, and says so explicitly instead
+    // of reading as a model that had nothing to say.
+    if (result.interruptions.length > 0) {
+      const toolNames = result.interruptions.map((i) => extractApprovalMeta(i).toolName ?? "(unknown)");
+      for (const interruption of result.interruptions) {
+        result.state.reject(interruption, {
+          message: "Scheduled tasks run unattended and cannot ask for approval — this call was declined automatically.",
+        });
+      }
+      devLog(`[taskScheduler] task id=${task.id} blocked on approval-gated tool(s): ${toolNames.join(", ")}`);
+      return `Blocked — needs your approval for: ${toolNames.join(", ")}. Run this task interactively in chat instead.`;
+    }
+
     return result.finalOutput ?? "";
   } finally {
     await closeMcpServers(mcpServers);
