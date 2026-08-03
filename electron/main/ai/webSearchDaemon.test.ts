@@ -286,6 +286,20 @@ describe("startExplorerDaemon browser fallback config", () => {
 
     expect(devLogMock).not.toHaveBeenCalled();
   });
+
+  // KI-7: an EventEmitter throws an uncaught exception when an 'error' event fires with no
+  // listener. A ChildProcess that fails to spawn (ENOENT, EACCES, EAGAIN) emits exactly that,
+  // so an unspawnable daemon crashed the main process instead of degrading gracefully.
+  it("does not throw when the spawned process emits an error", async () => {
+    const { startExplorerDaemon } = await import("./webSearchDaemon");
+    // startExplorerDaemon's own promise is unaffected by this — it awaits waitForHealthy,
+    // which the fetch mock in this suite already resolves as healthy regardless.
+    await startExplorerDaemon();
+
+    const child = spawnMock.mock.results[0].value as MockChild;
+    expect(() => child.emit("error", new Error("spawn ENOENT"))).not.toThrow();
+    expect(devLogMock).toHaveBeenCalledWith(expect.stringContaining("spawn ENOENT"));
+  });
 });
 
 describe("stopExplorerDaemon", () => {

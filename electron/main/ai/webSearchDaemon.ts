@@ -160,6 +160,12 @@ export function startExplorerDaemon(): Promise<void> {
       // fallback that quietly stopped resolving looked identical to one that was working.
       stdio: ["ignore", "ignore", "pipe"],
     });
+    // A ChildProcess that fails to spawn (ENOENT, EACCES, EAGAIN under process pressure)
+    // emits 'error', and Node throws an uncaught exception for an 'error' event with no
+    // listener. Without this, an unspawnable daemon crashed the main process instead of
+    // degrading to the "log and carry on" behavior the surrounding comments describe —
+    // waitForHealthy below still times out and surfaces normally.
+    child.on("error", (e) => devLog(`[open-websearch] failed to spawn: ${e.message}`));
     child.stderr?.on("data", (chunk: Buffer) => {
       // One chunk routinely carries many lines, and devLog writes synchronously — so every line
       // kept here is an appendFileSync on the main process thread. A single failed Bing request
