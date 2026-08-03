@@ -35,7 +35,7 @@ describe("testDriveConnection", () => {
       ok: true,
       json: async () => ({ user: { emailAddress: "user@gmail.com" } }),
     });
-    const result = await testDriveConnection({ accessToken: "at-1" });
+    const result = await testDriveConnection({ accessToken: "at-1", expiresAt: Date.now() + 3600_000 });
     expect(result).toEqual({ label: "user@gmail.com" });
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/about"),
@@ -49,7 +49,7 @@ describe("testDriveConnection", () => {
       status: 403,
       text: async () => "Forbidden",
     });
-    await expect(testDriveConnection({ accessToken: "at-bad" })).rejects.toThrow(/403/);
+    await expect(testDriveConnection({ accessToken: "at-bad", expiresAt: Date.now() + 3600_000 })).rejects.toThrow(/403/);
   });
 
   it("uses a refreshed token when the stored credentials are expired", async () => {

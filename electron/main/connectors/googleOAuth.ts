@@ -61,8 +61,16 @@ export function makeEnsureFreshCredentials(
   return async function ensureFreshCredentials(
     credentials: ConnectorCredentials
   ): Promise<ConnectorCredentials> {
+    // A missing expiresAt used to mean "never expires" — but a token response that omits
+    // expires_in (oauthFlow.ts's exchangeCodeForTokens/refreshAccessToken both map that case
+    // to undefined) converts into a credential that never refreshes again, failing every
+    // subsequent call with a 401 until the user manually reconnects. Google always returns
+    // expires_in today, so this doesn't fire in practice, but runOAuthFlow is documented as
+    // generic and reusable by any connector — treating "unknown" as "expired" is the safe
+    // direction: an unnecessary refresh costs one extra request, a missed one costs a silent
+    // 401 loop.
     const isExpired =
-      credentials.expiresAt !== undefined && Date.now() > credentials.expiresAt - EXPIRY_SAFETY_MARGIN_MS;
+      credentials.expiresAt === undefined || Date.now() > credentials.expiresAt - EXPIRY_SAFETY_MARGIN_MS;
     if (!isExpired) return credentials;
     if (!credentials.refreshToken) {
       throw new Error(

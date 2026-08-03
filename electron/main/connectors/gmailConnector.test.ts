@@ -44,9 +44,22 @@ describe("ensureFreshCredentials", () => {
     vi.useRealTimers();
   });
 
-  it("returns the credentials unchanged when there's no expiry recorded", async () => {
+  // KI-10: a missing expiresAt used to mean "never expires" — a token response omitting
+  // expires_in converted into a credential that never refreshed again. Now treated as
+  // expired (refresh before use), the safe direction for "unknown".
+  it("refreshes when there's no expiry recorded, rather than treating it as valid forever", async () => {
+    refreshAccessTokenMock.mockResolvedValue({ accessToken: "at-2", expiresAt: Date.now() + 3600_000 });
+    const credentials = { accessToken: "at-1", refreshToken: "rt-1" };
+
+    const fresh = await ensureFreshCredentials(credentials);
+
+    expect(fresh.accessToken).toBe("at-2");
+    expect(refreshAccessTokenMock).toHaveBeenCalled();
+  });
+
+  it("throws instead of refreshing when there's no expiry recorded and no refresh token", async () => {
     const credentials = { accessToken: "at-1" };
-    expect(await ensureFreshCredentials(credentials)).toBe(credentials);
+    await expect(ensureFreshCredentials(credentials)).rejects.toThrow(/reconnect Gmail/);
     expect(refreshAccessTokenMock).not.toHaveBeenCalled();
   });
 
@@ -105,7 +118,7 @@ describe("testGmailConnection", () => {
       ok: true,
       json: async () => ({ emailAddress: "user@gmail.com" }),
     });
-    const result = await testGmailConnection({ accessToken: "at-1" });
+    const result = await testGmailConnection({ accessToken: "at-1", expiresAt: Date.now() + 3600_000 });
     expect(result).toEqual({ label: "user@gmail.com" });
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/profile"),
@@ -119,7 +132,9 @@ describe("testGmailConnection", () => {
       status: 401,
       text: async () => "Unauthorized",
     });
-    await expect(testGmailConnection({ accessToken: "at-bad" })).rejects.toThrow(/401/);
+    await expect(testGmailConnection({ accessToken: "at-bad", expiresAt: Date.now() + 3600_000 })).rejects.toThrow(
+      /401/
+    );
   });
 
   it("uses a refreshed token when the stored credentials are expired", async () => {
