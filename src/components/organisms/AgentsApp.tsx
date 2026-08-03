@@ -819,6 +819,7 @@ export default function AgentsApp() {
         entering={entering}
         locationEnabled={settings.locationEnabled}
         cognitiveState={cognitiveState}
+        version={__APP_RELEASE_VERSION__}
         sessionStats={sessionStats}
       >
         <ErrorBoundary fallbackTitle="The chat failed to load">
