@@ -65,23 +65,46 @@ export function runOAuthFlow(config: OAuthConfig): Promise<OAuthTokenResponse> {
       const code = url.searchParams.get("code");
       const errorParam = url.searchParams.get("error");
 
-      res.writeHead(200, { "Content-Type": "text/html" });
-      res.end("<html><body>You can close this window and return to the app.</body></html>");
+      // The response headers/body used to be written before any of the validation below —
+      // the browser told the user "success" regardless of what the app was about to decide.
+      // A failed state check rejected the flow while the browser kept showing the success
+      // page, so the two surfaces disagreed. Validating first and varying the body lets the
+      // browser say what actually happened. The URL here carries the authorization code, so
+      // no-referrer/no-store keep it out of a Referer header on any onward navigation and
+      // out of any cache along the way.
+      const respond = (ok: boolean) => {
+        res.writeHead(200, {
+          "Content-Type": "text/html",
+          "Referrer-Policy": "no-referrer",
+          "Cache-Control": "no-store",
+        });
+        res.end(
+          ok
+            ? "<html><body>You can close this window and return to the app.</body></html>"
+            : "<html><body>Something went wrong — you can close this window and return to the app to see the error.</body></html>"
+        );
+      };
 
-      if (settled) return;
+      if (settled) {
+        respond(false);
+        return;
+      }
       settled = true;
       clearTimeout(timeout);
       server.close();
 
       if (errorParam) {
+        respond(false);
         reject(new Error(`OAuth authorization was denied or failed: ${errorParam}`));
         return;
       }
       if (returnedState !== state || !code) {
+        respond(false);
         reject(new Error("OAuth callback failed a security check (state mismatch or missing code)."));
         return;
       }
 
+      respond(true);
       exchangeCodeForTokens(config, code, verifier, redirectUri)
         .then(resolve)
         .catch(reject);
@@ -135,7 +158,13 @@ async function exchangeCodeForTokens(
     body,
   });
   if (!response.ok) {
-    throw new Error(`Token exchange failed (${response.status}): ${await response.text()}`);
+    // The full body is logged, not thrown: `connect_connector` (ai/agents.ts) is
+    // agent-callable, so a thrown message reaches the model's context. A provider's raw
+    // error body can echo request parameters, and an auth-endpoint failure body isn't
+    // something that needs to reach an LLM regardless — only the status is.
+    const text = await response.text();
+    devLog(`[oauthFlow] token exchange failed (${response.status}): ${text}`);
+    throw new Error(`Token exchange failed (${response.status}).`);
   }
   const data = (await response.json()) as {
     access_token: string;
@@ -168,7 +197,11 @@ export async function refreshAccessToken(config: OAuthConfig, refreshToken: stri
     body,
   });
   if (!response.ok) {
-    throw new Error(`Token refresh failed (${response.status}): ${await response.text()}`);
+    // Same reasoning as exchangeCodeForTokens above — this runs from ensureFreshCredentials,
+    // reachable from an agent-callable connector tool call, so only the status is thrown.
+    const text = await response.text();
+    devLog(`[oauthFlow] token refresh failed (${response.status}): ${text}`);
+    throw new Error(`Token refresh failed (${response.status}).`);
   }
   const data = (await response.json()) as { access_token: string; expires_in?: number; scope?: string };
   return {
