@@ -135,6 +135,9 @@ async function processDueTask(task: TaskRow): Promise<void> {
 }
 
 let pollInFlight = false;
+// Tracked separately from the boolean above so app quit can await the actual in-flight
+// run rather than just checking whether one exists — see waitForInFlightPoll below.
+let inFlightPoll: Promise<void> | null = null;
 
 async function pollOnce(): Promise<void> {
   // A prompt task can take longer than POLL_INTERVAL_MS to run (an LLM call, especially
@@ -160,7 +163,9 @@ async function pollOnce(): Promise<void> {
 export function startTaskScheduler(): void {
   if (timer) return;
   timer = setInterval(() => {
-    void pollOnce();
+    inFlightPoll = pollOnce().finally(() => {
+      inFlightPoll = null;
+    });
   }, POLL_INTERVAL_MS);
 }
 
@@ -169,4 +174,14 @@ export function stopTaskScheduler(): void {
   if (!timer) return;
   clearInterval(timer);
   timer = null;
+}
+
+/** Resolves once any poll in flight at the moment of the call finishes, or immediately if
+ * none is running. stopTaskScheduler only clears the interval — a task already mid-run
+ * (an LLM call, possibly using MCP tools) was previously abandoned when the process exited,
+ * so runPromptTask's `finally { await closeMcpServers(mcpServers) }` might never complete
+ * and MCP subprocesses were orphaned rather than closed. Exported so main/index.ts's
+ * before-quit handler can await it (with its own timeout) before actually quitting. */
+export function waitForInFlightPoll(): Promise<void> {
+  return inFlightPoll ?? Promise.resolve();
 }
