@@ -1,0 +1,435 @@
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { EventEmitter } from "node:events";
+
+type SpawnOptions = { env: Record<string, string>; stdio: unknown };
+type MockChild = EventEmitter & {
+  kill: (signal?: string) => void;
+  killed: boolean;
+  exitCode: number | null;
+  signalCode: string | null;
+  stderr: EventEmitter;
+};
+
+// Typed on the mock rather than its implementation so `.mock.calls[0][2].env` is typed
+// without declaring parameters the fake child never reads.
+const spawnMock = vi.fn<(command: string, args: string[], options: SpawnOptions) => MockChild>(() => {
+  const child = new EventEmitter() as MockChild;
+  child.kill = vi.fn();
+  child.killed = false;
+  // Node's real ChildProcess sets these to non-null only once the process has actually
+  // exited — killed is a red herring, set true as soon as a signal is *sent*, not received.
+  child.exitCode = null;
+  child.signalCode = null;
+  // The daemon's stderr is piped and forwarded to devLog, so the fake child needs one.
+  child.stderr = new EventEmitter();
+  return child;
+});
+vi.mock("node:child_process", () => ({
+  default: { spawn: spawnMock },
+  spawn: spawnMock,
+}));
+
+const createServerMock = vi.fn(() => {
+  const server = new EventEmitter() as EventEmitter & {
+    listen: (port: number, host: string, cb: () => void) => void;
+    close: (cb?: () => void) => void;
+    address: () => { port: number };
+    unref: () => void;
+  };
+  server.unref = vi.fn();
+  server.address = () => ({ port: 12345 });
+  server.listen = (_port: number, _host: string, cb: () => void) => cb();
+  server.close = (cb?: () => void) => cb?.();
+  return server;
+});
+vi.mock("node:net", () => ({
+  default: { createServer: createServerMock },
+  createServer: createServerMock,
+}));
+
+// Specifier-aware so a test can make playwright-core resolution fail on its own while
+// open-websearch still resolves — that asymmetry is the whole point of the graceful
+// degradation path in resolvePlaywrightModulePath.
+const resolveMock = vi.hoisted(() =>
+  vi.fn((specifier: string) =>
+    specifier.startsWith("playwright-core")
+      ? "/fake/playwright-core/package.json"
+      : "/fake/open-websearch/package.json"
+  )
+);
+vi.mock("node:module", () => ({
+  default: { createRequire: () => ({ resolve: resolveMock }) },
+  createRequire: () => ({ resolve: resolveMock }),
+}));
+
+// Keeps this suite hermetic: devLog reaches for electron's `app` for the userData path,
+// which this test has no need to stand up.
+const devLogMock = vi.hoisted(() => vi.fn());
+vi.mock("../devLog", () => ({ devLog: devLogMock }));
+
+// Browser discovery is a filesystem probe, so the suite decides which browsers "exist".
+const existsSyncMock = vi.hoisted(() => vi.fn<(path: string) => boolean>(() => false));
+vi.mock("node:fs", () => ({
+  default: { existsSync: existsSyncMock },
+  existsSync: existsSyncMock,
+}));
+
+const fetchMock = vi.fn();
+
+describe("callDaemon", () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("rejects with a timeout error when the daemon request hangs", async () => {
+    // Health check succeeds immediately; the /fetch-web-style call itself hangs.
+    fetchMock.mockImplementation((url: string, opts?: { signal?: AbortSignal }) => {
+      if (url.endsWith("/health")) return Promise.resolve({ ok: true });
+      return new Promise((_resolve, reject) => {
+        opts?.signal?.addEventListener("abort", () => {
+          const err = new Error("aborted");
+          err.name = "AbortError";
+          reject(err);
+        });
+      });
+    });
+
+    const { startExplorerDaemon, callDaemon } = await import("./webSearchDaemon");
+    await startExplorerDaemon();
+
+    await expect(callDaemon("/fetch-web", { url: "https://example.com" }, 20)).rejects.toThrow(/timed out/);
+  });
+
+  it("resolves normally when the daemon responds before the timeout", async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith("/health")) return Promise.resolve({ ok: true });
+      return Promise.resolve({ ok: true, json: async () => ({ status: "ok", data: { hello: "world" } }) });
+    });
+
+    const { startExplorerDaemon, callDaemon } = await import("./webSearchDaemon");
+    await startExplorerDaemon();
+
+    await expect(callDaemon("/fetch-web", { url: "https://example.com" }, 5000)).resolves.toEqual({
+      hello: "world",
+    });
+  });
+
+  // KI-14: res.ok was never checked and res.json() ran unconditionally — a 5xx that returns
+  // HTML or an empty body threw a raw "Unexpected token < in JSON" SyntaxError instead of
+  // reporting the actual failed request.
+  it("reports the status and body on a non-ok response instead of throwing a raw JSON parse error", async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith("/health")) return Promise.resolve({ ok: true });
+      return Promise.resolve({ ok: false, status: 502, text: async () => "<html>Bad Gateway</html>" });
+    });
+
+    const { startExplorerDaemon, callDaemon } = await import("./webSearchDaemon");
+    await startExplorerDaemon();
+
+    await expect(callDaemon("/fetch-web", { url: "https://example.com" }, 5000)).rejects.toThrow(
+      /status 502.*Bad Gateway/s
+    );
+  });
+
+  it("reports a clear error when an ok response isn't valid JSON", async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith("/health")) return Promise.resolve({ ok: true });
+      return Promise.resolve({
+        ok: true,
+        json: async () => {
+          throw new SyntaxError("Unexpected token < in JSON at position 0");
+        },
+      });
+    });
+
+    const { startExplorerDaemon, callDaemon } = await import("./webSearchDaemon");
+    await startExplorerDaemon();
+
+    await expect(callDaemon("/fetch-web", { url: "https://example.com" }, 5000)).rejects.toThrow(/non-JSON response/);
+  });
+});
+
+describe("startExplorerDaemon browser fallback config", () => {
+  const DEFAULT_RESOLVE = (specifier: string) =>
+    specifier.startsWith("playwright-core")
+      ? "/fake/playwright-core/package.json"
+      : "/fake/open-websearch/package.json";
+
+  beforeEach(() => {
+    vi.resetModules();
+    spawnMock.mockClear();
+    devLogMock.mockClear();
+    resolveMock.mockReset().mockImplementation(DEFAULT_RESOLVE);
+    existsSyncMock.mockReset().mockReturnValue(false);
+    fetchMock.mockReset().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function spawnedEnv(): Record<string, string> {
+    return spawnMock.mock.calls[0][2].env;
+  }
+
+  it("hands open-websearch the browser-fallback config, pointing at our playwright-core", async () => {
+    const { startExplorerDaemon } = await import("./webSearchDaemon");
+    await startExplorerDaemon();
+
+    const env = spawnedEnv();
+    expect(env.SEARCH_MODE).toBe("auto");
+    expect(env.PLAYWRIGHT_PACKAGE).toBe("playwright-core");
+    // Unattended daemon — a visible browser window would be an unexplained popup.
+    expect(env.PLAYWRIGHT_HEADLESS).toBe("true");
+    expect(env.PLAYWRIGHT_MODULE_PATH).toBe("/fake/playwright-core");
+  });
+
+  it("omits PLAYWRIGHT_MODULE_PATH when playwright-core cannot be resolved, leaving the rest intact", async () => {
+    // The package is optional in practice: without it open-websearch logs that the client is
+    // unavailable and stays request-only, which is the pre-existing behaviour. Passing an
+    // empty path instead would look configured and fail later, deeper, and less clearly.
+    resolveMock.mockImplementation((specifier: string) => {
+      if (specifier.startsWith("playwright-core")) throw new Error("Cannot find module");
+      return "/fake/open-websearch/package.json";
+    });
+
+    const { startExplorerDaemon } = await import("./webSearchDaemon");
+    await startExplorerDaemon();
+
+    const env = spawnedEnv();
+    expect(env).not.toHaveProperty("PLAYWRIGHT_MODULE_PATH");
+    expect(env.SEARCH_MODE).toBe("auto");
+    expect(env.MODE).toBe("http");
+    expect(env.DEFAULT_SEARCH_ENGINE).toBe("duckduckgo");
+  });
+
+  it("forwards the daemon's stderr to devLog so a silent Playwright failure is visible", async () => {
+    const { startExplorerDaemon } = await import("./webSearchDaemon");
+    await startExplorerDaemon();
+
+    const child = spawnMock.mock.results[0].value as MockChild;
+    child.stderr.emit("data", Buffer.from("Playwright client is unavailable\n"));
+
+    expect(devLogMock).toHaveBeenCalledWith("[open-websearch] Playwright client is unavailable");
+  });
+
+  // Regression guard for the bug this was written against: without an explicit executable path,
+  // open-websearch's chromium.launch() falls through to Playwright's own bundled browser, which
+  // this app never downloads — so every browser retry died with "Executable doesn't exist at
+  // ~/Library/Caches/ms-playwright/…" while the client itself resolved fine and looked healthy.
+  const CHROME_MAC = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+  const EDGE_MAC = "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge";
+
+  async function envWithPlatform(platform: string): Promise<Record<string, string>> {
+    const original = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { value: platform, configurable: true });
+    try {
+      const { startExplorerDaemon } = await import("./webSearchDaemon");
+      await startExplorerDaemon();
+      return spawnedEnv();
+    } finally {
+      Object.defineProperty(process, "platform", original);
+    }
+  }
+
+  it("points the daemon at an installed Chrome rather than a browser we never downloaded", async () => {
+    existsSyncMock.mockImplementation((p: string) => p === CHROME_MAC);
+
+    expect((await envWithPlatform("darwin")).PLAYWRIGHT_EXECUTABLE_PATH).toBe(CHROME_MAC);
+  });
+
+  it("falls through to Edge when Chrome is not installed", async () => {
+    existsSyncMock.mockImplementation((p: string) => p === EDGE_MAC);
+
+    expect((await envWithPlatform("darwin")).PLAYWRIGHT_EXECUTABLE_PATH).toBe(EDGE_MAC);
+  });
+
+  it("resolves a Windows install too, so the fallback is not macOS-only", async () => {
+    const winChrome = `${process.env.PROGRAMFILES ?? "C:\\Program Files"}\\Google\\Chrome\\Application\\chrome.exe`;
+    existsSyncMock.mockImplementation((p: string) => p === winChrome);
+
+    expect((await envWithPlatform("win32")).PLAYWRIGHT_EXECUTABLE_PATH).toBe(winChrome);
+  });
+
+  it("omits the executable path entirely when no browser is installed", async () => {
+    existsSyncMock.mockReturnValue(false);
+
+    const env = await envWithPlatform("darwin");
+    expect(env).not.toHaveProperty("PLAYWRIGHT_EXECUTABLE_PATH");
+    // Everything else still configured — the daemon just stays on its request-only path.
+    expect(env.SEARCH_MODE).toBe("auto");
+  });
+
+  it("tags every line of a multi-line stderr chunk, not just the first", async () => {
+    // The daemon prints its whole config block in one chunk. Logging the chunk as a single
+    // devLog call left lines 2..n in debug.log without the timestamp/[main] prefix that every
+    // other line carries — observed in a real run before this was split.
+    const { startExplorerDaemon } = await import("./webSearchDaemon");
+    await startExplorerDaemon();
+
+    const child = spawnMock.mock.results[0].value as MockChild;
+    child.stderr.emit("data", Buffer.from("🔍 Default engine: duckduckgo\n🧭 Playwright headless: true\n"));
+
+    expect(devLogMock).toHaveBeenCalledTimes(2);
+    expect(devLogMock).toHaveBeenNthCalledWith(1, "[open-websearch] 🔍 Default engine: duckduckgo");
+    expect(devLogMock).toHaveBeenNthCalledWith(2, "[open-websearch] 🧭 Playwright headless: true");
+  });
+
+  it("keeps the error headline but drops the object dump that follows it", async () => {
+    // devLog is a synchronous appendFileSync per call. One failed Bing request emits ~180 lines
+    // of inspected AxiosError; measured over ten searches, 1830 of 1864 stderr lines were that
+    // noise. Continuation lines are always indented, so the headline survives and the dump does not.
+    const { startExplorerDaemon } = await import("./webSearchDaemon");
+    await startExplorerDaemon();
+
+    const child = spawnMock.mock.results[0].value as MockChild;
+    child.stderr.emit(
+      "data",
+      Buffer.from(
+        [
+          "Request-based Bing search failed, falling back to Playwright mode: AxiosError: 301",
+          "    at settle (/x/node_modules/axios/lib/core/settle.js:19:12)",
+          "  headers: Object [AxiosHeaders] {",
+          "    protocol: 'https:',",
+          "  },",
+          "}",
+          "🧭 Playwright client resolved from PLAYWRIGHT_MODULE_PATH (/x)",
+        ].join("\n")
+      )
+    );
+
+    expect(devLogMock.mock.calls.map((c) => c[0])).toEqual([
+      "[open-websearch] Request-based Bing search failed, falling back to Playwright mode: AxiosError: 301",
+      "[open-websearch] 🧭 Playwright client resolved from PLAYWRIGHT_MODULE_PATH (/x)",
+    ]);
+  });
+
+  it("does not log an empty line for a bare newline flush", async () => {
+    const { startExplorerDaemon } = await import("./webSearchDaemon");
+    await startExplorerDaemon();
+
+    const child = spawnMock.mock.results[0].value as MockChild;
+    child.stderr.emit("data", Buffer.from("\n"));
+
+    expect(devLogMock).not.toHaveBeenCalled();
+  });
+
+  // KI-7: an EventEmitter throws an uncaught exception when an 'error' event fires with no
+  // listener. A ChildProcess that fails to spawn (ENOENT, EACCES, EAGAIN) emits exactly that,
+  // so an unspawnable daemon crashed the main process instead of degrading gracefully.
+  it("does not throw when the spawned process emits an error", async () => {
+    const { startExplorerDaemon } = await import("./webSearchDaemon");
+    // startExplorerDaemon's own promise is unaffected by this — it awaits waitForHealthy,
+    // which the fetch mock in this suite already resolves as healthy regardless.
+    await startExplorerDaemon();
+
+    const child = spawnMock.mock.results[0].value as MockChild;
+    expect(() => child.emit("error", new Error("spawn ENOENT"))).not.toThrow();
+    expect(devLogMock).toHaveBeenCalledWith(expect.stringContaining("spawn ENOENT"));
+  });
+});
+
+describe("startExplorerDaemon health-check failure recovery", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.useFakeTimers();
+    spawnMock.mockClear();
+    resolveMock.mockReset().mockImplementation((specifier: string) =>
+      specifier.startsWith("playwright-core") ? "/fake/playwright-core/package.json" : "/fake/open-websearch/package.json"
+    );
+    existsSyncMock.mockReset().mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  // KI-8: daemonProcess/daemonPort/daemonReady were all assigned before waitForHealthy, so a
+  // health-check timeout left every one of them set — `if (daemonReady) return daemonReady`
+  // then handed every future call the same rejection forever, with the orphaned child still
+  // running. This asserts both halves: the failed child is killed, and a fresh call retries
+  // (spawns again) instead of reusing the dead promise.
+  it("kills the orphaned child and lets the next call retry after a health-check timeout", async () => {
+    fetchMock.mockReset().mockResolvedValue({ ok: false });
+    vi.stubGlobal("fetch", fetchMock);
+    const { startExplorerDaemon } = await import("./webSearchDaemon");
+
+    const firstAttempt = startExplorerDaemon();
+    // Swallow the rejection here so it doesn't count as an unhandled promise rejection while
+    // the timers below advance — the assertion on it happens after.
+    firstAttempt.catch(() => {});
+    await vi.advanceTimersByTimeAsync(15_000);
+    await expect(firstAttempt).rejects.toThrow(/did not become healthy/);
+
+    const firstChild = spawnMock.mock.results[0].value as MockChild;
+    expect(firstChild.kill).toHaveBeenCalledWith("SIGKILL");
+
+    // Second call must spawn a new child rather than returning the same dead promise.
+    fetchMock.mockReset().mockResolvedValue({ ok: true });
+    const secondAttempt = startExplorerDaemon();
+    await vi.advanceTimersByTimeAsync(300);
+    await expect(secondAttempt).resolves.toBeUndefined();
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("stopExplorerDaemon", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.useFakeTimers();
+    spawnMock.mockClear();
+    resolveMock.mockReset().mockImplementation((specifier: string) =>
+      specifier.startsWith("playwright-core") ? "/fake/playwright-core/package.json" : "/fake/open-websearch/package.json"
+    );
+    existsSyncMock.mockReset().mockReturnValue(false);
+    fetchMock.mockReset().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  // KI-6: child.killed is set to true as soon as SIGTERM is *sent*, not once the process has
+  // actually exited — so `if (!child.killed)` was always false and SIGKILL could never fire.
+  it("escalates to SIGKILL after the grace period when the process ignored SIGTERM", async () => {
+    const { startExplorerDaemon, stopExplorerDaemon } = await import("./webSearchDaemon");
+    await startExplorerDaemon();
+    const child = spawnMock.mock.results[0].value as MockChild;
+
+    stopExplorerDaemon();
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+    // Still alive — SIGTERM was sent but the process hasn't exited (unlike child.killed,
+    // which the old, buggy check relied on and which is already true at this point).
+    child.exitCode = null;
+    child.signalCode = null;
+
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+  });
+
+  it("does not escalate when the process already exited from SIGTERM", async () => {
+    const { startExplorerDaemon, stopExplorerDaemon } = await import("./webSearchDaemon");
+    await startExplorerDaemon();
+    const child = spawnMock.mock.results[0].value as MockChild;
+
+    stopExplorerDaemon();
+    // The process exited in response to SIGTERM before the grace period elapsed.
+    child.exitCode = null;
+    child.signalCode = "SIGTERM";
+
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    expect(child.kill).not.toHaveBeenCalledWith("SIGKILL");
+  });
+});

@@ -1,0 +1,61 @@
+# Runs the same four gates the project requires locally (CLAUDE.md -> Verify Gate):
+# eslint, tsc -b, tests, build — in that order, so a type error fails in seconds
+# rather than after a full test run.
+#
+# One job rather than four chained with `needs:`, because each job would re-run
+# `npm ci` from scratch — including the ~100 MB Electron binary download, which
+# setup-node's `cache: 'npm'` does not cover (that caches ~/.npm; Electron caches
+# to ~/.cache/electron). The stages are strictly sequential either way, so one job
+# gives identical fail-fast behaviour at roughly a third of the wall time.
+name: CI
+
+on:
+  push:
+    branches: [develop]
+  pull_request:
+    branches: [develop, main]
+  # Called by release.yml so a tag is gated by exactly this workflow rather than a
+  # copy of it that can drift.
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # Not covered by setup-node's npm cache, and `npm ci` downloads it every run.
+      # The test suite needs the binary present: electron/main/ai/agents.test.ts fails
+      # with "Electron failed to install correctly" without it, hiding ~48 tests.
+      - name: Cache Electron binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/electron
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npx tsc -b
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build

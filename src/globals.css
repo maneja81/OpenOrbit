@@ -1,0 +1,4960 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* Palette tokens from the chat redesign POC (0-cowork/redesign/variation-2-float.html).
+   Deliberately narrow: only the values the redesigned surfaces read. The rest of this file
+   keeps its literals — migrating ~200 hardcoded colors is a separate change, and a
+   half-migrated palette is worse than a consistent unmigrated one. */
+:root {
+  --blue: #3d8fff;
+  --green: #3ddc84;
+  --purple: #a78bfa;
+  --text-hi: rgba(218, 240, 255, 0.94);
+  --text-md: rgba(172, 210, 255, 0.7);
+  --text-lo: rgba(100, 158, 218, 0.38);
+}
+
+/* App-wide focus ring in brand blue, overriding the OS/browser default (which can render
+   yellow/orange depending on the user's system accent color) on any focusable element that
+   doesn't already set its own outline.
+
+   An outline follows the element's own border-radius, so a focusable element with no radius
+   gets a hard square ring — give every focusable element a radius rather than adding a
+   second ring mechanism here. Kept to `outline` alone on purpose: box-shadow isn't additive
+   across rules, so a glow declared here would silently erase the shadow of any focusable
+   element that already has one. */
+:focus-visible {
+  outline: 1.5px solid rgba(126, 200, 255, 0.55);
+  outline-offset: 2px;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  background: #00060f;
+}
+
+#u {
+  width: 100vw;
+  height: 100vh;
+  position: relative;
+  overflow: hidden;
+  font-family: system-ui, sans-serif;
+  background: #00060f;
+}
+
+#bgvid {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.2;
+  z-index: 0;
+}
+
+canvas#bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+svg#oc {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.oc-ring {
+  fill: none;
+  stroke: rgba(60, 140, 255, 0.1);
+  stroke-width: 0.8;
+  stroke-dasharray: 3 7;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: oc-ring-spin 90s linear infinite;
+}
+
+@keyframes oc-ring-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.oc-line {
+  fill: none;
+  stroke: rgba(90, 170, 255, 0.32);
+  stroke-width: 1.2;
+  stroke-dasharray: 6 10;
+  animation: oc-line-flow 3.2s linear infinite;
+}
+
+.oc-line.active {
+  stroke: rgba(120, 195, 255, 0.65);
+  stroke-width: 1.8;
+  stroke-dasharray: 8 8;
+  filter: drop-shadow(0 0 6px rgba(90, 170, 255, 0.55));
+  animation: oc-line-flow 1.1s linear infinite;
+}
+
+@keyframes oc-line-flow {
+  to {
+    stroke-dashoffset: -32;
+  }
+}
+
+.oc-pulse-dot {
+  fill: rgba(180, 230, 255, 0.95);
+  filter: drop-shadow(0 0 6px rgba(160, 220, 255, 0.9));
+  offset-rotate: 0deg;
+  animation: oc-pulse-move 1.1s linear infinite;
+}
+
+@keyframes oc-pulse-move {
+  from {
+    offset-distance: 0%;
+  }
+  to {
+    offset-distance: 100%;
+  }
+}
+
+.agent-node {
+  position: absolute;
+  width: 150px;
+  height: 44px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  z-index: 10;
+}
+
+.agent-node.side-left {
+  flex-direction: row-reverse;
+}
+
+.agent-node:hover .agent-node-circle {
+  filter: brightness(1.25);
+}
+
+.agent-node-circle {
+  position: relative;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle, #002a52 0%, #00060f 100%);
+  border: 1.5px solid rgba(167, 139, 250, 0.5);
+  transition: border-color 0.3s, box-shadow 0.3s, transform 0.3s;
+}
+
+.agent-node-snap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  /* A square box filling a round orb — a radius keeps the focus outline on the orb's
+     own shape instead of drawing a box around it. */
+  border-radius: 50%;
+}
+
+/* Both orbs sit on a dark nebula inside a transformed scene, where the app-wide ring
+   (1.5px at 0.55 alpha) is not readable. Brighter and further out, still outline-only so
+   the orb's own box-shadow — the status glow and the delegation ripple — survives. */
+.agent-node-snap:focus-visible,
+.orchestrator-snap:focus-visible {
+  outline: 2.5px solid rgba(150, 215, 255, 0.95);
+  outline-offset: 5px;
+}
+
+.agent-node-circle.active {
+  border-color: #3ddc84;
+  /* A literal 10% on a 44px orb (~4px) reads as noise next to the glow/ripple/drift
+     already happening — sized up further so the growth is actually perceptible. */
+  transform: scale(1.2);
+  animation: agent-node-heartbeat 1.8s ease-in-out infinite;
+}
+
+/* Two-beat "lub-dub" pulse: an expanding outer ripple (the existing delegation
+   ring effect) combined with an inset glow that brightens on each beat, so the
+   orb reads as alive rather than just lit up. */
+@keyframes agent-node-heartbeat {
+  0% {
+    box-shadow: 0 0 0 0 rgba(61, 220, 132, 0.45), inset 0 0 8px rgba(61, 220, 132, 0.25);
+  }
+  14% {
+    box-shadow: 0 0 0 8px rgba(61, 220, 132, 0.22), inset 0 0 20px rgba(61, 220, 132, 0.6);
+  }
+  28% {
+    box-shadow: 0 0 0 0 rgba(61, 220, 132, 0.35), inset 0 0 8px rgba(61, 220, 132, 0.25);
+  }
+  42% {
+    box-shadow: 0 0 0 12px rgba(61, 220, 132, 0), inset 0 0 24px rgba(61, 220, 132, 0.65);
+  }
+  60%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(61, 220, 132, 0), inset 0 0 8px rgba(61, 220, 132, 0.25);
+  }
+}
+
+.agent-node-icon {
+  font-size: 15px;
+  color: #7ec8ff;
+}
+
+.agent-node-label-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agent-node-label {
+  font-size: 12px;
+  color: #c8e6ff;
+  letter-spacing: 0.3px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.agent-node-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.agent-node-tagline {
+  font-size: 10px;
+  color: #7ec8ff;
+  opacity: 0.75;
+  white-space: nowrap;
+  letter-spacing: 0.2px;
+}
+
+.agent-node-model {
+  font-size: 9px;
+  color: #7ec8ff;
+  opacity: 0.5;
+  white-space: nowrap;
+  letter-spacing: 0.1px;
+  font-family: monospace;
+}
+
+/* ── StepFeed ───────────────────────────────────────────────── */
+
+.step-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 2px 4px;
+  font-family: monospace;
+}
+
+.step-feed-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: rgba(126, 200, 255, 0.35);
+  animation: step-fade-in 0.2s ease;
+}
+
+.step-feed-item:last-child {
+  color: #7ec8ff;
+  text-shadow: 0 0 6px rgba(126, 200, 255, 0.5);
+}
+
+.step-feed-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(126, 200, 255, 0.4);
+  flex-shrink: 0;
+}
+
+.step-feed-item:last-child .step-feed-dot {
+  background: #7ec8ff;
+  box-shadow: 0 0 6px #7ec8ff;
+  animation: step-dot-blink 1.1s ease-in-out infinite;
+}
+
+.step-feed-item--handoff_occurred .step-feed-dot,
+.step-feed-item--handoff_requested .step-feed-dot {
+  background: #a78bfa;
+}
+
+.step-feed-item--handoff_occurred:last-child .step-feed-dot,
+.step-feed-item--handoff_requested:last-child .step-feed-dot {
+  box-shadow: 0 0 6px #a78bfa;
+}
+
+.step-feed-item--tool_called .step-feed-dot,
+.step-feed-item--tool_output .step-feed-dot {
+  background: #22d3ee;
+}
+
+.step-feed-item--tool_called:last-child .step-feed-dot,
+.step-feed-item--tool_output:last-child .step-feed-dot {
+  box-shadow: 0 0 6px #22d3ee;
+}
+
+.step-feed-label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Which agent made the call, and how long it took. Both stay dimmer than the label so the
+   action itself still reads first; the label keeps flex:1 so it loses characters to
+   ellipsis before either of these gets clipped. */
+.step-feed-agent {
+  max-width: 40%;
+  color: rgba(126, 200, 255, 0.5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.step-feed-agent::after {
+  content: "·";
+  margin-left: 6px;
+  opacity: 0.6;
+}
+
+.step-feed-duration {
+  flex-shrink: 0;
+  color: rgba(126, 200, 255, 0.4);
+  font-variant-numeric: tabular-nums;
+}
+
+.step-feed-item:last-child .step-feed-agent {
+  color: rgba(126, 200, 255, 0.75);
+}
+
+.step-feed-item:last-child .step-feed-duration {
+  color: rgba(126, 200, 255, 0.6);
+}
+
+@keyframes step-fade-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes step-dot-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
+/* ─────────────────────────────────────────────────────────── */
+
+.status-dot {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 2px solid #00060f;
+  flex-shrink: 0;
+}
+
+.status-dot.active {
+  background: #3ddc84;
+  box-shadow: 0 0 8px rgba(61, 220, 132, 0.7);
+}
+
+.status-dot.standby {
+  background: #a78bfa;
+  box-shadow: 0 0 6px rgba(167, 139, 250, 0.5);
+}
+
+.status-dot.error {
+  background: #ff4d4d;
+  box-shadow: 0 0 8px rgba(255, 77, 77, 0.6);
+}
+
+.status-dot.sleeping {
+  background: rgba(150, 190, 230, 0.25);
+}
+
+.orchestrator-snap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  /* Square box filling the round orchestrator — see .agent-node-snap. */
+  border-radius: 50%;
+}
+
+#orchestrator {
+  position: absolute;
+  left: 50%;
+  top: 41%;
+  width: 20vmin;
+  height: 20vmin;
+  min-width: 140px;
+  min-height: 140px;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+  background: radial-gradient(circle, #003366 0%, #00060f 100%);
+  border: 2px solid #3d8fff;
+  box-shadow: inset 0 0 42px rgba(236, 130, 220, 0.3);
+  cursor: default;
+  transform: translate(-50%, -50%);
+  transition: border-color 0.3s, transform 0.3s;
+}
+
+#orchestrator.speaking {
+  border-color: #3ddc84;
+  transform: translate(-50%, -50%) scale(1.05);
+  animation: orchestrator-heartbeat 1.4s ease-in-out infinite;
+}
+
+/* Same two-beat pulse as .agent-node-heartbeat, but inset-only (the outer expanding
+   ring is already handled by the separate #ap.speaking/rp-speaking ring element). */
+@keyframes orchestrator-heartbeat {
+  0% {
+    box-shadow: inset 0 0 30px rgba(61, 220, 132, 0.35);
+  }
+  14% {
+    box-shadow: inset 0 0 55px rgba(61, 220, 132, 0.65);
+  }
+  28% {
+    box-shadow: inset 0 0 30px rgba(61, 220, 132, 0.35);
+  }
+  42% {
+    box-shadow: inset 0 0 60px rgba(61, 220, 132, 0.7);
+  }
+  60%,
+  100% {
+    box-shadow: inset 0 0 30px rgba(61, 220, 132, 0.35);
+  }
+}
+
+#orchestrator .nm {
+  font-size: 18px;
+  color: #c8e6ff;
+  font-weight: 600;
+  letter-spacing: 1.2px;
+}
+
+#orchestrator .sb {
+  font-size: 11px;
+  color: #5ba3e8;
+  margin-top: 3px;
+  letter-spacing: 0.5px;
+}
+
+/* Smaller and more muted than .sb so the three lines read as a hierarchy:
+   name → live state → session stats. */
+#orchestrator .ss {
+  font-size: 10px;
+  color: rgba(91, 163, 232, 0.55);
+  margin-top: 2px;
+  letter-spacing: 0.4px;
+}
+
+/* ── Tooltip ────────────────────────────────────────────────── */
+
+/* display: contents so wrapping an orb's existing children in a Tooltip trigger
+   doesn't disturb .agent-node's flex layout or #orchestrator's positioning context —
+   .tooltip-panel below anchors to whichever ancestor (.agent-node / #orchestrator)
+   is actually `position: absolute`. */
+.tooltip-trigger {
+  display: contents;
+}
+
+.tooltip-panel {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 160px;
+  max-width: 220px;
+  background: linear-gradient(160deg, rgba(10, 30, 60, 0.85) 0%, rgba(2, 10, 24, 0.9) 100%);
+  border: 1px solid rgba(100, 170, 255, 0.16);
+  border-radius: 10px;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.02) inset,
+    0 8px 32px rgba(0, 10, 30, 0.45);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  padding: 10px 12px;
+  z-index: 30;
+  pointer-events: none;
+  font-family: system-ui, sans-serif;
+}
+
+.tooltip-panel-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #d8ecff;
+  letter-spacing: 0.3px;
+  margin-bottom: 6px;
+}
+
+.tooltip-panel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.tooltip-panel-list li {
+  font-size: 10.5px;
+  color: #7ec8ff;
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
+#ap {
+  position: absolute;
+  width: 20vmin;
+  height: 20vmin;
+  min-width: 140px;
+  min-height: 140px;
+  border-radius: 50%;
+  border: 2px solid #3d8fff;
+  animation: rp 2.4s ease-out infinite;
+  z-index: 5;
+  pointer-events: none;
+}
+
+#ap.speaking {
+  border-color: #3ddc84;
+  animation: rp-speaking 1s ease-out infinite;
+}
+
+@keyframes rp {
+  0% {
+    transform: scale(1);
+    opacity: 0.4;
+  }
+  100% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+}
+
+@keyframes rp-speaking {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(1.7);
+    opacity: 0;
+  }
+}
+
+#chat {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  background: linear-gradient(to top, rgba(0, 6, 15, 0.92) 60%, transparent);
+}
+
+#chat-log {
+  min-height: 36px;
+  max-height: 40vh;
+  overflow-y: auto;
+  padding: 10px 20px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 640px;
+  margin: 0 auto;
+  width: 100%;
+  /* Scrollable (long replies still scroll on wheel/trackpad), but the scrollbar chrome
+     itself is hidden — a visible native scrollbar clashed with the glass/dark aesthetic. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  /* Dissolves the top of the backlog into the orbit scene instead of cutting it with a hard
+     edge. The history link sits outside this element for that reason — drawn inside, it
+     would render half-faded. */
+  mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.5) 8%, black 22%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.5) 8%, black 22%);
+}
+
+#chat-log::-webkit-scrollbar {
+  display: none;
+}
+
+/* Absorbs the free space in a short conversation so turns sit at the bottom of the log,
+   next to the input, rather than floating at the top of a mostly-empty panel. */
+.log-spacer {
+  flex: 1;
+  min-height: 0;
+}
+
+.history-link {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 auto 2px;
+  padding: 3px 10px;
+  border: 1px solid rgba(61, 143, 255, 0.12);
+  border-radius: 20px;
+  background: rgba(61, 143, 255, 0.06);
+  color: var(--text-lo);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.13s;
+}
+
+.history-link:hover {
+  background: rgba(61, 143, 255, 0.11);
+  border-color: rgba(61, 143, 255, 0.24);
+  color: var(--text-md);
+}
+
+/* Floats over the bottom-right of the log. It cannot sit in the gap between the log and the
+   input card — that gap is ~12px and this is 30px tall, which parked it on the card's top
+   corner. Tracks the right edge of the 640px chat column rather than the window edge (pinned
+   to the window it drifts far from the conversation on a wide screen), falling back to a
+   24px inset once the window is narrower than the column. Only ever visible while scrolled
+   up, so it overlays an older message rather than the newest one. */
+.jump-bottom {
+  position: absolute;
+  right: max(24px, calc(50% - 312px));
+  bottom: 152px;
+  z-index: 32;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid rgba(61, 143, 255, 0.22);
+  background: rgba(6, 18, 52, 0.9);
+  color: var(--text-md);
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+  animation: jump-in 0.16s ease-out;
+}
+
+.jump-bottom:hover {
+  border-color: rgba(61, 143, 255, 0.4);
+  color: var(--text-hi);
+}
+
+@keyframes jump-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* A turn: optional steps disclosure, the dot+bubble row, then the meta line. */
+.turn {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+
+.turn-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.turn.user .turn-row {
+  flex-direction: row-reverse;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-bottom: 5px;
+}
+
+.turn.assistant .dot {
+  background: var(--blue);
+  box-shadow: 0 0 6px rgba(61, 143, 255, 0.7);
+}
+
+.turn.user .dot {
+  background: var(--green);
+  box-shadow: 0 0 6px rgba(61, 220, 132, 0.6);
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 16px;
+  font-size: 10.5px;
+  color: var(--text-lo);
+}
+
+.turn.user .meta {
+  flex-direction: row-reverse;
+}
+
+.meta .agent-name {
+  color: var(--text-md);
+  font-weight: 500;
+}
+
+/* Credits the specialist a turn was delegated to. The full narration is in the Thinking
+   disclosure above the bubble; this is the one-glance version. */
+.meta .handoff {
+  font-size: 10px;
+  font-family: "SF Mono", monospace;
+  background: rgba(167, 139, 250, 0.08);
+  border: 1px solid rgba(167, 139, 250, 0.16);
+  color: var(--purple);
+  border-radius: 20px;
+  padding: 1px 7px;
+}
+
+.thinking-toggle {
+  align-self: flex-start;
+  max-width: 90%;
+}
+
+/* What the reply cost, under its bubble. Hugs the same edge as the message it belongs to:
+   a cost only ever appears on an assistant turn, and .m.a leaves those bubbles on the
+   left, so flex-end stranded the figure at the opposite edge of the panel from the reply
+   it described. Matches .thinking-toggle above it, keeping a turn's annotations on one
+   rail. Dimmer than both — it's a receipt you look for, not something to read past on the
+   way to the answer. */
+.message-cost {
+  align-self: flex-start;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 0 4px;
+  font-size: 11px;
+  color: rgba(126, 200, 255, 0.4);
+  font-variant-numeric: tabular-nums;
+}
+
+.message-cost-price {
+  color: rgba(126, 200, 255, 0.65);
+}
+
+.message-cost-calls::before {
+  content: "·";
+  margin-right: 6px;
+  opacity: 0.6;
+}
+
+.thinking-toggle-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  color: rgba(150, 190, 230, 0.55);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.thinking-toggle-btn:hover {
+  color: rgba(150, 190, 230, 0.85);
+}
+
+.thinking-toggle-btn i {
+  font-size: 12px;
+}
+
+.thinking-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 4px 2px 20px;
+  font-family: monospace;
+  font-size: 11px;
+  color: rgba(126, 200, 255, 0.6);
+}
+
+/* Rows here share StepFeed's agent/label/duration spans, so they need the same row layout
+   for the label to stretch and the duration to sit at the end. */
+.thinking-step {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.m {
+  display: flex;
+  align-items: flex-end;
+  /* Was 100%: inside .turn-row the bubble is now a flex sibling of the dot, so a full-width
+     wrapper would push the dot off and stop short replies hugging their own side. */
+  max-width: calc(100% - 14px);
+}
+
+.m.u {
+  flex-direction: row-reverse;
+}
+
+.mb {
+  max-width: 100%;
+  max-height: 33vh;
+  overflow-y: hidden;
+  font-size: 15px;
+  line-height: 1.55;
+  padding: 9px 13px;
+  color: var(--text-hi);
+  /* Ultra-transparent so the orbit's glow carries through a stack of messages; the blur is
+     what keeps the text readable over a moving background. */
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+}
+
+.mb.scrollable {
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  mask-image: linear-gradient(to bottom, transparent, black 28px, black 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, black 28px, black 100%);
+}
+
+.mb.scrollable::-webkit-scrollbar {
+  display: none;
+}
+
+/* iMessage tail convention: the corner nearest the sender dot is squared off. Radius order
+   is top-left, top-right, bottom-right, bottom-left — assistant squares bottom-left, user
+   squares bottom-right. No text-align here: the user's bubble is placed on the right by
+   .turn-row's row-reverse, so aligning its text right as well would ragged-edge every
+   wrapped line and misplace any block content. */
+/* Warmed off the POC value, which was picked against a brighter simulated nebula. Over the
+   real near-black backdrop (#00060f) rgba(4, 12, 38, 0.52) composited to about rgb(2, 9, 27)
+   — near-invisible, so a long reply read as a bordered column rather than a bubble. This
+   composites to about rgb(4, 15, 38): clearly a surface, and still well short of the user
+   bubble's rgb(7, 22, 55), which stays the brighter of the two. */
+.m.a .mb {
+  background: rgba(8, 22, 56, 0.55);
+  border: 1px solid rgba(61, 143, 255, 0.16);
+  border-radius: 16px 16px 16px 3px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.045),
+    0 2px 18px rgba(0, 0, 0, 0.3);
+}
+
+.m.u .mb {
+  background: rgba(18, 48, 120, 0.38);
+  border: 1px solid rgba(80, 150, 255, 0.16);
+  border-radius: 16px 16px 3px 16px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 2px 18px rgba(0, 0, 0, 0.24);
+}
+
+/* Markdown content inside assistant bubbles (see ChatBubble.tsx) */
+.mb p {
+  margin: 0 0 8px;
+}
+
+.mb p:last-child {
+  margin-bottom: 0;
+}
+
+.mb ul,
+.mb ol {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+
+.mb li {
+  margin-bottom: 2px;
+}
+
+.mb h1,
+.mb h2,
+.mb h3,
+.mb h4 {
+  margin: 12px 0 6px;
+  line-height: 1.3;
+  color: rgba(210, 235, 255, 0.85);
+}
+
+.mb h1:first-child,
+.mb h2:first-child,
+.mb h3:first-child,
+.mb h4:first-child {
+  margin-top: 0;
+}
+
+.mb strong {
+  color: rgba(215, 238, 255, 0.9);
+  font-weight: 600;
+}
+
+.mb code {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.9em;
+  font-family: ui-monospace, monospace;
+}
+
+/* Single newlines typed by a user survive markdown's paragraph folding. Assistant replies
+   deliberately don't get this — the model emits real markdown, where preserving source
+   newlines spaces every block out. */
+.mb--user p {
+  white-space: pre-wrap;
+}
+
+/* Plain typed prose is not parsed at all (see ChatBubble), so it is one bare text node with
+   no paragraph to hang the rule above on. This is the whole-bubble pre-wrap the history modal
+   used to apply, now scoped to exactly the case that still needs it. */
+.mb--plain {
+  white-space: pre-wrap;
+}
+
+/* Fenced code. Sits on the bubble's frosted glass rather than punching an opaque hole in it,
+   so a block reads as part of the message. */
+.code-block {
+  margin: 0 0 8px;
+  border: 1px solid rgba(61, 143, 255, 0.16);
+  border-radius: 10px;
+  background: rgba(0, 8, 24, 0.42);
+  overflow: hidden;
+}
+
+.code-block:last-child {
+  margin-bottom: 0;
+}
+
+.code-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 26px;
+  padding: 2px 4px 2px 10px;
+  border-bottom: 1px solid rgba(61, 143, 255, 0.1);
+}
+
+.code-block-lang {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-family: ui-monospace, monospace;
+  color: var(--text-lo);
+}
+
+/* Copy failures, shown next to the button that failed rather than as a toast — the message
+   is only meaningful beside the control it belongs to. `margin-left: auto` so it right-aligns
+   against the button whether or not the fence declared a language. #ff9090 matches
+   .settings-error, the app's existing error tone. */
+.code-block-error {
+  margin-left: auto;
+  font-size: 11px;
+  color: #ff9090;
+}
+
+.code-block-copy {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: auto;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-lo);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.13s;
+}
+
+.code-block-copy:hover {
+  background: rgba(61, 143, 255, 0.12);
+  color: var(--text-md);
+}
+
+/* Scoped through .mb, not written bare: `.mb pre` and `.mb pre code` are the generic markdown
+   rules further down this file, and at (0,1,1) and (0,1,2) they outrank a bare `.code-block-body`
+   (0,1,0). Unscoped, every declaration here loses and the block renders with the old opaque
+   panel, its own border, and a stray bottom margin nested inside the new container. */
+.mb pre.code-block-body {
+  margin: 0;
+  padding: 8px 10px;
+  background: none;
+  border: none;
+  border-radius: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.mb pre.code-block-body::-webkit-scrollbar {
+  display: none;
+}
+
+.mb pre.code-block-body code {
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(200, 230, 255, 0.82);
+}
+
+.chat-image {
+  display: block;
+  max-width: 100%;
+  /* Capped so one tall image can't fill the whole bubble before the text below it. */
+  max-height: 220px;
+  width: auto;
+  height: auto;
+  margin: 4px 0;
+  border-radius: 10px;
+  border: 1px solid rgba(61, 143, 255, 0.18);
+}
+
+/* Only a remote image opens externally, so only that one advertises a click. */
+.chat-image--openable {
+  cursor: pointer;
+}
+
+/* The button that wraps an openable image. Contributes no box of its own — the image keeps
+   its own margin, radius and border, and the focus ring is the only thing the button draws. */
+.chat-image-open {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: 10px;
+}
+
+/* Shown instead of an <img> for a scheme we won't render (file:, non-image data:) or after a
+   load failure — a blank gap would read as a rendering bug rather than a missing image. */
+.chat-image-fallback {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin: 4px 0;
+  padding: 5px 9px;
+  border: 1px dashed rgba(61, 143, 255, 0.2);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--text-lo);
+  overflow-wrap: anywhere;
+}
+
+/* A remote image that hasn't been loaded yet. Solid rather than dashed like the fallback
+   above: this is a working image awaiting a decision, not a broken one. The host is the line
+   that matters — it names who gets told the message was read — so it is the only part given
+   full-contrast text. */
+.chat-image-consent {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  max-width: 100%;
+  margin: 4px 0;
+  padding: 9px 11px;
+  border: 1px solid rgba(61, 143, 255, 0.18);
+  border-radius: 10px;
+  background: rgba(4, 12, 38, 0.5);
+  font-size: 12px;
+}
+
+.chat-image-consent-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-md);
+}
+
+.chat-image-consent-title {
+  font-weight: 500;
+}
+
+.chat-image-consent-host {
+  color: var(--text-hi);
+  font-family: "SF Mono", monospace;
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
+/* The query string is where exfiltrated data would sit, so it is shown rather than
+   truncated — dimmer than the host, but present and selectable. */
+.chat-image-consent-path {
+  color: var(--text-lo);
+  font-family: "SF Mono", monospace;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.chat-image-consent button {
+  margin-top: 3px;
+}
+
+/* A wide table scrolls inside its own box rather than stretching the bubble past the panel.
+   The wrapper owns the bottom margin; .mb table keeps its own, and both applying would stack
+   into a 16px gap under every table. */
+.mb-table-wrap {
+  overflow-x: auto;
+  margin: 0 0 8px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+/* `.mb .mb-table-wrap table` (0,2,1), not `.mb-table-wrap table` (0,1,1): the latter ties with
+   `.mb table` further down this file and loses on source order, leaving the doubled margin in
+   place. Specificity rather than position, so moving either rule can't quietly break it.
+   Written as the `margin` shorthand to match what it overrides — `.mb table` sets every side,
+   and jsdom (which the style guard test runs in) does not resolve a longhand against a
+   less-specific shorthand, so a `margin-bottom` here would be correct but untestable. */
+.mb .mb-table-wrap table {
+  margin: 0;
+}
+
+.mb-table-wrap::-webkit-scrollbar {
+  display: none;
+}
+
+/* GFM task lists already parse; without these the checkbox renders as OS chrome and the
+   marker sits beside it. */
+.mb input[type="checkbox"] {
+  margin-right: 6px;
+  accent-color: #3d8fff;
+  vertical-align: middle;
+}
+
+.mb li:has(> input[type="checkbox"]) {
+  list-style: none;
+  margin-left: -14px;
+}
+
+.mb hr {
+  height: 0;
+  margin: 10px 0;
+  border: 0;
+  border-top: 1px solid rgba(61, 143, 255, 0.16);
+}
+
+.mb pre {
+  background: rgba(0, 0, 0, 0.25);
+  border: 0.5px solid rgba(60, 140, 255, 0.18);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0 0 8px;
+  overflow-x: auto;
+}
+
+.mb pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.85em;
+}
+
+.mb a {
+  color: #7ec8ff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.mb blockquote {
+  margin: 0 0 8px;
+  padding-left: 10px;
+  border-left: 2px solid rgba(100, 170, 255, 0.3);
+  color: rgba(190, 225, 255, 0.5);
+}
+
+.mb table {
+  border-collapse: collapse;
+  margin: 0 0 8px;
+  font-size: 0.9em;
+}
+
+.mb th,
+.mb td {
+  border: 0.5px solid rgba(100, 170, 255, 0.2);
+  padding: 4px 8px;
+  text-align: left;
+}
+
+#bar {
+  display: flex;
+  align-items: flex-end;
+  padding: 12px 16px 22px;
+  max-width: 640px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+#inp-wrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Two-zone card (see ChatInputBar). overflow:hidden is what lets the toolbar's bottom
+   corners follow the card radius — it's also why the slash menu is rendered as a sibling
+   of this element rather than inside it. */
+.input-card {
+  background: rgba(4, 12, 40, 0.82);
+  border: 1px solid rgba(61, 143, 255, 0.26);
+  border-radius: 16px;
+  overflow: hidden;
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.045),
+    0 4px 24px rgba(0, 0, 0, 0.44);
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+
+.input-card:focus-within {
+  border-color: rgba(61, 143, 255, 0.46);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 0 0 3px rgba(61, 143, 255, 0.07),
+    0 4px 24px rgba(0, 0, 0, 0.44);
+}
+
+.input-top {
+  display: flex;
+  align-items: flex-end;
+  padding: 4px 8px 4px 4px;
+}
+
+/* The textarea no longer carries its own chrome — the card owns the border, background and
+   focus state, so this is a bare field. Height is still driven by resize() in JS
+   (MAX_INPUT_HEIGHT_PX); deliberately no CSS max-height, or the two would disagree. */
+#inp {
+  flex: 1;
+  resize: none;
+  background: none;
+  border: none;
+  padding: 10px 8px 10px 14px;
+  color: var(--text-hi);
+  font-size: 16px;
+  line-height: 22px;
+  font-family: inherit;
+  outline: none;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+#inp::-webkit-scrollbar {
+  display: none;
+}
+
+#inp::placeholder {
+  color: rgba(100, 170, 255, 0.3);
+}
+
+/* In-flow inside .input-top now — the card provides the layout the absolute positioning
+   used to fake, so #inp no longer needs padding reserved on its right edge. */
+#inp-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 0;
+  flex-shrink: 0;
+}
+
+/* Toolbar zone — second row of the card. */
+.input-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 12px 10px;
+  border-top: 1px solid rgba(61, 143, 255, 0.07);
+}
+
+.tb-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-family: inherit;
+  color: var(--text-lo);
+  background: rgba(61, 143, 255, 0.05);
+  border: 1px solid rgba(61, 143, 255, 0.1);
+  border-radius: 20px;
+  padding: 3px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.13s;
+}
+
+.tb-chip:hover:not(:disabled) {
+  background: rgba(61, 143, 255, 0.1);
+  border-color: rgba(61, 143, 255, 0.22);
+  color: var(--text-md);
+}
+
+/* Disabled while the field has text: the menu only opens on a leading "/", so there is
+   nothing this click could do without discarding what was typed (see ChatInputBar). */
+.tb-chip:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.hint {
+  text-align: center;
+  font-size: 10.5px;
+  color: var(--text-lo);
+  margin-top: 7px;
+  letter-spacing: 0.02em;
+}
+
+#sbtn {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: linear-gradient(145deg, #1858c2, #2068d6);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 16px;
+  box-shadow: 0 2px 12px rgba(28, 96, 200, 0.44);
+  transition: all 0.13s;
+  flex-shrink: 0;
+}
+
+#sbtn:hover {
+  background: linear-gradient(145deg, #1d64d4, #2676e8);
+  box-shadow: 0 4px 18px rgba(28, 96, 200, 0.62);
+}
+
+#sbtn:active {
+  transform: scale(0.96);
+}
+
+/* Darker navy than #sbtn so the two rounded squares stay distinguishable at a glance now
+   that they no longer differ in shape. */
+#vbtn {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: rgba(14, 36, 96, 0.72);
+  border: 1px solid rgba(61, 143, 255, 0.2);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #7ec8ff;
+  font-size: 17px;
+  transition: all 0.13s;
+  flex-shrink: 0;
+}
+
+#vbtn:hover {
+  background: rgba(20, 48, 120, 0.86);
+  border-color: rgba(61, 143, 255, 0.36);
+}
+
+#vbtn.listening {
+  background: rgba(255, 60, 60, 0.2);
+  border-color: rgba(255, 100, 100, 0.45);
+  color: #ff9090;
+  animation: vp 1s ease-in-out infinite;
+}
+
+#vbtn.transcribing {
+  cursor: wait;
+  color: #7ec8ff;
+}
+
+#vbtn.transcribing i {
+  animation: vspin 0.8s linear infinite;
+}
+
+@keyframes vspin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes vp {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+}
+
+#vwave {
+  display: none;
+  align-items: center;
+  gap: 3px;
+  padding: 0 4px;
+}
+
+#vwave.show {
+  display: flex;
+}
+
+.vb {
+  width: 3px;
+  border-radius: 2px;
+  background: #5ba8ff;
+  animation: vb 0.8s ease-in-out infinite;
+}
+
+.vb:nth-child(1) {
+  animation-delay: 0s;
+  height: 8px;
+}
+
+.vb:nth-child(2) {
+  animation-delay: 0.1s;
+  height: 14px;
+}
+
+.vb:nth-child(3) {
+  animation-delay: 0.2s;
+  height: 20px;
+}
+
+.vb:nth-child(4) {
+  animation-delay: 0.3s;
+  height: 14px;
+}
+
+.vb:nth-child(5) {
+  animation-delay: 0.4s;
+  height: 8px;
+}
+
+@keyframes vb {
+  0%,
+  100% {
+    transform: scaleY(0.4);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+#titlebar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  z-index: 30;
+  -webkit-app-region: drag;
+}
+
+#titlebar-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: 10px;
+  -webkit-app-region: no-drag;
+}
+
+.tbtn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  color: rgba(150, 190, 230, 0.55);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  transition: all 0.15s;
+}
+
+.tbtn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #c8e6ff;
+}
+
+.tbtn.active {
+  color: #7ec8ff;
+}
+
+#titlebar-title {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(200, 230, 255, 0.6);
+  letter-spacing: 1.5px;
+  pointer-events: none;
+}
+
+/* Shrink-wrapped and centred on the window, the same way #titlebar-title is, rather than a
+   full-width bar. The widget columns now start at this element's own y, so a bar stretching
+   left-to-right would lie across the top of both columns at z-index 25 against their 15 and
+   eat the clicks on their collapse chevrons. pointer-events: none is the second half of that:
+   the greeting is inert text and must never be a hit target. */
+#stbar {
+  position: absolute;
+  top: 44px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  z-index: 25;
+  pointer-events: none;
+}
+
+#sttxt {
+  font-size: 11px;
+  color: #4a8acc;
+  letter-spacing: 0.3px;
+}
+
+/* Bottom-left dock. left: 20px lines up with #widgets-left; bottom: 22px matches the
+   .input-bar's own bottom padding. z-index must clear #chat (30) — it spans the full window
+   width with no pointer-events: none, so at 30 or below these buttons look right and are
+   completely dead. Same reason .jump-bottom sits at 32. */
+#ctrls {
+  position: absolute;
+  left: 20px;
+  bottom: 22px;
+  z-index: 32;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+#setbtn,
+#tourbtn,
+#aboutbtn {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(30, 90, 200, 0.06);
+  border: 0.5px solid rgba(60, 140, 255, 0.22);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  padding: 7px;
+}
+
+#setbtn:hover {
+  background: rgba(80, 160, 255, 0.12);
+  transform: rotate(45deg);
+}
+
+/* No rotate here — that gesture reads as a turning gear on #setbtn, but as a tilted
+   question mark on this one, and as a tipped-over "i" on #aboutbtn. */
+#tourbtn:hover,
+#aboutbtn:hover {
+  background: rgba(80, 160, 255, 0.12);
+}
+
+#setbtn i,
+#tourbtn i,
+#aboutbtn i {
+  font-size: 16px;
+  color: #7ec8ff;
+  transition: transform 0.2s;
+}
+
+/* ---------- Settings Modal ---------- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  background: rgba(0, 4, 12, 0.6);
+  backdrop-filter: blur(6px) saturate(120%);
+  -webkit-backdrop-filter: blur(6px) saturate(120%);
+  animation: backdrop-in 0.25s ease-out;
+  padding: 64px 24px 24px;
+}
+
+@keyframes backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.modal-panel {
+  width: 100%;
+  max-width: 480px;
+  max-height: min(640px, 86vh);
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(160deg, rgba(10, 30, 60, 0.55) 0%, rgba(2, 10, 24, 0.75) 100%);
+  border: 1px solid rgba(100, 170, 255, 0.22);
+  border-radius: 20px;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.03) inset,
+    0 8px 40px rgba(0, 10, 30, 0.6),
+    0 0 60px rgba(40, 120, 255, 0.08);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  overflow: hidden;
+  animation: panel-in 0.34s cubic-bezier(0.16, 1, 0.3, 1);
+  font-family: system-ui, sans-serif;
+}
+
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(-48px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px;
+  border-bottom: 0.5px solid rgba(100, 170, 255, 0.15);
+  flex-shrink: 0;
+}
+
+.settings-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #d8ecff;
+  letter-spacing: 0.3px;
+}
+
+.settings-title i {
+  font-size: 16px;
+  color: #7ec8ff;
+}
+
+.settings-close {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.04);
+  border: 0.5px solid rgba(100, 170, 255, 0.18);
+  color: #8fb8e8;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.settings-close:hover {
+  background: rgba(255, 80, 80, 0.12);
+  border-color: rgba(255, 100, 100, 0.3);
+  color: #ff9090;
+  transform: rotate(90deg);
+}
+
+.settings-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 10px 16px 0;
+  flex-shrink: 0;
+}
+
+.settings-tab {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border: none;
+  background: transparent;
+  color: rgba(150, 190, 230, 0.55);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 10px 10px 0 0;
+  position: relative;
+  transition: color 0.2s, background 0.2s;
+}
+
+.settings-tab i {
+  font-size: 14px;
+}
+
+.settings-tab:hover {
+  color: rgba(200, 230, 255, 0.85);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.settings-tab.active {
+  color: #d8ecff;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.settings-tab.active::after {
+  content: "";
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #3d8fff, #7ec8ff);
+  box-shadow: 0 0 8px rgba(100, 190, 255, 0.6);
+}
+
+.settings-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  padding: 18px 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.settings-body::-webkit-scrollbar {
+  display: none;
+}
+
+/* ---------- Settings: Sidebar layout ---------- */
+
+.modal-panel--settings {
+  max-width: 860px;
+  height: min(640px, 90vh);
+}
+
+.settings-window-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.settings-sidebar {
+  width: 236px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 0.5px solid rgba(100, 170, 255, 0.15);
+  background: rgba(0, 8, 20, 0.22);
+}
+
+.sidebar-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 18px 18px 14px;
+  font-size: 14.5px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: #d8ecff;
+  flex-shrink: 0;
+}
+
+.sidebar-titlebar i {
+  font-size: 16px;
+  color: #7ec8ff;
+}
+
+.sidebar-search {
+  margin: 0 14px 14px;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.sidebar-search i {
+  position: absolute;
+  left: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 13px;
+  color: rgba(150, 190, 230, 0.55);
+  pointer-events: none;
+}
+
+.sidebar-search input {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.04);
+  border: 0.5px solid rgba(100, 170, 255, 0.15);
+  border-radius: 8px;
+  padding: 7px 10px 7px 30px;
+  font-size: 12.5px;
+  color: #d8ecff;
+  font-family: inherit;
+}
+
+.sidebar-search input::placeholder {
+  color: rgba(150, 190, 230, 0.55);
+}
+
+.sidebar-search input:focus {
+  outline: none;
+  border-color: rgba(100, 170, 255, 0.22);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.sidebar-nav {
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  padding: 2px 10px 14px;
+}
+
+.sidebar-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.sidebar-group {
+  margin-bottom: 14px;
+}
+
+.sidebar-group-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  color: rgba(150, 190, 230, 0.55);
+  padding: 0 8px 5px;
+}
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 6.5px 8px;
+  border: none;
+  background: transparent;
+  color: rgba(180, 210, 240, 0.75);
+  font-size: 12.5px;
+  font-weight: 500;
+  font-family: inherit;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s, color 0.15s;
+}
+
+.sidebar-item i {
+  font-size: 14.5px;
+  width: 16px;
+  text-align: center;
+  color: #7ec8ff;
+  opacity: 0.75;
+}
+
+.sidebar-item:hover {
+  background: rgba(255, 255, 255, 0.035);
+  color: #d8ecff;
+}
+
+.sidebar-item.active {
+  background: linear-gradient(90deg, rgba(61, 143, 255, 0.22), rgba(61, 143, 255, 0.06));
+  color: #fff;
+  box-shadow: inset 0 0 0 0.5px rgba(100, 170, 255, 0.22);
+}
+
+.sidebar-item.active i {
+  opacity: 1;
+}
+
+.sidebar-item.danger i {
+  color: #ff9090;
+  opacity: 0.8;
+}
+
+.sidebar-item.danger.active {
+  background: linear-gradient(90deg, rgba(255, 80, 80, 0.16), rgba(255, 80, 80, 0.04));
+  box-shadow: inset 0 0 0 0.5px rgba(255, 100, 100, 0.3);
+}
+
+.settings-detail {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 24px 14px;
+  border-bottom: 0.5px solid rgba(100, 170, 255, 0.1);
+  flex-shrink: 0;
+}
+
+.detail-title-group {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.detail-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(126, 200, 255, 0.12);
+  border: 0.5px solid rgba(100, 170, 255, 0.22);
+  color: #7ec8ff;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.detail-title h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  color: #d8ecff;
+}
+
+.detail-title p {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  color: rgba(150, 190, 230, 0.55);
+}
+
+.window-close {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.04);
+  border: 0.5px solid rgba(100, 170, 255, 0.15);
+  color: #8fb8e8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 13px;
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+
+.window-close:hover {
+  background: rgba(255, 80, 80, 0.12);
+  border-color: rgba(255, 100, 100, 0.3);
+  color: #ff9090;
+  transform: rotate(90deg);
+}
+
+.detail-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.detail-body::-webkit-scrollbar {
+  display: none;
+}
+
+.group-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: rgba(180, 210, 240, 0.75);
+  padding: 0 4px 7px;
+}
+
+.group-hint {
+  font-size: 11px;
+  font-weight: 400;
+  color: rgba(150, 190, 230, 0.55);
+  margin: 0 4px 10px;
+  line-height: 1.5;
+}
+
+.group .card {
+  background: rgba(255, 255, 255, 0.025);
+  border: 0.5px solid rgba(100, 170, 255, 0.15);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.group .card + .card {
+  margin-top: 16px;
+}
+
+.group .card .row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 14px;
+}
+
+.group .card .row + .row {
+  border-top: 0.5px solid rgba(100, 170, 255, 0.1);
+}
+
+.group .card .row-label {
+  font-size: 12.5px;
+  color: #d8ecff;
+}
+
+.group .card .row-label small {
+  display: block;
+  font-size: 10.5px;
+  color: rgba(150, 190, 230, 0.55);
+  font-weight: 400;
+  margin-top: 2px;
+}
+
+.group .card .row-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+}
+
+.group .card .row-field + .row-field {
+  border-top: 0.5px solid rgba(100, 170, 255, 0.1);
+}
+
+.group .card .row-field span {
+  font-size: 12px;
+  color: #d8ecff;
+}
+
+/* A hint under a row-field's label, matching .row-label small above. The API key fields use one
+   to say a key is already stored — without the block display it runs on inline and reads as
+   "API KeyA key is saved — type a new one to replace it". */
+/* A caution rather than a failure: the value is accepted and stored, it just carries a risk the
+   user should see. Distinct from .settings-error, which means the write was refused. */
+.settings-warning {
+  font-size: 11px;
+  line-height: 1.45;
+  color: rgba(255, 196, 120, 0.9);
+  margin-top: 4px;
+}
+
+.group .card .row-field span small {
+  display: block;
+  font-size: 10.5px;
+  color: rgba(150, 190, 230, 0.55);
+  font-weight: 400;
+  margin-top: 2px;
+}
+
+/* An action that belongs to one setting rather than to the section — the per-slot "Test" button
+   and the result it produces. Sits inside the .row-field's column flow, so it lines up under the
+   fields it tests instead of competing for space in the accordion header. */
+.group .card .row-field-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.group .card .row-field input,
+.group .card .row-field select {
+  background: rgba(0, 4, 12, 0.4);
+  border: 0.5px solid rgba(100, 170, 255, 0.15);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  color: #d8ecff;
+  font-family: ui-monospace, monospace;
+}
+
+.group .card .row-field input:focus,
+.group .card .row-field select:focus {
+  outline: none;
+  border-color: rgba(100, 170, 255, 0.22);
+}
+
+.group .card .row-field input::placeholder {
+  color: rgba(150, 190, 230, 0.35);
+}
+
+.group .card.danger-card {
+  border-color: rgba(255, 100, 100, 0.3);
+  background: rgba(255, 60, 60, 0.05);
+}
+
+.group .card.danger-card .row-field p {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: rgba(180, 210, 240, 0.75);
+}
+
+.danger-btn {
+  align-self: flex-start;
+  background: linear-gradient(160deg, rgba(255, 70, 70, 0.9), rgba(200, 30, 30, 0.9));
+  border: none;
+  color: #fff;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  margin-top: 4px;
+}
+
+.danger-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  border: 0.5px solid rgba(100, 170, 255, 0.15);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(180, 210, 240, 0.75);
+  transition: all 0.15s;
+}
+
+.btn:hover {
+  background: rgba(255, 255, 255, 0.035);
+  color: #d8ecff;
+  border-color: rgba(100, 170, 255, 0.22);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn i {
+  font-size: 13px;
+}
+
+.btn-icon-only {
+  padding: 6px;
+}
+
+.btn-icon-only i {
+  font-size: 13px;
+  margin: 0;
+}
+
+.sound-fx-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.settings-section h3 {
+  font-size: 10px;
+  font-weight: 600;
+  color: #5ba3e8;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  margin-bottom: 12px;
+}
+
+/* A section with more than one heading (FilesAppsTab) otherwise runs the next heading straight
+   into whatever ended the previous block — the global `* { margin: 0 }` reset leaves headings
+   with no top margin. Child combinator so a heading nested inside a section's own sub-layouts
+   keeps its own spacing. */
+.settings-section > .settings-section-header:not(:first-child) {
+  margin-top: 24px;
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.settings-field-spaced {
+  margin-bottom: 10px;
+}
+
+.settings-field span {
+  font-size: 12px;
+  color: rgba(200, 230, 255, 0.65);
+}
+
+/* Same sub-label treatment the Models rows use (.group .card .row-field span small). Without the
+   block display it runs on inline and reads as "Model IDLeave blank to use gpt-4.1-mini". */
+.settings-field span small {
+  display: block;
+  font-size: 10.5px;
+  color: rgba(150, 190, 230, 0.55);
+  font-weight: 400;
+  margin-top: 2px;
+}
+
+/* The prompt label carries a "reset to default" control on its right when the prompt has been
+   customised. Without this the button stacks under the label text, since .settings-field is a
+   column and its spans are plain inline text everywhere else. */
+.agent-accordion-prompt-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.settings-field input {
+  background: rgba(255, 255, 255, 0.04);
+  border: 0.5px solid rgba(60, 140, 255, 0.22);
+  border-radius: 10px;
+  padding: 9px 12px;
+  color: #c8e6ff;
+  font-size: 13px;
+  outline: none;
+  font-family: ui-monospace, monospace;
+  transition: all 0.2s;
+}
+
+.settings-field input:focus {
+  border-color: rgba(60, 140, 255, 0.55);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.settings-field input::placeholder {
+  color: rgba(100, 170, 255, 0.3);
+  font-family: system-ui, sans-serif;
+}
+
+.settings-field-readonly-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.settings-field-readonly-row .settings-field-readonly {
+  flex: 1;
+  cursor: default;
+  opacity: 0.6;
+  user-select: all;
+}
+
+.settings-field-readonly-row .settings-action-btn-sm {
+  flex-shrink: 0;
+}
+
+.mcp-env-textarea {
+  background: rgba(255, 255, 255, 0.04);
+  border: 0.5px solid rgba(60, 140, 255, 0.22);
+  border-radius: 10px;
+  padding: 9px 12px;
+  color: #c8e6ff;
+  font-size: 12.5px;
+  line-height: 1.5;
+  font-family: ui-monospace, monospace;
+  outline: none;
+  resize: vertical;
+}
+
+.mcp-env-textarea:focus {
+  border-color: rgba(60, 140, 255, 0.55);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.mcp-env-textarea::placeholder {
+  color: rgba(100, 170, 255, 0.3);
+  font-family: system-ui, sans-serif;
+}
+
+.settings-agent-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-agent-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 0.5px solid rgba(100, 170, 255, 0.1);
+  transition: background 0.2s;
+}
+
+.settings-agent-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.settings-agent-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: #c8e6ff;
+  min-width: 84px;
+}
+
+.settings-agent-label i {
+  font-size: 14px;
+  color: #7ec8ff;
+}
+
+/* ---------- Combobox (custom, non-native <select> replacement) ---------- */
+
+.combobox {
+  position: relative;
+}
+
+.combobox-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  background: rgba(0, 4, 12, 0.4);
+  border: 0.5px solid rgba(100, 170, 255, 0.15);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  font-family: ui-monospace, monospace;
+  color: #d8ecff;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.combobox-trigger:hover,
+.combobox-trigger:focus {
+  outline: none;
+  border-color: rgba(100, 170, 255, 0.35);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.combobox-chevron {
+  font-size: 11px;
+  color: #5ba3e8;
+  flex-shrink: 0;
+}
+
+/* "sm" is a compact inline variant for widget cards / table-like rows (matches the old
+   .tu-model-select / .km-category-select footprint); "md" (default, no override needed)
+   is the full-width Settings-field size. */
+.combobox-sm .combobox-trigger {
+  width: auto;
+  padding: 4px 8px;
+  font-size: 11px;
+  border-radius: 6px;
+}
+
+.combobox-sm .combobox-chevron {
+  font-size: 9px;
+}
+
+/* Rendered in a portal (document.body), positioned via inline style computed from the
+   trigger's bounding rect in Combobox.tsx — position: fixed (not absolute) so it isn't
+   clipped by a scrolling ancestor (e.g. KnowledgeModal's .km-list) or hidden behind a
+   later sibling's own stacking context (e.g. a widget card's backdrop-filter). */
+.combobox-menu {
+  position: fixed;
+  max-height: 240px;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  background: linear-gradient(160deg, rgba(10, 30, 60, 0.92) 0%, rgba(2, 10, 24, 0.96) 100%);
+  border: 0.5px solid rgba(60, 140, 255, 0.28);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 10, 30, 0.55);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  padding: 5px;
+  z-index: 200;
+}
+
+.combobox-menu::-webkit-scrollbar {
+  display: none;
+}
+
+.combobox-search {
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(0, 4, 12, 0.4);
+  border: 0.5px solid rgba(100, 170, 255, 0.15);
+  border-radius: 7px;
+  padding: 6px 8px;
+  margin-bottom: 5px;
+  font-size: 12px;
+  color: #d8ecff;
+  font-family: ui-monospace, monospace;
+}
+
+.combobox-search:focus {
+  outline: none;
+  border-color: rgba(100, 170, 255, 0.35);
+}
+
+.combobox-search::placeholder {
+  color: rgba(150, 190, 230, 0.35);
+}
+
+.combobox-empty {
+  padding: 8px 9px;
+  font-size: 12px;
+  color: rgba(150, 190, 230, 0.5);
+}
+
+.combobox-option {
+  width: 100%;
+  display: block;
+  text-align: left;
+  padding: 7px 9px;
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  color: #c8e6ff;
+  font-size: 12.5px;
+  font-family: ui-monospace, monospace;
+  cursor: pointer;
+}
+
+.combobox-option:hover,
+.combobox-option.active {
+  background: rgba(60, 140, 255, 0.18);
+}
+
+.settings-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 2px;
+  font-size: 13px;
+  color: rgba(200, 230, 255, 0.85);
+}
+
+.settings-toggle-row:not(:last-child) {
+  border-bottom: 0.5px solid rgba(100, 170, 255, 0.08);
+}
+
+.toggle {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 0.5px solid rgba(100, 170, 255, 0.22);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.2s, border-color 0.2s;
+  flex-shrink: 0;
+}
+
+.toggle.on {
+  background: rgba(60, 140, 255, 0.55);
+  border-color: rgba(120, 190, 255, 0.6);
+}
+
+.toggle:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #dbeaff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.toggle.on .toggle-knob {
+  transform: translateX(16px);
+}
+
+.settings-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.settings-section-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-section-header-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-section-header h3 {
+  margin-bottom: 0;
+}
+
+.settings-empty {
+  font-size: 12px;
+  color: rgba(150, 190, 230, 0.45);
+  padding: 8px 2px;
+}
+
+.settings-error {
+  font-size: 12px;
+  color: #ff9090;
+  margin-top: 8px;
+}
+
+.settings-success {
+  font-size: 12px;
+  color: #7ee0a0;
+  margin-top: 8px;
+}
+
+.settings-test-status {
+  font-size: 12px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-test-status.settings-error {
+  margin-top: 0;
+}
+
+.settings-test-status.settings-success {
+  margin-top: 0;
+}
+
+.settings-folder-list,
+.settings-app-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.settings-folder-row,
+.settings-app-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 0.5px solid rgba(100, 170, 255, 0.1);
+  font-size: 12.5px;
+  color: #c8e6ff;
+}
+
+.settings-folder-row i {
+  color: #7ec8ff;
+  flex-shrink: 0;
+}
+
+.settings-folder-path {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(200, 230, 255, 0.75);
+}
+
+.settings-app-row {
+  justify-content: space-between;
+}
+
+.settings-icon-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  color: rgba(150, 190, 230, 0.6);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.settings-icon-btn:hover {
+  background: rgba(255, 80, 80, 0.12);
+  color: #ff9090;
+}
+
+.settings-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  border-radius: 10px;
+  background: rgba(60, 140, 255, 0.1);
+  border: 0.5px solid rgba(60, 140, 255, 0.28);
+  color: #a8d4ff;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.settings-action-btn:hover {
+  background: rgba(60, 140, 255, 0.18);
+  border-color: rgba(100, 170, 255, 0.5);
+}
+
+.settings-action-btn-sm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  background: rgba(60, 140, 255, 0.12);
+  border: 0.5px solid rgba(60, 140, 255, 0.28);
+  color: #a8d4ff;
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.settings-action-btn-sm:hover {
+  background: rgba(60, 140, 255, 0.22);
+}
+
+.settings-action-btn-ghost {
+  background: transparent;
+  border-color: transparent;
+}
+
+.settings-action-btn-ghost:hover {
+  background: rgba(60, 140, 255, 0.1);
+}
+
+.settings-action-btn-primary {
+  background: rgba(60, 140, 255, 0.35);
+  border-color: rgba(100, 170, 255, 0.6);
+  color: #eaf6ff;
+}
+
+.settings-action-btn-primary:hover {
+  background: rgba(60, 140, 255, 0.5);
+}
+
+.settings-action-btn:disabled,
+.settings-action-btn-sm:disabled,
+.settings-action-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.settings-hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(150, 190, 230, 0.6);
+  margin-bottom: 12px;
+}
+
+.settings-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.mcp-add-form {
+  margin-top: 12px;
+  border-radius: 10px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 0.5px solid rgba(100, 170, 255, 0.1);
+}
+
+.mcp-add-mode-tabs {
+  margin-bottom: 12px;
+}
+
+/* A registry result row is a .settings-folder-row — a flex row whose path cell truncates on one
+   line — so the required-keys caution underneath needs its own column box rather than becoming a
+   third inline cell between the path and the Install button. min-width:0 is what still lets the
+   path shrink below its content width and keep its ellipsis. */
+.mcp-result-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mcp-server-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: rgba(200, 230, 255, 0.75);
+  padding: 4px 0;
+  cursor: pointer;
+}
+
+/* ---------- Tag multi-select (chips + add-from-dropdown) ---------- */
+
+.tag-multiselect {
+  position: relative;
+}
+
+.tag-multiselect-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.tag-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px 5px 10px;
+  border-radius: 999px;
+  background: rgba(60, 140, 255, 0.14);
+  border: 0.5px solid rgba(60, 140, 255, 0.32);
+  color: #c8e6ff;
+  font-size: 12px;
+  font-family: ui-monospace, monospace;
+}
+
+.tag-chip-remove {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  color: rgba(200, 230, 255, 0.6);
+  font-size: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.tag-chip-remove:hover {
+  background: rgba(255, 80, 80, 0.18);
+  color: #ff9090;
+}
+
+.tag-multiselect-add-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: transparent;
+  border: 0.5px dashed rgba(100, 170, 255, 0.4);
+  color: #7ec8ff;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.tag-multiselect-add-btn:hover {
+  background: rgba(60, 140, 255, 0.1);
+  border-color: rgba(100, 170, 255, 0.6);
+}
+
+.error-boundary {
+  padding: 20px;
+  border-radius: 12px;
+  background: rgba(255, 60, 60, 0.06);
+  border: 0.5px solid rgba(255, 100, 100, 0.25);
+  color: #ffb3b3;
+}
+
+.error-boundary-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.error-boundary-message {
+  font-size: 12px;
+  color: rgba(255, 180, 180, 0.7);
+  font-family: ui-monospace, monospace;
+}
+
+/* ---------- Side Widgets ---------- */
+
+/* top clears the 36px #titlebar drag region by 8px. The status row shares this y — it is
+   centre-anchored and pointer-events: none, so it neither overlaps nor blocks these columns.
+
+   bottom: 96px is the chat's *resting* height (#bar: a one-line input card plus its 12/22
+   padding). It is deliberately not the chat's maximum: #chat-log grows to 40vh, and sizing
+   these columns for that would shorten them by ~430px permanently to avoid an overlap that
+   only exists while the backlog is long. The overlap is handled by z-order instead — #chat
+   is z-index 30 against these columns' 15, so a grown chat paints over the bottom of a
+   column rather than being interleaved with it. */
+#widgets-left,
+#widgets-right {
+  position: absolute;
+  top: 44px;
+  bottom: 96px;
+  width: 260px;
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  pointer-events: none;
+}
+
+/* A stack taller than its column scrolls inside it rather than running off the bottom of
+   the window. Scoped to :not(.entering) because the entrance animation starts each card at
+   translateY(-16px) — a scroll container clips that, so the cards would slide in cut off.
+   The class is removed once the animation finishes, so scrolling is available from then on.
+   Scrollbar chrome is hidden to match #chat-log and the app's UI conventions; the wheel
+   still works because .widget-card is pointer-events: auto. */
+#widgets-left:not(.entering),
+#widgets-right:not(.entering) {
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+#widgets-left::-webkit-scrollbar,
+#widgets-right::-webkit-scrollbar {
+  display: none;
+}
+
+#widgets-left {
+  left: 20px;
+}
+
+#widgets-right {
+  right: 20px;
+}
+
+.widget-card {
+  background: linear-gradient(160deg, rgba(10, 30, 60, 0.12) 0%, rgba(2, 10, 24, 0.18) 100%);
+  border: 1px solid rgba(100, 170, 255, 0.16);
+  border-radius: 16px;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.02) inset,
+    0 8px 32px rgba(0, 10, 30, 0.45);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  padding: 16px 18px;
+  pointer-events: auto;
+  font-family: system-ui, sans-serif;
+}
+
+.widget-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.widget-card.collapsed .widget-card-header {
+  margin-bottom: 0;
+}
+
+.widget-card-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.widget-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.widget-card-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #d8ecff;
+  letter-spacing: 0.3px;
+}
+
+.widget-collapse-btn {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: transparent;
+  border: none;
+  color: rgba(150, 190, 230, 0.5);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  flex-shrink: 0;
+  transition: transform 0.2s, color 0.2s, background 0.2s;
+}
+
+.widget-collapse-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #c8e6ff;
+}
+
+.widget-card.collapsed .widget-collapse-btn {
+  transform: rotate(-90deg);
+}
+
+.widget-card-subtext {
+  font-size: 10.5px;
+  color: rgba(150, 190, 230, 0.5);
+}
+
+.widget-icon-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  color: rgba(150, 190, 230, 0.6);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.widget-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #c8e6ff;
+}
+
+.widget-empty {
+  font-size: 11.5px;
+  color: rgba(150, 190, 230, 0.4);
+  padding: 4px 0;
+}
+
+.widget-error {
+  font-size: 11px;
+  color: #ff9090;
+  margin-top: 8px;
+  white-space: pre-line;
+}
+
+/* Weekly Activity chart */
+
+.wa-chart {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  height: 100px;
+  gap: 6px;
+  margin-top: 22px;
+}
+
+.wa-col {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  height: 100%;
+  justify-content: flex-end;
+}
+
+.wa-tooltip {
+  position: absolute;
+  top: -6px;
+  transform: translateY(-100%);
+  font-size: 10px;
+  font-weight: 600;
+  color: #c8e6ff;
+  background: rgba(20, 60, 140, 0.5);
+  border: 0.5px solid rgba(100, 170, 255, 0.3);
+  border-radius: 6px;
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+
+.wa-bar-track {
+  width: 6px;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+
+.wa-bar {
+  width: 100%;
+  min-height: 4px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, rgba(126, 200, 255, 0.35) 0%, rgba(60, 140, 255, 0.2) 100%);
+  transition: height 0.4s ease-out;
+}
+
+.wa-bar.peak {
+  background: linear-gradient(180deg, #7ec8ff 0%, #3d8fff 100%);
+  box-shadow: 0 0 12px rgba(100, 190, 255, 0.5);
+}
+
+.wa-label {
+  font-size: 9.5px;
+  color: rgba(150, 190, 230, 0.5);
+}
+
+.wa-label.peak {
+  color: #c8e6ff;
+  font-weight: 600;
+}
+
+/* System Status gauge */
+
+.ss-gauge-wrap {
+  position: relative;
+  width: 128px;
+  height: 128px;
+  margin: 0 auto 16px;
+}
+
+.ss-gauge {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+  overflow: visible;
+}
+
+.ss-gauge-track {
+  fill: none;
+  stroke: rgba(100, 170, 255, 0.12);
+  stroke-width: 8;
+}
+
+.ss-gauge-fill {
+  fill: none;
+  stroke: #5ba8ff;
+  stroke-width: 8;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 6px rgba(90, 170, 255, 0.6));
+  transition: stroke-dashoffset 0.5s ease-out;
+}
+
+.ss-gauge-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.ss-gauge-pct {
+  font-size: 22px;
+  font-weight: 700;
+  color: #d8ecff;
+}
+
+.ss-gauge-label {
+  font-size: 10.5px;
+  color: rgba(150, 190, 230, 0.55);
+  margin-top: 2px;
+}
+
+.ss-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ss-metric-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ss-metric-label {
+  font-size: 11px;
+  color: rgba(200, 230, 255, 0.7);
+  width: 32px;
+  flex-shrink: 0;
+}
+
+.ss-metric-track {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.ss-metric-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #3d8fff, #7ec8ff);
+}
+
+.ss-metric-pct {
+  font-size: 10.5px;
+  color: rgba(150, 190, 230, 0.6);
+  width: 78px;
+  text-align: right;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.ss-metric-row-location {
+  justify-content: space-between;
+}
+
+.ss-metric-row-location .ss-metric-pct {
+  width: auto;
+}
+
+/* Tasks widget */
+
+.tk-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tk-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 0.5px solid rgba(100, 170, 255, 0.1);
+  font-size: 11.5px;
+  color: #c8e6ff;
+}
+
+.tk-row > i {
+  color: #7ec8ff;
+  flex-shrink: 0;
+  font-size: 13px;
+}
+
+.tk-info {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tk-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(200, 230, 255, 0.9);
+}
+
+.tk-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  color: rgba(200, 230, 255, 0.5);
+}
+
+.tk-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #7ec8ff;
+}
+
+.tk-badge i {
+  font-size: 10.5px;
+}
+
+/* Knowledge widget */
+
+.kw-dropzone {
+  border-radius: 9px;
+  transition: background 0.15s ease, outline 0.15s ease;
+  outline: 1.5px dashed transparent;
+  outline-offset: 2px;
+}
+
+.kw-dropzone.dragover {
+  background: rgba(126, 200, 255, 0.06);
+  outline-color: rgba(126, 200, 255, 0.5);
+}
+
+.kw-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.kw-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 0.5px solid rgba(100, 170, 255, 0.1);
+  font-size: 11.5px;
+  color: #c8e6ff;
+}
+
+.kw-row i {
+  color: #7ec8ff;
+  flex-shrink: 0;
+  font-size: 13px;
+}
+
+.kw-show-more {
+  background: transparent;
+  border: none;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: rgba(150, 190, 230, 0.6);
+  cursor: pointer;
+  text-align: left;
+}
+
+.kw-show-more:hover {
+  color: #c8e6ff;
+}
+
+.kw-loading {
+  font-size: 11px;
+  color: rgba(126, 200, 255, 0.75);
+  margin-top: 8px;
+  animation: kw-text-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes kw-text-pulse {
+  0%, 100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.au-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-bottom: 12px;
+}
+
+.au-field span {
+  font-size: 12px;
+  color: rgba(200, 230, 255, 0.65);
+}
+
+.au-field input {
+  background: rgba(255, 255, 255, 0.04);
+  border: 0.5px solid rgba(60, 140, 255, 0.22);
+  border-radius: 10px;
+  padding: 9px 12px;
+  color: #c8e6ff;
+  font-size: 13px;
+  outline: none;
+  font-family: ui-monospace, monospace;
+  transition: all 0.2s;
+}
+
+.au-field input:focus {
+  border-color: rgba(60, 140, 255, 0.55);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.au-field input::placeholder {
+  color: rgba(100, 170, 255, 0.3);
+  font-family: system-ui, sans-serif;
+}
+
+.au-primary-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: rgba(126, 200, 255, 0.12);
+  border: 0.5px solid rgba(126, 200, 255, 0.3);
+  border-radius: 10px;
+  padding: 8px 16px;
+  color: #c8e6ff;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.spin-icon {
+  animation: vspin 0.8s linear infinite;
+}
+
+.au-primary-btn:hover:not(:disabled) {
+  background: rgba(126, 200, 255, 0.2);
+}
+
+.au-primary-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.au-section {
+  margin-bottom: 14px;
+}
+
+.au-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.au-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #5ba3e8;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.au-link-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 12px;
+  color: rgba(200, 230, 255, 0.8);
+  cursor: pointer;
+}
+
+.au-link-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.km-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px 0;
+  margin-bottom: 10px;
+}
+
+.km-body {
+  padding: 0 20px 20px;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.km-body::-webkit-scrollbar {
+  display: none;
+}
+
+.km-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #e6f3ff;
+}
+
+.km-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.agent-info-tagline {
+  font-size: 12.5px;
+  color: #7ec8ff;
+  opacity: 0.85;
+  margin: 0 0 10px;
+}
+
+.agent-info-description {
+  font-size: 12px;
+  color: rgba(200, 230, 255, 0.75);
+  line-height: 1.5;
+  margin: 0 0 14px;
+}
+
+.agent-info-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.agent-info-row-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #d8ecff;
+  letter-spacing: 0.3px;
+}
+
+.agent-info-row-value {
+  font-size: 11.5px;
+  color: rgba(200, 230, 255, 0.75);
+  font-family: monospace;
+}
+
+.agent-info-tool-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  list-style: none;
+  padding: 0;
+  margin: 0 0 10px;
+}
+
+.agent-info-tool-list li {
+  font-size: 12px;
+  color: rgba(200, 230, 255, 0.85);
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 0.5px solid rgba(100, 170, 255, 0.14);
+}
+
+.agent-info-connector-count {
+  font-size: 11px;
+  color: rgba(150, 190, 230, 0.6);
+  margin: 0;
+}
+
+.km-tab {
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 0.5px solid rgba(100, 170, 255, 0.2);
+  background: rgba(255, 255, 255, 0.02);
+  color: rgba(200, 230, 255, 0.75);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.km-tab.active {
+  background: rgba(126, 200, 255, 0.15);
+  border-color: rgba(126, 200, 255, 0.5);
+  color: #e6f3ff;
+}
+
+.km-bulk-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  border-radius: 9px;
+  background: rgba(126, 200, 255, 0.06);
+  font-size: 11.5px;
+  color: #c8e6ff;
+}
+
+.km-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 60vh;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.km-list::-webkit-scrollbar {
+  display: none;
+}
+
+/* Folder browser — one level of an attached folder, shown in place of the knowledge list */
+
+.kb-browser-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 0.5px solid rgba(100, 170, 255, 0.12);
+  margin-bottom: 8px;
+}
+
+.kb-browser-crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  font-size: 12px;
+  color: rgba(200, 230, 255, 0.75);
+  overflow: hidden;
+}
+
+.kb-browser-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.kb-browser-crumb:last-child {
+  color: #d8ecff;
+  font-weight: 600;
+}
+
+.kb-browser-sep {
+  color: rgba(150, 190, 230, 0.45);
+  font-size: 12px;
+}
+
+/* Same hidden-scrollbar treatment as .km-list — this replaces it in the same slot. */
+.kb-browser-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 60vh;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.kb-browser-list::-webkit-scrollbar {
+  display: none;
+}
+
+.kb-browser-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 0.5px solid rgba(100, 170, 255, 0.1);
+  font-size: 12px;
+  color: #c8e6ff;
+  text-align: left;
+}
+
+.kb-browser-row i {
+  color: #7ec8ff;
+  flex-shrink: 0;
+  font-size: 13px;
+}
+
+.kb-browser-row-dir {
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.kb-browser-row-dir:hover {
+  background: rgba(126, 200, 255, 0.07);
+}
+
+.kb-browser-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Add-source menu — the "+" in the Knowledge widget header */
+
+.add-source {
+  display: inline-flex;
+}
+
+/* Rendered in a portal (document.body) and positioned from the trigger's bounding rect in
+   AddSourceMenu.tsx, the same treatment .combobox-menu gets: every widget card sets a
+   backdrop-filter and so opens its own stacking context, which traps a menu anchored inside
+   the Knowledge card underneath the card that follows it in the rail (Tasks & Reminders).
+   max-content rather than a fixed width — the rail is only 260px, so any width that fits
+   inside the card ellipsizes the label/sublabel pair down to "F..". */
+.add-source-menu {
+  position: fixed;
+  z-index: 200;
+  width: max-content;
+  max-width: 320px;
+}
+
+/* SlashCommandMenu positions itself for the chat input bar — anchored upward and stretched to
+   the bar's full width. Here the wrapper owns the anchoring, so the menu flows inside it
+   instead; without this the menu keeps `bottom: 100%` and opens upward over the widget above,
+   at the wrapper's width rather than its own content's. */
+.add-source-menu .slash-menu {
+  position: static;
+}
+
+.km-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 0.5px solid rgba(100, 170, 255, 0.1);
+  font-size: 11.5px;
+  color: #c8e6ff;
+}
+
+.km-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.km-name-clickable {
+  cursor: pointer;
+}
+
+.km-name-clickable:hover {
+  text-decoration: underline;
+}
+
+.km-category-select {
+  flex-shrink: 0;
+  width: 110px;
+}
+
+.km-category-select .combobox-trigger {
+  width: 100%;
+}
+
+.km-category-select .combobox-trigger span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kw-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(200, 230, 255, 0.75);
+}
+
+/* Token Usage widget */
+
+.tu-filter {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 9px;
+  padding: 3px;
+}
+
+.tu-filter-btn {
+  flex: 1;
+  padding: 5px 0;
+  border: none;
+  background: transparent;
+  color: rgba(150, 190, 230, 0.55);
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tu-filter-btn:hover {
+  color: rgba(200, 230, 255, 0.8);
+}
+
+.tu-filter-btn.active {
+  background: rgba(60, 140, 255, 0.22);
+  color: #c8e6ff;
+}
+
+.tu-total {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-bottom: 12px;
+}
+
+.tu-total-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #d8ecff;
+}
+
+.tu-total-label {
+  font-size: 10.5px;
+  color: rgba(150, 190, 230, 0.5);
+}
+
+.tu-bar {
+  display: flex;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.tu-bar-input {
+  background: linear-gradient(90deg, #3d8fff, #7ec8ff);
+  transition: width 0.3s ease-out;
+}
+
+.tu-bar-output {
+  background: linear-gradient(90deg, #b06fe0, #e08fd8);
+  transition: width 0.3s ease-out;
+}
+
+.tu-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tu-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  color: rgba(200, 230, 255, 0.7);
+}
+
+.tu-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.tu-dot.input {
+  background: linear-gradient(135deg, #3d8fff, #7ec8ff);
+}
+
+.tu-dot.output {
+  background: linear-gradient(135deg, #b06fe0, #e08fd8);
+}
+
+.tu-dot.cost {
+  background: linear-gradient(135deg, #4de0a8, #a8f0d0);
+}
+
+.tu-legend-value {
+  margin-left: auto;
+  font-weight: 600;
+  color: #c8e6ff;
+}
+
+.tu-activity-section {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 0.5px solid rgba(100, 170, 255, 0.15);
+}
+
+.tu-model-select {
+  margin-bottom: 12px;
+}
+
+.tu-model-select .combobox,
+.tu-model-select .combobox-trigger {
+  width: 100%;
+}
+
+/* ---------- Onboarding ---------- */
+
+#onboarding {
+  width: 100vw;
+  height: 100vh;
+  position: relative;
+  overflow: hidden;
+  font-family: system-ui, sans-serif;
+  background: #00060f;
+  transition: opacity 0.5s ease;
+}
+
+#onboarding.leaving {
+  opacity: 0;
+}
+
+#onboarding #bgvid {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.2;
+  z-index: 0;
+}
+
+#onboarding #titlebar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 30;
+  -webkit-app-region: drag;
+}
+
+#onboarding #titlebar-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(200, 230, 255, 0.6);
+  letter-spacing: 1.5px;
+}
+
+#onboarding-body {
+  position: relative;
+  z-index: 10;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.onboarding-step {
+  width: min(560px, 86vw);
+  animation: onboarding-step-in 0.45s ease;
+}
+
+@keyframes onboarding-step-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.onboarding-step-index {
+  display: block;
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: #5ba3e8;
+  margin-bottom: 14px;
+}
+
+.onboarding-question {
+  font-size: clamp(22px, 3.4vw, 34px);
+  font-weight: 600;
+  color: #e6f2ff;
+  margin-bottom: 28px;
+}
+
+.onboarding-question:has(+ .onboarding-subtitle) {
+  margin-bottom: 8px;
+}
+
+.onboarding-subtitle {
+  font-size: 14px;
+  color: #7fb0e0;
+  margin-bottom: 28px;
+}
+
+.onboarding-input-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 2px solid rgba(100, 170, 255, 0.35);
+  padding-bottom: 10px;
+  transition: border-color 0.2s;
+}
+
+.onboarding-input-row:focus-within {
+  border-color: #3d8fff;
+}
+
+.onboarding-input-row input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 20px;
+  color: #c8e6ff;
+  font-family: inherit;
+}
+
+.onboarding-input-row input::placeholder {
+  color: rgba(150, 190, 230, 0.35);
+}
+
+.onboarding-chip-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.onboarding-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.onboarding-chip {
+  padding: 10px 20px;
+  border: 1px solid rgba(91, 163, 232, 0.35);
+  border-radius: 999px;
+  background: rgba(91, 163, 232, 0.07);
+  color: #8fc8f0;
+  font-family: inherit;
+  font-size: 13px;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.onboarding-chip:hover {
+  border-color: rgba(91, 163, 232, 0.65);
+  background: rgba(91, 163, 232, 0.15);
+  color: #c8e6ff;
+}
+
+.onboarding-chip:focus-visible {
+  outline: none;
+  border-color: #7ec8ff;
+  box-shadow: 0 0 0 2px rgba(126, 200, 255, 0.35);
+}
+
+.onboarding-chip.selected {
+  border-color: #7ec8ff;
+  background: rgba(126, 200, 255, 0.18);
+  color: #c8e6ff;
+}
+
+.onboarding-next {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid rgba(100, 170, 255, 0.35);
+  background: rgba(61, 143, 255, 0.1);
+  color: #c8e6ff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+
+.onboarding-next:hover:not(:disabled) {
+  background: rgba(61, 143, 255, 0.25);
+  border-color: #3d8fff;
+}
+
+.onboarding-next:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* ---------- Main UI entrance (post-onboarding) ---------- */
+
+#orchestrator.entering {
+  animation: orchestrator-entrance 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes orchestrator-entrance {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.7);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+#widgets-left.entering .widget-card,
+#widgets-right.entering .widget-card {
+  opacity: 0;
+  animation: widget-entrance 0.5s ease forwards;
+}
+
+#widgets-left.entering .widget-card:nth-child(1),
+#widgets-right.entering .widget-card:nth-child(1) {
+  animation-delay: 0.3s;
+}
+
+#widgets-left.entering .widget-card:nth-child(2),
+#widgets-right.entering .widget-card:nth-child(2) {
+  animation-delay: 0.6s;
+}
+
+#widgets-left.entering .widget-card:nth-child(3),
+#widgets-right.entering .widget-card:nth-child(3) {
+  animation-delay: 0.9s;
+}
+
+#widgets-left.entering .widget-card:nth-child(4),
+#widgets-right.entering .widget-card:nth-child(4) {
+  animation-delay: 1.2s;
+}
+
+@keyframes widget-entrance {
+  from {
+    opacity: 0;
+    transform: translateY(-16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ---------- Settings: Danger Zone ---------- */
+
+.danger-zone h3 {
+  color: #ff6b6b;
+}
+
+.danger-zone-desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(255, 200, 200, 0.6);
+  margin-bottom: 16px;
+}
+
+.danger-zone .settings-field {
+  margin-bottom: 14px;
+}
+
+.danger-zone .settings-field input {
+  border-color: rgba(255, 107, 107, 0.3);
+}
+
+.danger-zone .settings-field input:focus {
+  border-color: rgba(255, 107, 107, 0.6);
+}
+
+.danger-zone-reset-btn {
+  background: rgba(255, 80, 80, 0.15);
+  border: 1px solid rgba(255, 80, 80, 0.4);
+  color: #ff8080;
+  border-radius: 10px;
+  padding: 9px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.danger-zone-reset-btn:hover:not(:disabled) {
+  background: rgba(255, 80, 80, 0.28);
+  border-color: rgba(255, 80, 80, 0.65);
+}
+
+.danger-zone-reset-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* ---------- Delete Confirm Modal ---------- */
+
+.delete-confirm-modal {
+  padding: 24px;
+}
+
+.delete-confirm-modal-actions {
+  display: flex;
+  gap: 10px;
+}
+
+/* ---------- Settings: Agent Accordion ---------- */
+
+.agent-accordion-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agent-accordion {
+  border: 0.5px solid rgba(60, 140, 255, 0.22);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+
+.agent-accordion.disabled {
+  opacity: 0.55;
+}
+
+.agent-accordion-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+}
+
+.agent-accordion-header-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  color: #c8e6ff;
+  text-align: left;
+}
+
+/* Wider offset than the app-wide 2px so the ring clears the label without touching the
+   row border — the header it sits in has 6px of vertical padding. */
+.agent-accordion-header-toggle:focus-visible {
+  outline-offset: 3px;
+}
+
+.agent-accordion-chevron {
+  font-size: 12px;
+  color: rgba(150, 190, 230, 0.6);
+  transition: transform 0.2s;
+}
+
+.agent-accordion-chevron.open {
+  transform: rotate(90deg);
+}
+
+.agent-accordion-icon {
+  font-size: 15px;
+  color: #7ec8ff;
+}
+
+.agent-accordion-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.agent-accordion-spacer {
+  flex: 1;
+}
+
+.agent-accordion-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 14px 16px;
+  border-top: 0.5px solid rgba(60, 140, 255, 0.14);
+  padding-top: 14px;
+}
+
+.agent-accordion-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-accordion-prompt {
+  background: rgba(255, 255, 255, 0.04);
+  border: 0.5px solid rgba(60, 140, 255, 0.22);
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: #c8e6ff;
+  font-size: 12px;
+  line-height: 1.5;
+  font-family: ui-monospace, monospace;
+  resize: vertical;
+  outline: none;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.agent-accordion-prompt::-webkit-scrollbar {
+  display: none;
+}
+
+.agent-accordion-prompt:disabled {
+  color: rgba(200, 230, 255, 0.45);
+  cursor: not-allowed;
+}
+
+.agent-accordion-prompt::placeholder {
+  color: rgba(100, 170, 255, 0.3);
+  font-family: system-ui, sans-serif;
+}
+
+.agent-accordion-description {
+  background: rgba(255, 255, 255, 0.04);
+  border: 0.5px solid rgba(60, 140, 255, 0.22);
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: #c8e6ff;
+  font-size: 13px;
+  line-height: 1.5;
+  font-family: inherit;
+  resize: vertical;
+  outline: none;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.agent-accordion-description::-webkit-scrollbar {
+  display: none;
+}
+
+.agent-accordion-description::placeholder {
+  color: rgba(100, 170, 255, 0.3);
+}
+
+.add-agent-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 0.5px dashed rgba(60, 140, 255, 0.35);
+  border-radius: 12px;
+  background: transparent;
+  color: #7ec8ff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.add-agent-btn:hover {
+  background: rgba(60, 140, 255, 0.08);
+  border-color: rgba(60, 140, 255, 0.55);
+}
+
+.add-agent-form {
+  border-style: solid;
+}
+
+.add-agent-form .agent-accordion-body {
+  border-top: none;
+  padding-top: 14px;
+}
+
+.add-agent-form-error {
+  margin: 0;
+  font-size: 12px;
+  color: #ff8080;
+}
+
+.add-agent-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.add-agent-form-cancel,
+.add-agent-form-submit {
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.add-agent-form-cancel {
+  background: transparent;
+  border: 0.5px solid rgba(150, 190, 230, 0.3);
+  color: #c8e6ff;
+}
+
+.add-agent-form-cancel:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.add-agent-form-submit {
+  background: rgba(60, 140, 255, 0.2);
+  border: 0.5px solid rgba(60, 140, 255, 0.5);
+  color: #7ec8ff;
+}
+
+.add-agent-form-submit:hover:not(:disabled) {
+  background: rgba(60, 140, 255, 0.32);
+}
+
+.add-agent-form-submit:disabled,
+.add-agent-form-cancel:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ---------- Settings: Connectors — services nested under a shared-credentials parent ---------- */
+
+.connector-service-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.connector-service-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 0.5px solid rgba(100, 170, 255, 0.1);
+  transition: background 0.2s;
+}
+
+.connector-service-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.connector-service-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: #c8e6ff;
+  min-width: 0;
+}
+
+.connector-service-label i {
+  font-size: 14px;
+  color: #7ec8ff;
+  flex-shrink: 0;
+}
+
+.connector-service-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- Chat: Slash Command Menu ---------- */
+
+.slash-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  max-height: 240px;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  background: linear-gradient(160deg, rgba(10, 30, 60, 0.85) 0%, rgba(2, 10, 24, 0.92) 100%);
+  border: 0.5px solid rgba(60, 140, 255, 0.28);
+  border-radius: 14px;
+  box-shadow: 0 12px 32px rgba(0, 10, 30, 0.55);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  padding: 6px;
+  z-index: 40;
+}
+
+.slash-menu::-webkit-scrollbar {
+  display: none;
+}
+
+.slash-menu-empty {
+  padding: 10px 12px;
+  font-size: 12px;
+  color: rgba(150, 190, 230, 0.5);
+}
+
+.slash-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 9px;
+  color: #c8e6ff;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.slash-menu-item.active {
+  background: rgba(60, 140, 255, 0.18);
+}
+
+.slash-menu-icon {
+  font-size: 14px;
+  color: #7ec8ff;
+  flex-shrink: 0;
+}
+
+.slash-menu-label {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.slash-menu-sublabel {
+  font-size: 11px;
+  color: rgba(150, 190, 230, 0.55);
+  margin-left: auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-drop-ghost {
+  position: fixed;
+  z-index: 9999;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: rgba(126, 200, 255, 0.85);
+  box-shadow: 0 0 12px rgba(126, 200, 255, 0.6);
+  pointer-events: none;
+  transition: transform 0.5s cubic-bezier(0.3, 0.7, 0.4, 1), opacity 0.5s ease;
+}
+
+.file-drop-ghost.flying {
+  opacity: 0;
+}
+
+.kw-dropzone.pulse {
+  animation: kw-pulse 0.6s ease;
+}
+
+@keyframes kw-pulse {
+  0% {
+    outline-color: rgba(126, 200, 255, 0.9);
+    background: rgba(126, 200, 255, 0.12);
+  }
+  100% {
+    outline-color: transparent;
+    background: transparent;
+  }
+}
+
+/* ---------- driver.js tour popover (matches .widget-card glass aesthetic) ---------- */
+/* SettingsPanel's .modal-backdrop sits at z-index: 200 (highest existing panel in this
+   file); driver.js's own overlay/popover default to z-index: 1000000000, already above
+   it, but we pin an explicit value here so the ordering is documented, not incidental. */
+
+.driver-overlay {
+  z-index: 10000 !important;
+}
+
+.driver-popover {
+  z-index: 10001 !important;
+  background: linear-gradient(160deg, rgba(15, 20, 35, 0.94) 0%, rgba(2, 10, 24, 0.96) 100%);
+  border: 1px solid rgba(126, 200, 255, 0.3);
+  border-radius: 16px;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.02) inset,
+    0 8px 32px rgba(0, 10, 30, 0.55);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  padding: 18px 20px;
+  min-width: 280px;
+  max-width: 340px;
+}
+
+.driver-popover-title {
+  color: #eaf6ff;
+  font-size: 16px;
+}
+
+.driver-popover-description {
+  color: rgba(200, 220, 240, 0.8);
+  font-size: 13px;
+}
+
+.driver-popover-progress-text {
+  color: rgba(150, 190, 230, 0.55);
+}
+
+/* driver.js pins this button flush to the popover corner (top/right 0) with `all: unset`,
+   so it has no radius — its focus ring rendered as a square crossing the popover's 16px
+   corner. Inset it and make it a circle to match the app's other icon buttons; the ring
+   then follows that shape and stays inside the panel. Width/height/flex apply despite
+   `all: unset` because driver's own `position: absolute` blockifies the button. */
+.driver-popover-close-btn {
+  top: 6px;
+  right: 6px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(150, 190, 230, 0.55);
+}
+
+.driver-popover-close-btn:hover,
+.driver-popover-close-btn:focus {
+  color: #eaf6ff;
+}
+
+.driver-popover-footer-btn {
+  background: rgba(60, 140, 255, 0.1);
+  border: 0.5px solid rgba(60, 140, 255, 0.28);
+  border-radius: 10px;
+  color: #a8d4ff;
+  transition: all 0.2s;
+}
+
+.driver-popover-footer-btn:hover,
+.driver-popover-footer-btn:focus {
+  background: rgba(60, 140, 255, 0.18);
+  border-color: rgba(100, 170, 255, 0.5);
+}
+
+.driver-popover-arrow-side-left {
+  border-right-color: rgba(15, 20, 35, 0.94);
+}
+
+.driver-popover-arrow-side-right {
+  border-left-color: rgba(15, 20, 35, 0.94);
+}
+
+.driver-popover-arrow-side-top {
+  border-bottom-color: rgba(15, 20, 35, 0.94);
+}
+
+.driver-popover-arrow-side-bottom {
+  border-top-color: rgba(15, 20, 35, 0.94);
+}
+
+/* ---------- Settings: About ---------- */
+.about-value {
+  font-size: 12.5px;
+  color: rgba(180, 210, 240, 0.75);
+  text-align: right;
+}
+
+.about-value small {
+  color: rgba(150, 190, 230, 0.55);
+}
+
+.about-value-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.about-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  color: #d8ecff;
+  background: rgba(126, 200, 255, 0.15);
+  border: 0.5px solid rgba(126, 200, 255, 0.35);
+}
+
+/* Licence bodies and release notes are arbitrary length — cap them so a long one can't
+   stretch the settings panel, and hide the native scrollbar per the app's chrome rules. */
+.about-license-text,
+.about-notes {
+  max-height: 320px;
+  overflow-y: auto;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: rgba(180, 210, 240, 0.7);
+}
+
+/* Sits inside a .row, so it fills the space beside the label. */
+.about-license-text {
+  flex: 1;
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.about-license-text::-webkit-scrollbar,
+.about-notes::-webkit-scrollbar {
+  display: none;
+}
+
+/* Release notes are rendered directly in the accordion body, which already supplies its own
+   padding — so the markdown's outer margins would double it up. */
+.about-notes :first-child {
+  margin-top: 0;
+}
+
+.about-notes :last-child {
+  margin-bottom: 0;
+}
+
+/* ── Chat history modal ─────────────────────────────────────── */
+
+/* Wider than the 480px default: history rows carry a full message body, and reflowing a
+   paragraph into a narrow column made turns hard to scan against each other. */
+.modal-panel--chat-history {
+  max-width: 620px;
+}
+
+.ch-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* A transcript, not a table of rows: each turn stacks its meta line, bubble and cost, and
+   the whole stack hugs the side its speaker sits on — the same left/right split the live
+   chat log gets from .m/.m.u, so history reads as the conversation it came from. */
+.ch-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+
+.ch-row--user {
+  align-items: flex-end;
+}
+
+.ch-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+  color: rgba(150, 190, 230, 0.5);
+}
+
+.ch-who {
+  font-weight: 600;
+  color: rgba(126, 200, 255, 0.7);
+}
+
+/* History bubbles reuse the live log's .mb, minus its 33vh clamp: these sit inside the
+   modal's own scroller, and a nested fade-scroller would hide the text you opened history
+   to read. The width cap is what keeps the opposite edge visible, so a turn reads as a
+   bubble on one side rather than a full-bleed row. */
+.ch-row .mb {
+  max-width: 86%;
+  max-height: none;
+  overflow-wrap: anywhere;
+}
+
+/* The row is the width reference, not the bubble's own content. .m dropped `width: 100%` so
+   the live log could sit it beside the sender dot, but a history row has no dot: .ch-row is a
+   column, so a shrink-to-fit .m makes the 86% above resolve against fit-content and collapse
+   the bubble to min-content — a one-word reply wrapping mid-word. The 14px .m reserves for
+   the dot is meaningless here, so it is cleared with it. */
+.ch-row .m {
+  width: 100%;
+  max-width: none;
+}
+
+.ch-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 20px;
+  border-top: 1px solid rgba(100, 170, 255, 0.12);
+}
+
+.ch-pager-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(100, 170, 255, 0.18);
+  background: rgba(255, 255, 255, 0.03);
+  color: #cfe6ff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ch-pager-btn:hover:not(:disabled) {
+  background: rgba(100, 170, 255, 0.12);
+}
+
+.ch-pager-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.ch-pager-status {
+  font-size: 11.5px;
+  color: rgba(150, 190, 230, 0.6);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- HTTP Tools (Settings → HTTP Tools) ---- */
+/* Reuses .settings-folder-row for endpoint rows and .mcp-env-textarea for the header
+   editors — these classes cover only what has no existing equivalent. */
+
+.http-collection-form {
+  margin-bottom: 12px;
+}
+
+.http-method-badge {
+  flex-shrink: 0;
+  min-width: 52px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-align: center;
+  color: #7ec8ff;
+  background: rgba(126, 200, 255, 0.1);
+  border: 0.5px solid rgba(126, 200, 255, 0.2);
+}
+
+/* A state-changing method reads amber rather than the accent blue, so a POST or DELETE
+   is distinguishable from a read at a glance. */
+.http-method-badge.write {
+  color: #ffc97e;
+  background: rgba(255, 201, 126, 0.1);
+  border-color: rgba(255, 201, 126, 0.22);
+}
+
+.http-tool-path-hint {
+  color: rgba(150, 190, 230, 0.55);
+  font-size: 11.5px;
+}
+
+.http-confirm-badge {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: #ffc97e;
+}
+
+.http-confirm-badge i {
+  font-size: 14px;
+}
+
+.http-tool-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 0.5px solid rgba(100, 170, 255, 0.12);
+}
+
+.http-tool-form-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.http-tool-method {
+  flex: 0 0 130px;
+}
+
+.http-tool-path {
+  flex: 1;
+  min-width: 0;
+}
+
+.http-param-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 0.5px solid rgba(100, 170, 255, 0.1);
+}
+
+.http-param-row-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.http-param-name {
+  flex: 0 0 120px;
+}
+
+.http-param-description {
+  width: 100%;
+}
+
+.http-param-required {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: rgba(150, 190, 230, 0.75);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* ---- HTTP tool approval prompt ---- */
+
+.http-approval-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.http-approval-lead {
+  font-size: 13px;
+  color: #c8e6ff;
+  line-height: 1.5;
+}
+
+.http-approval-tool {
+  color: #ffc97e;
+  font-weight: 600;
+}
+
+.http-approval-args {
+  margin: 0;
+  padding: 10px;
+  max-height: 180px;
+  overflow: auto;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 0.5px solid rgba(100, 170, 255, 0.12);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  color: rgba(200, 230, 255, 0.85);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* The prompt answers itself when the deadline passes, so the deadline has to be visible.
+   Muted until the last 30s — this is information, not pressure, right up until it is. The
+   digits are tabular so a ticking clock doesn't reflow the line every second. */
+.http-approval-expiry,
+.tool-approval-card-expiry {
+  margin: 0;
+  font-size: 11.5px;
+  color: rgba(200, 230, 255, 0.55);
+}
+
+.http-approval-expiry strong,
+.tool-approval-card-expiry strong {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: rgba(200, 230, 255, 0.8);
+}
+
+.http-approval-expiry--soon,
+.tool-approval-card-expiry--soon {
+  color: #ffc97e;
+}
+
+.http-approval-expiry--soon strong,
+.tool-approval-card-expiry--soon strong {
+  color: #ffc97e;
+}
+
+.http-approval-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ---- In-chat tool approval card (Settings → HTTP Tools → "Ask me with") ---- */
+/* Sits at the end of #chat-log as the newest thing in the conversation. Amber-keyed to
+   match .http-method-badge.write — both mean "this one changes something". */
+
+.tool-approval-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 8px 0 4px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(255, 201, 126, 0.05);
+  border: 0.5px solid rgba(255, 201, 126, 0.25);
+}
+
+.tool-approval-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: #d8ecff;
+  line-height: 1.45;
+}
+
+.tool-approval-card-head i {
+  font-size: 15px;
+  color: #ffc97e;
+  flex-shrink: 0;
+}
+
+.tool-approval-card-head strong {
+  color: #ffc97e;
+  font-weight: 600;
+}
+
+.tool-approval-card-args {
+  margin: 0;
+  padding: 9px 10px;
+  max-height: 140px;
+  overflow: auto;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 0.5px solid rgba(100, 170, 255, 0.12);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: rgba(200, 230, 255, 0.85);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tool-approval-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

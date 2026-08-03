@@ -3,5 +3,48 @@
 # otherwise git records it as a gitlink/submodule.
 /wiki/
 
+# Agent working state — per-machine scratch, not project config.
+/0-cowork/
+/MEMORY.md
+
+# Per-machine Claude Code state — settings.local.json, and the worktrees/ checkouts each
+# feature branch gets. None of it belongs to anyone but the developer who made it.
+.claude/*
+# Skills are the exception: they're shared tooling, versioned with the code they drive, and
+# referenced from CLAUDE.md — a tracked file pointing at an ignored one helps nobody. The
+# negation needs the directory re-included explicitly, because git will not re-include a file
+# whose parent directory is excluded.
+!.claude/skills/
+
+# Dependencies
+/node_modules/
+
+# Build output.
+# dist-electron/ holds all three electron-vite bundles (main, preload, renderer —
+# see electron.vite.config.ts). dist/ is used by two different commands: `npm run
+# build:web` (Vite's default outDir) and `npm run package` (electron-builder's
+# default output dir), so one entry covers both.
+/dist-electron/
+/dist/
+
+# Incremental build state from `tsc -b` — both tsconfigs set composite: true,
+# which writes a .tsbuildinfo next to them.
+*.tsbuildinfo
+
+# Coverage reports (@vitest/coverage-v8 writes here by default).
+/coverage/
+
+# Secrets. Never commit a real key — .env.bak already holds live provider and
+# OAuth credentials. The example template is the one exception, since it carries
+# placeholder values and documents which variables exist.
+.env
+.env.*
+!.env.example
+
 # macOS
 .DS_Store
+
+# Claude
+Claude.md
+./claude
+MEMORY.md
