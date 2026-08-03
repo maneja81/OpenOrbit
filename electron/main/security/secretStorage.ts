@@ -31,9 +31,18 @@ export function encryptSecret(plainText: string): string {
 export function decryptSecret(stored: string): string {
   if (stored.startsWith("nodeCrypto:")) {
     const [, ivB64, authTagB64, dataB64] = stored.split(":");
-    const decipher = crypto.createDecipheriv("aes-256-gcm", getEncryptionKey(), Buffer.from(ivB64, "base64"));
-    decipher.setAuthTag(Buffer.from(authTagB64, "base64"));
-    return Buffer.concat([decipher.update(Buffer.from(dataB64, "base64")), decipher.final()]).toString("utf8");
+    try {
+      const decipher = crypto.createDecipheriv("aes-256-gcm", getEncryptionKey(), Buffer.from(ivB64, "base64"));
+      decipher.setAuthTag(Buffer.from(authTagB64, "base64"));
+      return Buffer.concat([decipher.update(Buffer.from(dataB64, "base64")), decipher.final()]).toString("utf8");
+    } catch {
+      // GCM auth failure (corrupted/truncated value, or a key that no longer matches)
+      // previously threw node:crypto's raw "Unsupported state or unable to authenticate
+      // data" straight out of this function, with no caller wrapping it — surfacing as an
+      // opaque crash rather than something the user could act on (reconnect the account,
+      // re-enter the key).
+      throw new Error("Failed to decrypt stored secret — it may be corrupted or the encryption key has changed.");
+    }
   }
   return stored;
 }
