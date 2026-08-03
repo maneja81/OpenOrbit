@@ -24,6 +24,13 @@ export type { HttpToolCollectionRow, HttpToolRow, HttpToolParam } from "../db/ht
 
 const PARAM_TYPES = ["string", "number", "boolean"];
 const PARAM_LOCATIONS = ["path", "query", "header", "body"];
+// Matches the capture class httpToolRequest.ts's own PLACEHOLDER_PATTERN uses for
+// {{name}} — a param name is later interpolated unescaped into a per-param RegExp when
+// substituting path placeholders, so anything outside this class (e.g. ".*", or an
+// unbalanced "(") either swallows every placeholder in the path or throws a SyntaxError
+// building the regex. Enforcing the same class the placeholder syntax already implies
+// closes that off at the one place params are created or edited.
+const PARAM_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 function assertPlainObject(value: unknown, message: string): asserts value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -69,6 +76,11 @@ function assertParamsShape(value: unknown, prefix: string): asserts value is Htt
   for (const entry of value) {
     assertPlainObject(entry, `${prefix} each param must be an object`);
     assertNonEmptyString(entry.name, `${prefix} each param needs a non-empty name`);
+    if (!PARAM_NAME_PATTERN.test(entry.name)) {
+      throw new Error(
+        `${prefix} param name "${entry.name}" must match ${PARAM_NAME_PATTERN} (letters, digits, underscore; not starting with a digit)`
+      );
+    }
     // The name becomes a key in the generated zod schema, so a duplicate would silently
     // overwrite the earlier one and drop a parameter the user thinks they declared.
     if (seen.has(entry.name)) {

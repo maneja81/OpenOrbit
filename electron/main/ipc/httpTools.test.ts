@@ -108,3 +108,34 @@ describe("httpTools:testTool argument names", () => {
     );
   });
 });
+
+describe("httpTools:createTool param name validation", () => {
+  function createTool(input: unknown): unknown {
+    return handlerFor("httpTools:createTool")(null, input);
+  }
+
+  const BASE_INPUT = { collectionId: "col-1", name: "Get Thing" };
+
+  // KI-11: param.name is later interpolated unescaped into a per-param RegExp
+  // (httpToolRequest.ts's path substitution). A name like ".*" builds a pattern that
+  // swallows every "{{...}}" placeholder in the path; an unbalanced "(" throws a
+  // SyntaxError building the regex. Restricting the name to the same class the {{name}}
+  // placeholder syntax already implies closes both off at creation time.
+  it.each([".*", "id)", "a b", "1id"])("rejects a param name that isn't a valid identifier: %s", (name) => {
+    expect(() =>
+      createTool({
+        ...BASE_INPUT,
+        params: [{ name, description: "", type: "string", location: "path", required: false }],
+      })
+    ).toThrow(/must match/);
+  });
+
+  it.each(["id", "user_id", "_private", "id2"])("accepts a valid identifier param name: %s", (name) => {
+    expect(() =>
+      createTool({
+        ...BASE_INPUT,
+        params: [{ name, description: "", type: "string", location: "path", required: false }],
+      })
+    ).not.toThrow();
+  });
+});
