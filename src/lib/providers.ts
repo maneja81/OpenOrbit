@@ -149,3 +149,44 @@ export function inferProviderId(url: string): string {
 export function voiceProviders(): AiProvider[] {
   return AI_PROVIDERS.filter((provider) => provider.supportsVoice);
 }
+
+/**
+ * Which provider a model id unmistakably belongs to, or null when nothing about it says.
+ *
+ * Only three shapes are unmistakable, and each is a *naming scheme* rather than a catalogue
+ * entry, so none of them goes stale when a provider ships a new model.
+ */
+function obviousProviderFor(model: string): string | null {
+  if (model.startsWith("claude-")) return "anthropic";
+  // OpenRouter namespaces everything as `vendor/model`, optionally behind its `~latest` marker.
+  if (model.includes("/") || model.startsWith("~")) return "openrouter";
+  if (/^(gpt-|chatgpt-|o\d)/.test(model)) return "openai";
+  return null;
+}
+
+/**
+ * Whether a model id looks like one the given provider actually serves.
+ *
+ * Advisory only — it drives a warning, never a refused write. It exists because switching an
+ * agent to a provider with no `defaultChatModel` leaves the old provider's id in place, and an
+ * agent reading "Claude" while still naming `gpt-4.1-mini` looks configured and 404s on first use.
+ *
+ * Framed as "does this obviously belong to someone *else*", not "is this on an allowlist for the
+ * chosen provider". The allowlist version is the tempting one and it is wrong: a false warning
+ * tells someone their working setup is broken, which is far more expensive than a missed one, and
+ * an allowlist manufactures those in bulk. Pointing the `openai` slot at an OpenAI-compatible
+ * gateway is a supported setup — that is what its editable URL is for — so `llama-3.3-70b-instruct`
+ * or an Azure-style deployment name under `openai` has to pass, as do bare `o1`/`o3` and every
+ * embedding, image and moderation id that will ship after this is written.
+ *
+ * So it stays quiet unless the id carries another provider's naming scheme, and quiet always for
+ * a blank id (that means "use the default"), an agent following the Chat slot, an unrecognised
+ * provider (which has its own warning), and `local`, where the user names their own models.
+ */
+export function modelBelongsToProvider(providerId: string, modelId: string): boolean {
+  const model = modelId.trim().toLowerCase();
+  if (model === "" || providerId === "" || providerId === "local" || !findProvider(providerId)) return true;
+
+  const obvious = obviousProviderFor(model);
+  return obvious === null || obvious === providerId;
+}

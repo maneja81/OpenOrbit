@@ -26,7 +26,7 @@ import { useHttpTools } from "@/hooks/useHttpTools";
 import { useUserContext } from "@/hooks/useUserContext";
 import { formatHumanizedError, humanizeError } from "@/lib/humanizeError";
 import { providerUrlWarning } from "@/lib/providerUrlWarning";
-import { AI_PROVIDERS, findProvider } from "@/lib/providers";
+import { AI_PROVIDERS, findProvider, modelBelongsToProvider } from "@/lib/providers";
 import { DEFAULT_SETTINGS_SECTION, sectionOnTransition } from "@/lib/settingsSection";
 import { SoundFxEvent, sfxPreviewSrc } from "@/hooks/useSoundFX";
 
@@ -290,7 +290,7 @@ export default function SettingsPanel({
    * agent must not take down a run it isn't part of. The cost is that the fallback is invisible,
    * so this is the surface that makes it visible where the user set it.
    */
-  const providerWarningFor = (providerId: string): string | undefined => {
+  const providerWarningFor = (providerId: string, model: string): string | undefined => {
     if (providerId === "") return undefined;
     const provider = findProvider(providerId);
     if (!provider) return `Unknown provider — this agent falls back to the Chat provider.`;
@@ -301,6 +301,12 @@ export default function SettingsPanel({
     }
     if (!row.apiUrl && !provider.baseUrl) {
       return `${provider.label} has no API URL — this agent falls back to the Chat provider.`;
+    }
+    // Credentials are fine, so the run reaches the provider — and is refused by it. Switching to
+    // a provider with no default model leaves the previous one's id in place (only the user knows
+    // which model they pulled onto a local server), and until now nothing said so.
+    if (!modelBelongsToProvider(providerId, model)) {
+      return `"${model}" doesn't look like a ${provider.label} model — this agent will likely fail on its first run.`;
     }
     return undefined;
   };
@@ -444,39 +450,146 @@ export default function SettingsPanel({
           <div className="detail-body">
             {activeSection === "models" && (
               <div className="agent-accordion-list">
-                <SettingsAccordion
-                  title="Chat"
-                  headerActions={
-                    <>
-                      {chatTestResult && (
-                        <span
-                          className={`settings-test-status ${chatTestResult.ok ? "settings-success" : "settings-error"}`}
-                          title={chatTestResult.detail}
-                        >
-                          {chatTestResult.detail}
-                        </span>
-                      )}
-                      <button
-                        type="button"
-                        className="settings-action-btn-sm settings-action-btn-ghost"
-                        onClick={() => runTestChat()}
-                        disabled={testingChat}
-                      >
-                        <TablerIcon name="ti-plug-connected" />
-                        <span>{testingChat ? "Testing…" : "Test"}</span>
-                      </button>
-                    </>
-                  }
-                >
+                <SettingsAccordion title="API keys" defaultOpen>
                   <p className="group-hint">
-                    Powers the orchestrator and every agent's chat/tool calls. Defaults to OpenAI — point it at
-                    OpenRouter, Ollama, or any other OpenAI-compatible host if you want a different model catalog.
+                    One key per provider. The Chat slot uses whichever provider is selected under
+                    Default models, and an agent pinned to a provider in Settings → Agents uses that
+                    provider's key.
+                  </p>
+                  <div className="group">
+                    <div className="card">
+                      {AI_PROVIDERS.map((provider) => {
+                        // The Chat provider's credentials still go through selectChat rather than a
+                        // plain save: the slot, its key and every inheriting agent's model are one
+                        // change, and a half-applied one is what selectChatProvider exists to prevent.
+                        const isChat = provider.id === chatSlotView.providerId;
+                        const row = providers.configured.find((entry) => entry.id === provider.id);
+                        const keySet = isChat ? chatSlotView.keySet : (row?.keySet ?? false);
+                        const saveKey = (apiKey: string) =>
+                          isChat
+                            ? void applyChat({ providerId: provider.id, apiKey })
+                            : void providers.save({ providerId: provider.id, apiKey });
+                        return (
+                          <div key={provider.id} className="row-field">
+                            <span>
+                              {provider.label}
+                              <small>
+                                {isChat ? "Chat provider · " : ""}
+                                {keySet
+                                  ? "Key saved"
+                                  : provider.keyRequired
+                                    ? "No API key yet"
+                                    : "No key needed — set the URL below"}
+                              </small>
+                            </span>
+                            <ApiKeyField
+                              label={`${provider.label} API key`}
+                              isSet={keySet}
+                              onSave={saveKey}
+                              // Removal always goes through the plain credential write, even for
+                              // the Chat provider. selectChatProvider refuses a blank key on a
+                              // provider that requires one — a sensible guard while *choosing* a
+                              // provider, but it made Remove impossible on whichever provider was
+                              // currently selected, answering the click with "OpenAI needs an API
+                              // key." A slot pointed at a provider with no key is just a fresh
+                              // install, and resolveProviderId already says so at run time.
+                              onClear={
+                                keySet ? () => void providers.save({ providerId: provider.id, apiKey: "" }) : undefined
+                              }
+                            />
+                            <TextField
+                              label={`${provider.label} API URL`}
+                              value={isChat ? chatSlotView.apiUrl : (row?.apiUrl ?? "")}
+                              placeholder={provider.baseUrl || "http://localhost:11434/v1"}
+                              warningFor={providerUrlWarning}
+                              onCommit={(apiUrl) =>
+                                isChat
+                                  ? void applyChat({ providerId: provider.id, apiUrl })
+                                  : void providers.save({ providerId: provider.id, apiUrl })
+                              }
+                            />
+                            {/* Only the Chat provider gets a Test button: the check resolves a
+                                credential *slot*, so there is nothing to test a provider that
+                                nothing is currently pointed at against. */}
+                            {isChat && (
+                              <div className="row-field-action">
+                                <button
+                                  type="button"
+                                  className="settings-action-btn-sm settings-action-btn-ghost"
+                                  onClick={() => runTestChat()}
+                                  disabled={testingChat}
+                                >
+                                  <TablerIcon name="ti-plug-connected" />
+                                  <span>{testingChat ? "Testing…" : "Test"}</span>
+                                </button>
+                                {chatTestResult && (
+                                  <span
+                                    className={`settings-test-status ${chatTestResult.ok ? "settings-success" : "settings-error"}`}
+                                    title={chatTestResult.detail}
+                                  >
+                                    {chatTestResult.detail}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                            {isChat && chatError && <p className="settings-error">{chatError}</p>}
+                          </div>
+                        );
+                      })}
+                      <div className="row-field">
+                        <span>
+                          Voice
+                          <small>
+                            {settings.voiceApiKeySet ? "Key saved · " : "No API key yet · "}
+                            Its own key, so speech can run on a different account from Chat
+                          </small>
+                        </span>
+                        <ApiKeyField
+                          label="Voice API key"
+                          isSet={settings.voiceApiKeySet}
+                          onSave={(key) => onUpdate({ voiceApiKey: key })}
+                        />
+                        <TextField
+                          label="Voice API URL"
+                          value={settings.voiceApiUrl}
+                          placeholder="https://api.openai.com/v1"
+                          warningFor={providerUrlWarning}
+                          onCommit={(voiceApiUrl) => onUpdate({ voiceApiUrl })}
+                        />
+                        <div className="row-field-action">
+                          <button
+                            type="button"
+                            className="settings-action-btn-sm settings-action-btn-ghost"
+                            onClick={() => runTestVoice()}
+                            disabled={testingVoice}
+                          >
+                            <TablerIcon name="ti-plug-connected" />
+                            <span>{testingVoice ? "Testing…" : "Test"}</span>
+                          </button>
+                          {voiceTestResult && (
+                            <span
+                              className={`settings-test-status ${voiceTestResult.ok ? "settings-success" : "settings-error"}`}
+                              title={voiceTestResult.detail}
+                            >
+                              {voiceTestResult.detail}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </SettingsAccordion>
+
+                <SettingsAccordion title="Default models" defaultOpen>
+                  <p className="group-hint">
+                    Which model each part of the app reaches for. An agent can name its own in
+                    Settings → Agents; every agent that doesn't follows the chat model here.
                   </p>
                   <div className="group">
                     <div className="card">
                       <label className="row-field">
                         <span>
-                          Provider
+                          Chat provider
                           <small>Switching also moves every agent that follows this slot</small>
                         </span>
                         <Combobox
@@ -486,132 +599,28 @@ export default function SettingsPanel({
                           ariaLabel="Chat provider"
                         />
                       </label>
-                      <ApiKeyField
-                        label="API Key"
-                        isSet={chatSlotView.keySet}
-                        onSave={(apiKey) => void applyChat({ providerId: chatSlotView.providerId, apiKey })}
-                        onClear={
-                          chatSlotView.keySet
-                            ? () => void applyChat({ providerId: chatSlotView.providerId, apiKey: "" })
-                            : undefined
-                        }
-                      />
                       <TextField
-                        label="API URL"
-                        value={chatSlotView.apiUrl}
-                        placeholder={chatProvider?.baseUrl || "http://localhost:11434/v1"}
-                        warningFor={providerUrlWarning}
-                        onCommit={(apiUrl) => void applyChat({ providerId: chatSlotView.providerId, apiUrl })}
-                      />
-                      <TextField
-                        label="Model ID"
+                        label="Chat model"
+                        hint="Powers the orchestrator and every agent's chat and tool calls"
                         value={settings.orchestratorModel}
                         placeholder={chatProvider?.defaultChatModel || DEFAULT_ORCHESTRATOR_MODEL}
                         onCommit={(model) => void applyChat({ providerId: chatSlotView.providerId, model })}
                       />
+                      {/* Also rendered here, not only beside the credentials. Both controls that
+                          can produce a chatError — the provider dropdown above and the model field
+                          — live in this card, and an explanation for a rejected pick that appears
+                          in a different accordion reads as unrelated. */}
                       {chatError && <p className="settings-error">{chatError}</p>}
-                    </div>
-                  </div>
-                </SettingsAccordion>
-
-                <SettingsAccordion title="Other providers">
-                  <p className="group-hint">
-                    Credentials for providers an individual agent can be pointed at, without making
-                    them your Chat provider. Set one up here, then pick it on the agent in Settings →
-                    Agents.
-                  </p>
-                  <div className="group">
-                    <div className="card">
-                      {AI_PROVIDERS.filter((provider) => provider.id !== chatSlotView.providerId).map(
-                        (provider) => {
-                          const row = providers.configured.find((entry) => entry.id === provider.id);
-                          return (
-                            <div key={provider.id} className="row-field">
-                              <span>
-                                {provider.label}
-                                <small>
-                                  {row?.keySet
-                                    ? "Configured"
-                                    : provider.keyRequired
-                                      ? "No API key yet"
-                                      : "No API URL yet"}
-                                </small>
-                              </span>
-                              <ApiKeyField
-                                label={`${provider.label} API key`}
-                                isSet={row?.keySet ?? false}
-                                onSave={(apiKey) => void providers.save({ providerId: provider.id, apiKey })}
-                                onClear={
-                                  row?.keySet
-                                    ? () => void providers.save({ providerId: provider.id, apiKey: "" })
-                                    : undefined
-                                }
-                              />
-                              <TextField
-                                label={`${provider.label} API URL`}
-                                value={row?.apiUrl ?? ""}
-                                placeholder={provider.baseUrl || "http://localhost:11434/v1"}
-                                warningFor={providerUrlWarning}
-                                onCommit={(apiUrl) => void providers.save({ providerId: provider.id, apiUrl })}
-                              />
-                            </div>
-                          );
-                        }
-                      )}
-                    </div>
-                  </div>
-                </SettingsAccordion>
-
-                <SettingsAccordion
-                  title="Voice"
-                  headerActions={
-                    <>
-                      {voiceTestResult && (
-                        <span
-                          className={`settings-test-status ${voiceTestResult.ok ? "settings-success" : "settings-error"}`}
-                          title={voiceTestResult.detail}
-                        >
-                          {voiceTestResult.detail}
-                        </span>
-                      )}
-                      <button
-                        type="button"
-                        className="settings-action-btn-sm settings-action-btn-ghost"
-                        onClick={() => runTestVoice()}
-                        disabled={testingVoice}
-                      >
-                        <TablerIcon name="ti-plug-connected" />
-                        <span>{testingVoice ? "Testing…" : "Test"}</span>
-                      </button>
-                    </>
-                  }
-                >
-                  <p className="group-hint">
-                    Powers speech transcription and spoken replies. Defaults to OpenAI, same as Chat — an
-                    independent key/URL here in case you want voice on a different provider.
-                  </p>
-                  <div className="group">
-                    <div className="card">
-                      <ApiKeyField
-                        label="API Key"
-                        isSet={settings.voiceApiKeySet}
-                        onSave={(key) => onUpdate({ voiceApiKey: key })}
-                      />
-                      <TextField
-                        label="API URL"
-                        value={settings.voiceApiUrl}
-                        placeholder="https://api.openai.com/v1"
-                        warningFor={providerUrlWarning}
-                        onCommit={(voiceApiUrl) => onUpdate({ voiceApiUrl })}
-                      />
                       <TextField
                         label="Transcription model"
+                        hint="Turns what you say into text"
                         value={settings.voiceTranscriptionModel}
                         placeholder="whisper-1"
                         onCommit={(voiceTranscriptionModel) => onUpdate({ voiceTranscriptionModel })}
                       />
                       <TextField
                         label="Speech (TTS) model"
+                        hint="Reads replies out loud"
                         value={settings.voiceTtsModel}
                         placeholder="gpt-4o-mini-tts"
                         onCommit={(voiceTtsModel) => onUpdate({ voiceTtsModel })}
@@ -731,7 +740,17 @@ export default function SettingsPanel({
                           ...(nextModel ? { model: nextModel } : {}),
                         });
                       }}
-                      providerWarning={providerWarningFor(agent.provider_id)}
+                      providerWarning={providerWarningFor(agent.provider_id, agent.model)}
+                      // What a blank field would resolve to, so "leave it empty" is a stated
+                      // option rather than something the user has to discover. Mirrors
+                      // resolveAgentModel in electron/main/ai/agents.ts — including the empty
+                      // case, where that function refuses rather than filling one in, and the
+                      // accordion has to say "required" instead of naming a fallback.
+                      modelPlaceholder={
+                        agent.provider_id === ""
+                          ? settings.orchestratorModel
+                          : (findProvider(agent.provider_id)?.defaultChatModel ?? settings.orchestratorModel)
+                      }
                       onChangePrompt={(prompt) => onUpdateAgent(agent.id, { prompt })}
                       onChangeEnabled={(enabled) => onUpdateAgent(agent.id, { enabled })}
                       availableMcpServers={mcpServers}

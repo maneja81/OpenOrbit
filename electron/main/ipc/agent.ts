@@ -624,6 +624,13 @@ export function registerAgentHandlers() {
     if (typeof input.name !== "string" || input.name.trim().length === 0) {
       throw new Error("agent:create requires a non-empty name");
     }
+    // Shape only — whether the id names a provider this build knows is createAgent's call, the
+    // same division agent:update uses.
+    for (const field of ["icon", "tagline", "description", "model", "providerId", "prompt"] as const) {
+      if (input[field] !== undefined && typeof input[field] !== "string") {
+        throw new Error(`agent:create input.${field} must be a string`);
+      }
+    }
     return createAgent(input);
   });
 
@@ -693,7 +700,7 @@ export function registerAgentHandlers() {
       if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
         throw new Error("agent:importFromFile requires a plain object entry");
       }
-      const { name, icon, tagline, description, model, prompt } = entry as Partial<AgentExport>;
+      const { name, icon, tagline, description, model, providerId, prompt } = entry as Partial<AgentExport>;
       if (typeof name !== "string" || name.trim().length === 0) {
         throw new Error("agent:importFromFile requires a non-empty name for every agent");
       }
@@ -703,6 +710,9 @@ export function registerAgentHandlers() {
         tagline: typeof tagline === "string" ? tagline : "",
         description: typeof description === "string" ? description : "",
         model: typeof model === "string" ? model : "",
+        // Absent in files written before per-agent providers; importAgent also drops any id this
+        // build doesn't recognise.
+        providerId: typeof providerId === "string" ? providerId : "",
         prompt: typeof prompt === "string" ? prompt : "",
       };
     });

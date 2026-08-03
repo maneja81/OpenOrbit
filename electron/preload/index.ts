@@ -224,7 +224,7 @@ const agentsAPI = {
       tagline?: string;
       description?: string;
       model?: string;
-        providerId?: string;
+      providerId?: string;
       prompt?: string;
     }): Promise<AgentRow> => ipcRenderer.invoke("agent:create", input),
     orchestratorPrompt: (): Promise<string> => ipcRenderer.invoke("agent:orchestratorPrompt"),
