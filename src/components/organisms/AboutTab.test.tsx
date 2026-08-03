@@ -17,6 +17,7 @@ function stubBridge() {
       get: vi.fn(async () => ({ packageVersion: "1.0.0", electron: "43.0.0", node: "22.0.0", platform: "darwin" })),
       storage: vi.fn(async () => ({ cacheBytes: 1024, dbBytes: 2048, knowledgeBytes: 512 })),
       stats: vi.fn(async () => ({ messages: 3, agents: 4 })),
+      latestRelease: vi.fn(async () => ({ version: "0.0.0", releaseDate: "", releaseNotes: "", releaseUrl: "" })),
       clearCache,
     },
     fs: { openExternal, revealInFolder },

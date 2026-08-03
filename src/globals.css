@@ -1582,6 +1582,7 @@ svg#oc {
 #tourbtn,
 #aboutbtn,
 #helpbtn {
+  position: relative;
   width: 34px;
   height: 34px;
   border-radius: 50%;
@@ -1593,6 +1594,21 @@ svg#oc {
   justify-content: center;
   transition: all 0.2s;
   padding: 7px;
+}
+
+/* A newer release than this build has been published (AppControls.tsx). Positioned against
+   #aboutbtn's own `position: relative` above rather than a wrapping element, so it tracks the
+   icon exactly. */
+.update-dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #50a0ff;
+  border: 1.5px solid #00060f;
+  box-shadow: 0 0 4px rgba(80, 160, 255, 0.8);
 }
 
 #setbtn:hover {
