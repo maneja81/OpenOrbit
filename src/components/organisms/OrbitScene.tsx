@@ -38,6 +38,8 @@ interface OrbitSceneProps {
   locationEnabled: boolean;
   cognitiveState: string;
   sessionStats: string;
+  version: string;
+  updateAvailable: boolean;
   children?: ReactNode;
 }
 
@@ -66,6 +68,8 @@ export default function OrbitScene({
   locationEnabled,
   cognitiveState,
   sessionStats,
+  version,
+  updateAvailable,
   children,
 }: OrbitSceneProps) {
   const activeLineD = activeAgent ? lineGeometry[activeAgent] : undefined;
@@ -111,7 +115,13 @@ export default function OrbitScene({
         onToggleFullscreen={onToggleFullscreen}
       />
       <StatusBar statusText={statusText} />
-      <AppControls onOpenSettings={onOpenSettings} onStartTour={onStartTour} onOpenAbout={onOpenAbout} />
+      <AppControls
+        onOpenSettings={onOpenSettings}
+        onStartTour={onStartTour}
+        onOpenAbout={onOpenAbout}
+        version={version}
+        updateAvailable={updateAvailable}
+      />
       <div id="widgets-left" className={entering ? "entering" : undefined}>
         <TokenUsageWidget steps={steps} />
       </div>

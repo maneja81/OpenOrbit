@@ -1,21 +1,13 @@
 import { resolve } from "node:path";
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 import react from "@vitejs/plugin-react";
-import { resolveReleaseInfo } from "./scripts/releaseInfo";
+import { resolveCommit } from "./scripts/releaseInfo";
 
-// Resolved once per build, never at runtime, so the shipped app makes no release-check
-// network call and needs no GitHub token. resolveReleaseInfo never rejects — an offline
-// build falls back to 0.0.0 rather than failing (see scripts/releaseInfo.ts).
-const release = await resolveReleaseInfo();
-
-/** JSON.stringify is required, not cosmetic: release notes are arbitrary markdown carrying
- * quotes and newlines, which would produce broken JS if substituted raw. */
-export const releaseDefines: Record<string, string> = {
-  __APP_RELEASE_VERSION__: JSON.stringify(release.version),
-  __APP_RELEASE_DATE__: JSON.stringify(release.releaseDate),
-  __APP_RELEASE_NOTES__: JSON.stringify(release.releaseNotes),
-  __APP_RELEASE_URL__: JSON.stringify(release.releaseUrl),
-  __APP_COMMIT__: JSON.stringify(release.commit),
+// The packaged app has no .git dir of its own, so the building machine's commit can only
+// ever be captured here, at build time — resolveCommit() returns "" without a .git dir
+// (see scripts/releaseInfo.ts) rather than throwing, so an archive-only build still works.
+export const buildDefines: Record<string, string> = {
+  __APP_COMMIT__: JSON.stringify(resolveCommit()),
 };
 
 export default defineConfig({
@@ -51,7 +43,7 @@ export default defineConfig({
   },
   renderer: {
     root: ".",
-    define: releaseDefines,
+    define: buildDefines,
     build: {
       outDir: "dist-electron/renderer",
       rollupOptions: {

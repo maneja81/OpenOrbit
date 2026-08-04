@@ -18,15 +18,13 @@ interface AboutTabProps {
   sessionElapsedMs: number;
 }
 
-/** Every value below is empty on a build made offline or before the first release was
- * published, so each consumer hides its row rather than showing a blank. */
-const RELEASE = {
-  version: __APP_RELEASE_VERSION__,
-  date: __APP_RELEASE_DATE__,
-  notes: __APP_RELEASE_NOTES__,
-  url: __APP_RELEASE_URL__,
-  commit: __APP_COMMIT__,
-};
+/** __APP_COMMIT__ is the only piece of release metadata still resolved at build time — the
+ * building machine's git commit, which the packaged app has no other way to know (see
+ * scripts/releaseInfo.ts). Everything else about "what's the latest release" is fetched live,
+ * below — a build-time value could only ever compare a build against itself. */
+const BUILD_COMMIT = __APP_COMMIT__;
+
+const EMPTY_RELEASE: ReleaseInfo = { version: "0.0.0", releaseDate: "", releaseNotes: "", releaseUrl: "" };
 
 function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
@@ -45,6 +43,7 @@ export default function AboutTab({ sessionElapsedMs }: AboutTabProps) {
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [storage, setStorage] = useState<AppStorageInfo | null>(null);
   const [stats, setStats] = useState<AppStats | null>(null);
+  const [release, setRelease] = useState<ReleaseInfo>(EMPTY_RELEASE);
   const [error, setError] = useState<string | null>(null);
   const [openLicense, setOpenLicense] = useState<string | null>(null);
   const [clearing, setClearing] = useState(false);
@@ -57,14 +56,18 @@ export default function AboutTab({ sessionElapsedMs }: AboutTabProps) {
       window.agentsAPI.appInfo.get(),
       window.agentsAPI.appInfo.storage(),
       window.agentsAPI.appInfo.stats(),
+      window.agentsAPI.appInfo.latestRelease(),
     ])
-      .then(([nextInfo, nextStorage, nextStats]) => {
+      .then(([nextInfo, nextStorage, nextStats, nextRelease]) => {
         if (cancelled) return;
         setInfo(nextInfo);
         setStorage(nextStorage);
         setStats(nextStats);
+        setRelease(nextRelease);
       })
       .catch((e) => {
+        // latestRelease() itself never rejects (see ipc/updateCheck.ts) — this only fires on
+        // an IPC-level failure, same as the three calls it joined before it.
         if (!cancelled) setError(formatHumanizedError(humanizeError(e)));
       });
     return () => {
@@ -102,7 +105,7 @@ export default function AboutTab({ sessionElapsedMs }: AboutTabProps) {
   const copyDiagnostics = useCallback(async () => {
     if (!info) return;
     const lines = [
-      `${info.name} ${info.packageVersion}${RELEASE.commit ? ` (build ${RELEASE.commit})` : ""}`,
+      `${info.name} ${info.packageVersion}${BUILD_COMMIT ? ` (build ${BUILD_COMMIT})` : ""}`,
       `Electron ${info.electronVersion} / Node ${info.nodeVersion} / Chrome ${info.chromeVersion}`,
       `${formatPlatformName(info.platform)} ${info.osVersion} (${info.arch}) — kernel ${info.osRelease}`,
     ];
@@ -135,8 +138,8 @@ export default function AboutTab({ sessionElapsedMs }: AboutTabProps) {
     setOpenLicense((prev) => (prev === key ? null : key));
   }, []);
 
-  const releaseDate = formatReleaseDate(RELEASE.date);
-  const updateAvailable = info ? isUpdateAvailable(RELEASE.version, info.packageVersion) : false;
+  const releaseDate = formatReleaseDate(release.releaseDate);
+  const updateAvailable = info ? isUpdateAvailable(release.version, info.packageVersion) : false;
   const pending = bridgeReady && !info && !error;
 
   return (
@@ -158,18 +161,18 @@ export default function AboutTab({ sessionElapsedMs }: AboutTabProps) {
               <Row label="Version" hint="This build">
                 <span className="about-value">{info?.packageVersion ?? "…"}</span>
               </Row>
-              {RELEASE.version !== "0.0.0" && (
+              {release.version !== "0.0.0" && (
                 <Row label="Latest release">
                   <span className="about-value">
-                    {RELEASE.version}
+                    {release.version}
                     {releaseDate && <small> · {releaseDate}</small>}
                     {updateAvailable && <span className="about-badge">Update available</span>}
                   </span>
                 </Row>
               )}
-              {RELEASE.commit && (
+              {BUILD_COMMIT && (
                 <Row label="Build">
-                  <span className="about-value about-value-mono">{RELEASE.commit}</span>
+                  <span className="about-value about-value-mono">{BUILD_COMMIT}</span>
                 </Row>
               )}
               {info && (
@@ -229,13 +232,13 @@ export default function AboutTab({ sessionElapsedMs }: AboutTabProps) {
           </SettingsAccordion>
         )}
 
-        {RELEASE.notes && (
+        {release.releaseNotes && (
           <SettingsAccordion
             icon="ti-sparkles"
-            title={`What's new in ${RELEASE.version}`}
+            title={`What's new in ${release.version}`}
             headerActions={
-              RELEASE.url ? (
-                <button className="settings-action-btn-sm" onClick={() => openLink(RELEASE.url)}>
+              release.releaseUrl ? (
+                <button className="settings-action-btn-sm" onClick={() => openLink(release.releaseUrl)}>
                   <span>View on GitHub</span>
                   <TablerIcon name="ti-external-link" />
                 </button>
@@ -243,7 +246,7 @@ export default function AboutTab({ sessionElapsedMs }: AboutTabProps) {
             }
           >
             <div className="about-notes">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{RELEASE.notes}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{release.releaseNotes}</ReactMarkdown>
             </div>
           </SettingsAccordion>
         )}

@@ -65,6 +65,7 @@ export function useConnectors() {
 
   const test = useCallback(async (id: string) => {
     if (!hasAgentsAPI()) return null;
+    setError(null);
     try {
       return await window.agentsAPI.connectors.test(id);
     } catch (e) {
@@ -75,6 +76,7 @@ export function useConnectors() {
 
   const getSettings = useCallback(async (id: string): Promise<Record<string, string>> => {
     if (!hasAgentsAPI()) return {};
+    setError(null);
     try {
       return await window.agentsAPI.connectors.getSettings(id);
     } catch (e) {
@@ -94,5 +96,18 @@ export function useConnectors() {
     }
   }, []);
 
-  return { connectors, connectingId, error, refresh, connect, disconnect, test, getSettings, saveSettings };
+  const clearError = useCallback(() => setError(null), []);
+
+  return {
+    connectors,
+    connectingId,
+    error,
+    refresh,
+    connect,
+    disconnect,
+    test,
+    getSettings,
+    saveSettings,
+    clearError,
+  };
 }

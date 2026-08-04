@@ -17,6 +17,22 @@ apps, and Google account.
 
 <img src="public/openorbit.webp" alt="OpenOrbit orbit UI screenshot">
 
+## Download
+
+Builds are unsigned — expect a Gatekeeper prompt on macOS (right-click → Open) or a
+SmartScreen warning on Windows the first time you run one.
+
+| Platform | Download |
+| --- | --- |
+| macOS (Apple Silicon) | [OpenOrbit-0.1.0-arm64.dmg](https://github.com/maneja81/OpenOrbit/releases/download/v0.1.0/OpenOrbit-0.1.0-arm64.dmg) |
+| macOS (Intel) | [OpenOrbit-0.1.0-x64.dmg](https://github.com/maneja81/OpenOrbit/releases/download/v0.1.0/OpenOrbit-0.1.0-x64.dmg) |
+| Windows | [OpenOrbit.Setup.0.1.0.exe](https://github.com/maneja81/OpenOrbit/releases/download/v0.1.0/OpenOrbit.Setup.0.1.0.exe) |
+| Linux | [OpenOrbit-0.1.0.AppImage](https://github.com/maneja81/OpenOrbit/releases/download/v0.1.0/OpenOrbit-0.1.0.AppImage) |
+
+These links are for **v0.1.0** specifically — the filenames carry the version, so they'll
+change on the next release. [Releases](https://github.com/maneja81/OpenOrbit/releases)
+always has the current set.
+
 ## How it works
 
 Instead of one chatbot, you get a roster of agents visualized as nodes orbiting a central

@@ -1,13 +1,9 @@
 /// <reference types="vite/client" />
 
-/** Build-time release metadata, substituted by the `define` block in electron.vite.config.ts
- * (mirrored into vite.config.ts for `dev:web`). Resolved from the OpenOrbit repo's latest
- * release when the build runs; every one of these is "" — and the version "0.0.0" — when no
- * release exists or the build was offline, so consumers must handle the empty case. */
-declare const __APP_RELEASE_VERSION__: string;
-declare const __APP_RELEASE_DATE__: string;
-declare const __APP_RELEASE_NOTES__: string;
-declare const __APP_RELEASE_URL__: string;
+/** The building machine's git commit, substituted by the `define` block in
+ * electron.vite.config.ts (mirrored into vite.config.ts for `dev:web`). "" when the build ran
+ * without a .git dir — the packaged app has none of its own, so this is the only point the
+ * commit is ever knowable (see scripts/releaseInfo.ts). */
 declare const __APP_COMMIT__: string;
 
 /** Build-time overrides for the About screen's outbound links (src/lib/appLinks.ts).
@@ -364,6 +360,16 @@ interface AppStats {
   messageCount: number;
 }
 
+/** Mirrors ReleaseInfo in scripts/releaseInfo.ts — the renderer does not import that module,
+ * so `tsc` will NOT catch editing only one side. "0.0.0" is the deliberate "no release found"
+ * sentinel; every field is "" alongside it. */
+interface ReleaseInfo {
+  version: string;
+  releaseDate: string;
+  releaseNotes: string;
+  releaseUrl: string;
+}
+
 interface Window {
   agentsAPI: {
     ping: () => Promise<string>;
@@ -576,6 +582,10 @@ interface Window {
       storage: () => Promise<AppStorageInfo>;
       stats: () => Promise<AppStats>;
       clearCache: () => Promise<number>;
+      /** Live, once per call — unlike everything else on this namespace this hits the
+       * network (unauthenticated GitHub API). Never rejects; a failed/offline check resolves
+       * to the "0.0.0" sentinel like every other releaseInfo consumer. */
+      latestRelease: () => Promise<ReleaseInfo>;
     };
     dev: {
       log: (...args: unknown[]) => void;

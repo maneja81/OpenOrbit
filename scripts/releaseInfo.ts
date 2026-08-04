@@ -1,18 +1,27 @@
 /**
- * Resolves the app's release metadata once, at build time, for injection into the renderer
- * (see electron.vite.config.ts). Runs against the public release repo, so the request is
- * unauthenticated and no token is ever bundled into the app — only the resolved values are.
+ * Resolves the app's release metadata. Runs against the public release repo, so the request
+ * is unauthenticated and no token is ever bundled into the app — only the resolved values
+ * are.
  *
- * Hard requirement: this must never throw and never reject. An offline `npm run build` has
- * to succeed, so every failure path resolves to FALLBACK_RELEASE_INFO instead. `0.0.0` is
- * the deliberate "no release tag found" sentinel; the About screen hides the row on it.
+ * Two callers, deliberately different in what they need from here:
+ *  - `electron.vite.config.ts` calls `resolveCommit()` alone, at build time, to bake the
+ *    building machine's git commit into the shipped app — the packaged app has no .git dir
+ *    of its own, so this is the only point the commit is ever knowable.
+ *  - `electron/main/ipc/updateCheck.ts` calls `resolveReleaseInfo()` at runtime, once per
+ *    launch, to check whether a newer release has been published since this build — that has
+ *    to happen live or it can never detect a release that shipped after the build ran.
+ *
+ * Hard requirement either way: this must never throw and never reject. An offline
+ * `npm run build` has to succeed, and a launch with no network has to proceed. Every failure
+ * path resolves to FALLBACK_RELEASE_INFO instead. `0.0.0` is the deliberate "no release tag
+ * found" sentinel; consumers hide the row on it.
  */
 
 import { execFileSync } from "node:child_process";
 
 const GITHUB_API = "https://api.github.com";
 const ACCEPT_HEADER = "application/vnd.github+json";
-const DEFAULT_REPO = "maneja81/OpenOrbit";
+export const DEFAULT_REPO = "maneja81/OpenOrbit";
 
 // Bounds the worst case for `npm run dev` on a slow or captive network — without it, a
 // hanging request would stall every build behind it.

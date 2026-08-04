@@ -24,6 +24,7 @@ import { registerKnowledgeBaseHandlers } from "./ipc/knowledgeBase";
 import { registerTaskHandlers } from "./ipc/tasks";
 import { registerUserInfoHandlers } from "./ipc/userInfo";
 import { registerAppInfoHandlers } from "./ipc/appInfo";
+import { registerUpdateCheckHandlers } from "./ipc/updateCheck";
 import { ensureAppDirectories, migrateLegacyUserData } from "./appDirs";
 import { startExplorerDaemon, stopExplorerDaemon } from "./ai/webSearchDaemon";
 import { startTaskScheduler, stopTaskScheduler, waitForInFlightPoll } from "./tasks/scheduler";
@@ -132,6 +133,7 @@ app.whenReady().then(() => {
   registerTaskHandlers();
   registerUserInfoHandlers();
   registerAppInfoHandlers();
+  registerUpdateCheckHandlers();
   // Fire-and-forget: Explorer's tools await getExplorerDaemonPort() themselves, so a
   // slow/failed daemon start doesn't block app launch — it just fails that tool call later.
   // The .catch is required, not optional: Node's default disposition for an unhandled
