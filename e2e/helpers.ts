@@ -171,13 +171,19 @@ export async function openCombobox(page: Page, ariaLabel: string): Promise<void>
   await clickSelector(page, `[aria-haspopup="listbox"][aria-label="${ariaLabel}"]`);
 }
 
-// Combobox options select on mousedown (not click) — e.preventDefault() there is deliberate,
-// keeping the search input focused instead of blurring it — so a synthetic .click() (which never
-// fires mousedown) is a silent no-op against them.
+// Combobox/SlashCommandMenu options select on mousedown (not click) — e.preventDefault() there is
+// deliberate, keeping the search input focused instead of blurring it — so a synthetic .click()
+// (which never fires mousedown) is a silent no-op against them. Matches an option whose *own*
+// label text (`.combobox-option`'s full text, or a SlashCommandMenu item's `.slash-menu-label`
+// specifically) equals optionText — SlashCommandMenu concatenates label+sublabel into one
+// textContent with no separator, so a plain full-text match misses every item that has one.
 export async function selectComboboxOption(page: Page, optionText: string): Promise<void> {
   const found = await page.evaluate((t) => {
     const els = [...document.querySelectorAll('[role="listbox"] [role="option"]')];
-    const el = els.find((e) => e.textContent?.trim() === t);
+    const el = els.find((e) => {
+      const label = e.querySelector(".slash-menu-label");
+      return (label ? label.textContent?.trim() : e.textContent?.trim()) === t;
+    });
     if (!el) return false;
     el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     return true;
