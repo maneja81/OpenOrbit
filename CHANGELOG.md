@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.0] — 2026-08-05
+## [0.1.1] — 2026-08-05
 
 ### Added
 
@@ -448,6 +448,6 @@ build from source.
   low), `fast-csv` (denial of service, low), and `exceljs` 3.4.0 → 3.10.0.
   ([#5](https://github.com/maneja81/OpenOrbit/pull/5))
 
-[Unreleased]: https://github.com/maneja81/OpenOrbit/compare/v0.2.0...develop
-[0.2.0]: https://github.com/maneja81/OpenOrbit/compare/v0.1.0...v0.2.0
+[Unreleased]: https://github.com/maneja81/OpenOrbit/compare/v0.1.1...develop
+[0.1.1]: https://github.com/maneja81/OpenOrbit/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/maneja81/OpenOrbit/releases/tag/v0.1.0
