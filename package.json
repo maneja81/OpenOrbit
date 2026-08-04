@@ -24,7 +24,8 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "node --env-file-if-exists=.env node_modules/.bin/playwright test -c e2e/playwright.config.ts"
+    "test:e2e": "bash scripts/run-e2e-isolated.sh",
+    "test:e2e:local": "node --env-file-if-exists=.env node_modules/.bin/playwright test -c e2e/playwright.config.ts"
   },
   "build": {
     "appId": "com.mohitaneja.openorbit",
