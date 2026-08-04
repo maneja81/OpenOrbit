@@ -5,6 +5,63 @@ All notable changes to OpenOrbit are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **A Help button in the bottom-right dock** opens the OpenOrbit GitHub wiki in the
+  default browser. The bottom chrome dock is now split in two — Info and the app
+  version stay bottom-left, Help and Settings move to a new bottom-right dock — and
+  the tour-replay button switches from a question-mark icon to a route icon to free
+  `?` for Help.
+  ([#97](https://github.com/maneja81/OpenOrbit/pull/97))
+- **The app checks for a new release at launch** and badges the existing About icon
+  rather than adding a new toast/banner system. The previous build-time-only check
+  could only ever compare a build against itself, so it could never detect a release
+  published after the build ran. No auto-download or install — the project isn't
+  code-signed, so `electron-updater`'s silent-install path can't run on macOS, and a
+  Windows/Linux-only version would give a different experience per platform; this
+  only tells the user a release exists.
+  ([#98](https://github.com/maneja81/OpenOrbit/pull/98))
+- **Orbit now acknowledges config changes in chat.** Adding a knowledge file,
+  enabling location, or connecting a connector attached to an agent produces one
+  coalesced message (e.g. "I've got report.pdf. How can I help?"), shown immediately
+  if Settings is closed or once on close if several changes were made together.
+  ([#99](https://github.com/maneja81/OpenOrbit/pull/99))
+- **A dedicated `@` agent-mention menu in the chat input**, separate from the
+  existing `/` command menu. Typing `@` (or clicking the new "Agents" toolbar chip)
+  opens a menu of every enabled agent, grouped under "System" (the four built-in
+  agents) and "Custom" (user-created ones); selecting one inserts a plain-name
+  mention.
+  ([#101](https://github.com/maneja81/OpenOrbit/pull/101))
+- A Download section in the README linking directly to each v0.1.0 release asset
+  (macOS arm64/x64 `.dmg`, Windows `.exe`, Linux `.AppImage`), noting these are
+  versioned filenames that change next release, and flagging that builds are
+  unsigned so the Gatekeeper/SmartScreen prompt on first run isn't a surprise.
+  ([#96](https://github.com/maneja81/OpenOrbit/pull/96))
+
+### Changed
+
+- The orchestrator's internal reasoning now explicitly decomposes multi-part user
+  messages, checks which specialist/resource actually covers each part, and is
+  honest about the one-handoff-per-message architectural limit instead of implying
+  a same-turn multi-specialist chain it can't execute. Atlas no longer offers to
+  search "outside the knowledge base" since it has no web tools to back that up.
+  A pre-existing routing defect — the orchestrator can pick the wrong specialist
+  based on which one ran the previous turn — is not fixed by this change and is
+  tracked as follow-up.
+  ([#100](https://github.com/maneja81/OpenOrbit/pull/100))
+
+### Fixed
+
+- **Errors in MCP Servers, Connectors and HTTP Tools settings never cleared.** The
+  panels' data hooks live for the app's lifetime, and 8 methods across
+  `useMcpServers`/`useConnectors`/`useHttpTools` set `error` on failure but
+  bypassed the hooks' shared `run()` helper that clears it on entry — so a stale
+  failure could survive a tab switch or a full Settings close/reopen, outliving
+  the mutation that caused it.
+  ([#99](https://github.com/maneja81/OpenOrbit/pull/99))
+
 ## [0.1.0] — 2026-08-03
 
 The first release. Installers for macOS, Windows and Linux are attached to
@@ -356,4 +413,5 @@ build from source.
   low), `fast-csv` (denial of service, low), and `exceljs` 3.4.0 → 3.10.0.
   ([#5](https://github.com/maneja81/OpenOrbit/pull/5))
 
+[Unreleased]: https://github.com/maneja81/OpenOrbit/compare/v0.1.0...develop
 [0.1.0]: https://github.com/maneja81/OpenOrbit/releases/tag/v0.1.0
