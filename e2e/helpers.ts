@@ -61,19 +61,26 @@ export async function clickSelector(page: Page, selector: string): Promise<void>
   if (!found) throw new Error(`clickSelector: no element matching "${selector}"`);
 }
 
+// Retries briefly: a preceding action (e.g. a create submit) can resolve before React's list
+// re-render commits, and the target text isn't in the DOM yet on the very next evaluate.
 export async function clickByText(page: Page, text: string, scopeSelector?: string): Promise<void> {
-  const found = await page.evaluate(
-    ({ t, scopeSelector }) => {
-      const root = scopeSelector ? document.querySelector(scopeSelector) : document;
-      if (!root) return false;
-      const els = [...root.querySelectorAll('button, a, [role="button"], [role="radio"], [role="option"]')];
-      const el = els.find((e) => e.textContent?.trim() === t);
-      if (!el) return false;
-      (el as HTMLElement).click();
-      return true;
-    },
-    { t: text, scopeSelector }
-  );
+  const deadline = Date.now() + 3_000;
+  let found = false;
+  while (!found && Date.now() < deadline) {
+    found = await page.evaluate(
+      ({ t, scopeSelector }) => {
+        const root = scopeSelector ? document.querySelector(scopeSelector) : document;
+        if (!root) return false;
+        const els = [...root.querySelectorAll('button, a, [role="button"], [role="radio"], [role="option"]')];
+        const el = els.find((e) => e.textContent?.trim() === t);
+        if (!el) return false;
+        (el as HTMLElement).click();
+        return true;
+      },
+      { t: text, scopeSelector }
+    );
+    if (!found) await new Promise((r) => setTimeout(r, 100));
+  }
   if (!found) throw new Error(`clickByText: no element with text "${text}"`);
 }
 
