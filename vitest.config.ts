@@ -31,6 +31,10 @@ export default defineConfig({
       // Gitignored third-party reference material (see .gitignore) — Playwright specs and
       // Next.js sources for a demo app this project doesn't build or depend on.
       "0-cowork/reference/**",
+      // Real Electron E2E specs (see e2e/playwright.config.ts) — vitest's default *.spec.ts
+      // glob would otherwise pick these up and run them through jsdom via `test.describe()`,
+      // which throws immediately since they're written against @playwright/test's runner.
+      "e2e/**",
     ],
   },
 });

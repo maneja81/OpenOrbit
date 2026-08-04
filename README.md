@@ -120,6 +120,30 @@ npm run lint      # eslint
 On first run you'll be asked to name the orchestrator, introduce yourself, and enter an
 API key. Nothing else is required — there are no environment variables to set.
 
+## End-to-end tests
+
+`e2e/` holds Playwright specs that drive the real Electron app — currently onboarding, with
+more feature/setting coverage planned. Two ways to run them:
+
+```bash
+npm run test:e2e         # isolated: throwaway worktree, own install/build, markdown report
+npm run test:e2e:local   # fast: runs against this checkout's existing dist-electron build
+```
+
+`npm run test:e2e` never touches this checkout or your real
+`~/Library/Application Support/OpenOrbit` database — it creates a detached worktree from the
+current branch, copies in `.env.test`, installs and builds there, runs the suite against a
+sandboxed `--user-data-dir`, writes a report to `e2e/reports/<run-id>/report.md` in this
+checkout, and removes the throwaway worktree whether the run passed or failed. `npm install`
+is skipped on a cache hit (keyed on `package-lock.json`), so repeat runs are fast.
+
+Create a `.env.test` (gitignored, same shape as `.env`) with whichever provider keys the
+specs need — at minimum `OPENAI_API_KEY`. Which provider a spec authenticates against is
+controlled by `E2E_PROVIDER` (`openai` by default, or `openrouter` to use a cheaper model and
+avoid OpenAI billing on every run); an unset or missing key for the selected provider fails
+the run loudly rather than skipping quietly. `local` is not selectable — the harness doesn't
+provision an Ollama server.
+
 `npm run package` builds for your current platform only, using the `build` config in
 `package.json` (macOS `.dmg`, Windows `.exe` via NSIS, Linux `.AppImage`). Cross-platform
 builds happen in CI — see `.github/workflows/release.yml`, which builds all three and

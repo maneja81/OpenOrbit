@@ -34,6 +34,12 @@
 # Coverage reports (@vitest/coverage-v8 writes here by default).
 /coverage/
 
+# Playwright's own output (e2e/playwright.config.ts) — HTML report and per-test artifacts.
+/test-results/
+/playwright-report/
+# scripts/run-e2e-isolated.sh writes its markdown reports here.
+/e2e/reports/
+
 # Secrets. Never commit a real key — .env.bak already holds live provider and
 # OAuth credentials. The example template is the one exception, since it carries
 # placeholder values and documents which variables exist.
