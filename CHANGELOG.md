@@ -61,6 +61,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failure could survive a tab switch or a full Settings close/reopen, outliving
   the mutation that caused it.
   ([#99](https://github.com/maneja81/OpenOrbit/pull/99))
+- **The orbit orchestrator node and lower agent orbs could sit under the chat
+  log.** At a 900px window the chat panel's 40vh max-height left the orbit node
+  about 5px of clearance, and the panel's fade gradient made that read as a
+  full overlap once the log grew. The chat log now caps at 28vh and the orbit's
+  vertical center moved from 41% to 38.5% of the container, about 136px of
+  clearance instead of 5px.
+  ([#105](https://github.com/maneja81/OpenOrbit/pull/105))
 
 ## [0.1.0] — 2026-08-03
 
