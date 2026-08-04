@@ -19,6 +19,7 @@ export const APP_LINKS = {
   bug: import.meta.env.VITE_APP_BUG_URL ?? `${REPO_URL}/issues`,
   privacy: import.meta.env.VITE_APP_PRIVACY_URL ?? "#privacy",
   terms: import.meta.env.VITE_APP_TERMS_URL ?? "#terms",
+  wiki: import.meta.env.VITE_APP_WIKI_URL ?? `${REPO_URL}/wiki`,
 } as const;
 
 export type AppLinkKey = keyof typeof APP_LINKS;

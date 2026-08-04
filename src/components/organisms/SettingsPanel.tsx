@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Modal from "@/components/atoms/Modal";
 import Toggle from "@/components/atoms/Toggle";
 import Combobox from "@/components/atoms/Combobox";
@@ -29,6 +29,7 @@ import { providerUrlWarning } from "@/lib/providerUrlWarning";
 import { AI_PROVIDERS, findProvider, modelBelongsToProvider } from "@/lib/providers";
 import { DEFAULT_SETTINGS_SECTION, sectionOnTransition } from "@/lib/settingsSection";
 import { SoundFxEvent, sfxPreviewSrc } from "@/hooks/useSoundFX";
+import type { ConfigAckEvent } from "@/lib/configAckMessage";
 
 interface SettingsPanelProps {
   open: boolean;
@@ -71,6 +72,10 @@ interface SettingsPanelProps {
   onExportAgent: (id: string) => Promise<{ canceled: boolean } | undefined>;
   onExportAllAgents: () => Promise<{ canceled: boolean } | undefined>;
   onImportAgents: () => Promise<AgentRow[]>;
+  /** Queues one chat-ack event; the caller (AgentsApp) coalesces and flushes it. Required
+   * rather than optional — a silently-dropped ack is exactly the class of bug Steps 1-3 of
+   * this change fix elsewhere in the panel. */
+  onConfigAck: (event: ConfigAckEvent) => void;
 }
 
 export type SettingsSection =
@@ -236,6 +241,7 @@ export default function SettingsPanel({
   onExportAgent,
   onExportAllAgents,
   onImportAgents,
+  onConfigAck,
 }: SettingsPanelProps) {
   const [activeSection, setActiveSection] = useState<SettingsSection>(DEFAULT_SETTINGS_SECTION);
   // Adjust activeSection during render (not in an effect) when the panel transitions
@@ -367,6 +373,37 @@ export default function SettingsPanel({
   const connectorCatalog = connectors.connectors;
   const httpTools = useHttpTools();
   const httpToolCollections = httpTools.collections;
+
+  // The three data hooks mount once with the panel and never unmount (see `open`'s
+  // backdrop-only gating below), so a stale error from a session before this one stays
+  // on screen indefinitely unless the next open clears it.
+  useEffect(() => {
+    if (!open) return;
+    mcp.clearError();
+    connectors.clearError();
+    httpTools.clearError();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- clearError identities are stable useCallbacks; only the open edge should retrigger this
+  }, [open]);
+
+  // Baseline-then-diff over each connector's own status: the first run just records what's
+  // already connected, so connectors set up before this session don't read as newly connected.
+  // Reconnecting after a disconnect acks again — "usable again" is worth saying, not a
+  // once-per-app-lifetime event. A credentialsOnly parent row has no Connect button and its
+  // status never transitions, so it never fires.
+  const knownConnectorStatusRef = useRef<Map<string, ConnectorCatalogEntry["status"]> | null>(null);
+  useEffect(() => {
+    const known = knownConnectorStatusRef.current;
+    knownConnectorStatusRef.current = new Map(connectorCatalog.map((c) => [c.id, c.status]));
+    if (known === null) return;
+    for (const connector of connectorCatalog) {
+      if (known.get(connector.id) === "connected" || connector.status !== "connected") continue;
+      const agentNames = agents
+        .filter((agent) => parseIdList(agent.connector_ids).includes(connector.id))
+        .map((agent) => agent.name);
+      if (settings.orchestratorConnectorIds.includes(connector.id)) agentNames.unshift(settings.agentName);
+      onConfigAck({ type: "connector", label: connector.name, agentNames });
+    }
+  }, [connectorCatalog, agents, settings.orchestratorConnectorIds, settings.agentName, onConfigAck]);
 
   useEffect(() => {
     if (!open || !hasAgentsAPI()) return;

@@ -29,6 +29,7 @@ function renderDangerZone(onReset: () => Promise<void>) {
       onExportAgent={vi.fn()}
       onExportAllAgents={vi.fn()}
       onImportAgents={vi.fn()}
+      onConfigAck={vi.fn()}
     />
   );
   // Mounting already-open leaves activeSection at its default: sectionOnTransition only fires
@@ -133,6 +134,7 @@ describe("orchestrator prompt override", () => {
         onExportAgent={vi.fn()}
         onExportAllAgents={vi.fn()}
         onImportAgents={vi.fn()}
+        onConfigAck={vi.fn()}
       />
     );
     fireEvent.click(screen.getByRole("tab", { name: /^Agents$/i }));
@@ -197,6 +199,7 @@ describe("Privacy & Safety", () => {
         onExportAgent={vi.fn()}
         onExportAllAgents={vi.fn()}
         onImportAgents={vi.fn()}
+        onConfigAck={vi.fn()}
       />
     );
     fireEvent.click(screen.getByRole("tab", { name: /Privacy & Safety/i }));
@@ -282,6 +285,7 @@ describe("the orchestrator's enabled toggle", () => {
         onExportAgent={vi.fn()}
         onExportAllAgents={vi.fn()}
         onImportAgents={vi.fn()}
+        onConfigAck={vi.fn()}
       />
     );
     fireEvent.click(screen.getByRole("tab", { name: /^Agents$/i }));
@@ -326,6 +330,7 @@ describe("running onboarding again", () => {
         onExportAgent={vi.fn()}
         onExportAllAgents={vi.fn()}
         onImportAgents={vi.fn()}
+        onConfigAck={vi.fn()}
       />
     );
     fireEvent.click(screen.getByRole("tab", { name: /^General$/i }));
@@ -372,6 +377,7 @@ describe("AI Models section", () => {
         onExportAgent={vi.fn()}
         onExportAllAgents={vi.fn()}
         onImportAgents={vi.fn()}
+        onConfigAck={vi.fn()}
       />
     );
     fireEvent.click(screen.getByRole("tab", { name: /^Models$/i }));
@@ -411,5 +417,117 @@ describe("AI Models section", () => {
     }
     // The old "Model ID" label lived in the Chat credentials card.
     expect(screen.queryByLabelText("Model ID")).not.toBeInTheDocument();
+  });
+});
+
+describe("connector-connect acknowledgement", () => {
+  /** Stubs every bridge call the panel makes on mount, plus connectors.list/onUpdate so a
+   * disconnected→connected transition can be driven by hand via the captured onUpdate callback. */
+  function installBridge(connectorStatus: "connected" | "disconnected") {
+    let onUpdateCallback: (() => void) | null = null;
+    const api = {
+      agent: { orchestratorPrompt: vi.fn().mockResolvedValue("") },
+      userInfo: { list: vi.fn().mockResolvedValue([]) },
+      providers: { list: vi.fn().mockResolvedValue({ configured: [] }) },
+      mcp: { list: vi.fn().mockResolvedValue([]) },
+      httpTools: { listCollections: vi.fn().mockResolvedValue([]), listTools: vi.fn().mockResolvedValue([]) },
+      connectors: {
+        list: vi.fn().mockResolvedValue([
+          {
+            id: "gmail",
+            name: "Gmail",
+            description: "",
+            icon: "ti-mail",
+            status: connectorStatus,
+            accountLabel: null,
+            settingsFields: [],
+            settingsConfigured: true,
+            credentialsOnly: false,
+            settingsSourceId: null,
+          },
+        ]),
+        onUpdate: vi.fn((cb: () => void) => {
+          onUpdateCallback = cb;
+          return () => {};
+        }),
+      },
+    };
+    (globalThis as unknown as { window: { agentsAPI: unknown } }).window.agentsAPI = api;
+    return { api, triggerUpdate: () => onUpdateCallback?.() };
+  }
+
+  afterEach(() => {
+    delete (window as unknown as { agentsAPI?: unknown }).agentsAPI;
+  });
+
+  it("fires onConfigAck once with the connected agents when a connector transitions to connected", async () => {
+    const { api, triggerUpdate } = installBridge("disconnected");
+    const onConfigAck = vi.fn();
+    const agents: AgentRow[] = [
+      {
+        id: "a1",
+        name: "Cipher",
+        icon: "ti-robot",
+        tagline: "",
+        description: "",
+        prompt: "",
+        model: "",
+        provider_id: "",
+        tools: "[]",
+        enabled: 1,
+        system: 1,
+        created_at: new Date().toISOString(),
+        mcp_server_ids: "[]",
+        connector_ids: '["gmail"]',
+        http_tool_collection_ids: "[]",
+      },
+    ];
+    render(
+      <SettingsPanel
+        open
+        onClose={vi.fn()}
+        settings={mergeWithDefaults({})}
+        sessionElapsedMs={0}
+        onUpdate={vi.fn()}
+        onReset={vi.fn()}
+        agents={agents}
+        onUpdateAgent={vi.fn()}
+        onCreateAgent={vi.fn()}
+        onDeleteAgent={vi.fn()}
+        onExportAgent={vi.fn()}
+        onExportAllAgents={vi.fn()}
+        onImportAgents={vi.fn()}
+        onConfigAck={onConfigAck}
+      />
+    );
+
+    // Baseline load: the first pass over connectorCatalog just records "disconnected", firing
+    // nothing.
+    await waitFor(() => expect(api.connectors.list).toHaveBeenCalled());
+    expect(onConfigAck).not.toHaveBeenCalled();
+
+    api.connectors.list.mockResolvedValue([
+      {
+        id: "gmail",
+        name: "Gmail",
+        description: "",
+        icon: "ti-mail",
+        status: "connected",
+        accountLabel: "me@example.com",
+        settingsFields: [],
+        settingsConfigured: true,
+        credentialsOnly: false,
+        settingsSourceId: null,
+      },
+    ]);
+    triggerUpdate();
+
+    await waitFor(() =>
+      expect(onConfigAck).toHaveBeenCalledExactlyOnceWith({
+        type: "connector",
+        label: "Gmail",
+        agentNames: ["Cipher"],
+      })
+    );
   });
 });

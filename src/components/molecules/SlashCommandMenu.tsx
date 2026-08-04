@@ -11,6 +11,10 @@ export interface SlashMenuItem {
    * literal slash command — the orchestrator already reliably hands off based on a
    * plain name mention in the message text, so no new "@mention" syntax is needed). */
   insertText?: string;
+  /** Optional group header rendered before this item when it differs from the previous item's
+   * group — e.g. "System" / "Custom" in the @ agent-mention menu. Absent on every item in the
+   * existing / commands and /open-app apps lists, so no header ever renders for them. */
+  group?: string;
 }
 
 interface SlashCommandMenuProps {
@@ -40,23 +44,27 @@ export default function SlashCommandMenu({
     <div className="slash-menu" role="listbox">
       {items.length === 0 && emptyText && <div className="slash-menu-empty">{emptyText}</div>}
       {items.map((item, i) => (
-        <button
-          key={item.id}
-          type="button"
-          role="option"
-          ref={i === selectedIndex ? activeRef : undefined}
-          aria-selected={i === selectedIndex}
-          className={`slash-menu-item${i === selectedIndex ? " active" : ""}`}
-          onMouseEnter={() => onHover(i)}
-          onMouseDown={(e) => {
-            e.preventDefault();
-            onSelect(item);
-          }}
-        >
-          <TablerIcon name={item.icon} className="slash-menu-icon" />
-          <span className="slash-menu-label">{item.label}</span>
-          {item.sublabel && <span className="slash-menu-sublabel">{item.sublabel}</span>}
-        </button>
+        <div key={item.id}>
+          {item.group && item.group !== items[i - 1]?.group && (
+            <div className="slash-menu-group-label">{item.group}</div>
+          )}
+          <button
+            type="button"
+            role="option"
+            ref={i === selectedIndex ? activeRef : undefined}
+            aria-selected={i === selectedIndex}
+            className={`slash-menu-item${i === selectedIndex ? " active" : ""}`}
+            onMouseEnter={() => onHover(i)}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              onSelect(item);
+            }}
+          >
+            <TablerIcon name={item.icon} className="slash-menu-icon" />
+            <span className="slash-menu-label">{item.label}</span>
+            {item.sublabel && <span className="slash-menu-sublabel">{item.sublabel}</span>}
+          </button>
+        </div>
       ))}
     </div>
   );

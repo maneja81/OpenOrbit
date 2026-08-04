@@ -28,6 +28,11 @@ function renderBar(overrides: Partial<Parameters<typeof ChatInputBar>[0]> = {}) 
   return { ...render(<ChatInputBar {...props} />), props };
 }
 
+const MIXED_AGENTS = [
+  { id: "a1", name: "Cipher", icon: "ti-settings", system: 1 },
+  { id: "a2", name: "Bank Analyst", icon: "ti-robot", system: 0 },
+];
+
 describe("ChatInputBar", () => {
   afterEach(cleanup);
 
@@ -118,5 +123,65 @@ describe("ChatInputBar", () => {
       target: { value: "hello" },
     });
     expect((container.querySelector(".tb-chip") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("opens an agent-only menu, grouped System before Custom, on @", () => {
+    const { container } = renderBar({ agents: MIXED_AGENTS });
+    const input = container.querySelector("#inp") as HTMLTextAreaElement;
+    fireEvent.input(input, { target: { value: "@" } });
+    const menu = container.querySelector(".slash-menu");
+    expect(menu).not.toBeNull();
+    const labels = Array.from(menu!.querySelectorAll(".slash-menu-group-label")).map((el) => el.textContent);
+    expect(labels).toEqual(["System", "Custom"]);
+    const items = Array.from(menu!.querySelectorAll(".slash-menu-label")).map((el) => el.textContent);
+    expect(items).toEqual(["Cipher", "Bank Analyst"]);
+  });
+
+  it("shows exactly one group header when every agent is in the same group", () => {
+    // Default install has zero custom agents — only "System" ever appears, never "Custom".
+    const { container } = renderBar({ agents: [MIXED_AGENTS[0]] });
+    fireEvent.input(container.querySelector("#inp") as HTMLTextAreaElement, { target: { value: "@" } });
+    const menu = container.querySelector(".slash-menu");
+    const labels = Array.from(menu!.querySelectorAll(".slash-menu-group-label")).map((el) => el.textContent);
+    expect(labels).toEqual(["System"]);
+  });
+
+  it("filters the @ menu by agent name and closes the / and apps modes are untouched", () => {
+    const { container } = renderBar({ agents: MIXED_AGENTS });
+    const input = container.querySelector("#inp") as HTMLTextAreaElement;
+    fireEvent.input(input, { target: { value: "@bank" } });
+    const items = Array.from(container.querySelectorAll(".slash-menu-label")).map((el) => el.textContent);
+    expect(items).toEqual(["Bank Analyst"]);
+  });
+
+  it("selects an agent from the @ menu, inserting the plain-name mention and closing the menu", () => {
+    const { container } = renderBar({ agents: MIXED_AGENTS });
+    const input = container.querySelector("#inp") as HTMLTextAreaElement;
+    fireEvent.input(input, { target: { value: "@cip" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(input.value).toBe("Cipher, ");
+    expect(container.querySelector(".slash-menu")).toBeNull();
+  });
+
+  it("shows a second 'Agents' chip that opens the @ menu, independent of the Commands chip", () => {
+    const { container } = renderBar({ agents: MIXED_AGENTS });
+    const chips = container.querySelectorAll(".tb-chip");
+    expect(chips.length).toBe(2);
+    fireEvent.click(chips[1] as HTMLButtonElement);
+    const input = container.querySelector("#inp") as HTMLTextAreaElement;
+    expect(input.value).toBe("@");
+    expect(container.querySelector(".slash-menu")).not.toBeNull();
+  });
+
+  it("disables the Agents chip once there is non-@ text, and re-enables both chips after send", () => {
+    const { container } = renderBar({ agents: MIXED_AGENTS });
+    const input = container.querySelector("#inp") as HTMLTextAreaElement;
+    const chips = () => container.querySelectorAll(".tb-chip");
+    fireEvent.input(input, { target: { value: "hello" } });
+    expect((chips()[0] as HTMLButtonElement).disabled).toBe(true);
+    expect((chips()[1] as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect((chips()[0] as HTMLButtonElement).disabled).toBe(false);
+    expect((chips()[1] as HTMLButtonElement).disabled).toBe(false);
   });
 });

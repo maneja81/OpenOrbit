@@ -69,6 +69,7 @@ export function useMcpServers() {
 
   const getEnv = useCallback(async (id: string): Promise<Record<string, string>> => {
     if (!hasAgentsAPI()) return {};
+    setError(null);
     try {
       return await window.agentsAPI.mcp.getEnv(id);
     } catch (e) {
@@ -91,6 +92,7 @@ export function useMcpServers() {
   const testServer = useCallback(
     async (input: { name: string; command: string; args?: string[]; env?: Record<string, string> }) => {
       if (!hasAgentsAPI()) return null;
+      setError(null);
       try {
         return await window.agentsAPI.mcp.test(input);
       } catch (e) {
@@ -103,6 +105,7 @@ export function useMcpServers() {
 
   const searchRegistry = useCallback(async (query: string) => {
     if (!hasAgentsAPI()) return [];
+    setError(null);
     try {
       return await window.agentsAPI.mcp.search(query);
     } catch (e) {
@@ -111,5 +114,18 @@ export function useMcpServers() {
     }
   }, []);
 
-  return { servers, loading, error, addServer, updateServer, removeServer, getEnv, testServer, searchRegistry };
+  const clearError = useCallback(() => setError(null), []);
+
+  return {
+    servers,
+    loading,
+    error,
+    addServer,
+    updateServer,
+    removeServer,
+    getEnv,
+    testServer,
+    searchRegistry,
+    clearError,
+  };
 }

@@ -7,17 +7,12 @@ export default defineConfig({
       "@": resolve(__dirname, "./src"),
     },
   },
-  // The renderer reads these as build-time globals (see releaseDefines in
+  // The renderer reads this as a build-time global (see buildDefines in
   // electron.vite.config.ts), so anything importing AboutTab throws ReferenceError without
-  // them. Fixed literals rather than the real `resolveReleaseInfo()` on purpose: that call
-  // hits git/network per run, and a test asserting on whatever version happens to be
-  // checked out is a test that changes meaning between machines. A non-"0.0.0" version is
-  // chosen so the version row renders — AboutTab hides it on the offline-build fallback.
+  // it. A fixed literal rather than the real `resolveCommit()` on purpose: that shells out to
+  // git per run, and a test asserting on whatever commit happens to be checked out is a test
+  // that changes meaning between machines.
   define: {
-    __APP_RELEASE_VERSION__: JSON.stringify("1.2.3"),
-    __APP_RELEASE_DATE__: JSON.stringify("2026-08-01T00:00:00Z"),
-    __APP_RELEASE_NOTES__: JSON.stringify("Test release notes."),
-    __APP_RELEASE_URL__: JSON.stringify("https://example.com/releases/1.2.3"),
     __APP_COMMIT__: JSON.stringify("0000000"),
   },
   test: {
@@ -36,6 +31,10 @@ export default defineConfig({
       // Gitignored third-party reference material (see .gitignore) — Playwright specs and
       // Next.js sources for a demo app this project doesn't build or depend on.
       "0-cowork/reference/**",
+      // Real Electron E2E specs (see e2e/playwright.config.ts) — vitest's default *.spec.ts
+      // glob would otherwise pick these up and run them through jsdom via `test.describe()`,
+      // which throws immediately since they're written against @playwright/test's runner.
+      "e2e/**",
     ],
   },
 });

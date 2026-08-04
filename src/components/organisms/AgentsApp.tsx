@@ -7,6 +7,7 @@ import KnowledgeModal from "@/components/organisms/KnowledgeModal";
 import ChatHistoryModal from "@/components/organisms/ChatHistoryModal";
 import HttpToolApprovalModal, { type PendingToolApproval } from "@/components/molecules/HttpToolApprovalModal";
 import { approvalSettledMessage } from "@/lib/approvalSettledMessage";
+import { configAckMessage, shouldPersistConfigAck, type ConfigAckEvent } from "@/lib/configAckMessage";
 import ErrorBoundary from "@/components/atoms/ErrorBoundary";
 
 /** How long the entrance animation runs before the greeting lands. Named because the
@@ -31,6 +32,7 @@ import { useBackgroundMusic } from "@/hooks/useBackgroundMusic";
 import { useSystemStats } from "@/hooks/useSystemStats";
 import { useTokenUsage } from "@/hooks/useTokenUsage";
 import { hasAgentsAPI } from "@/lib/agentsApi";
+import { isUpdateAvailable } from "@/lib/semver";
 import { USER_CONTEXT_FIELDS } from "@/lib/userContext";
 import { formatHumanizedError, humanizeError } from "@/lib/humanizeError";
 import { AgentId, StepEvent, matchAgentSlashCommand } from "@/lib/agents";
@@ -209,6 +211,68 @@ export default function AgentsApp() {
   const systemStats = useSystemStats();
   const tokenUsage = useTokenUsage("today", null);
 
+  // Queued rather than appended immediately: Settings changes often arrive in a burst (add
+  // three files, then enable location, then connect Gmail) and each deserves one coalesced
+  // chat bubble on close, not one per change. A queue held in a ref (not state) survives across
+  // the whole Settings session without re-rendering on every push.
+  const configAckQueueRef = useRef<ConfigAckEvent[]>([]);
+
+  const flushConfigAcks = useCallback(() => {
+    const events = configAckQueueRef.current;
+    if (events.length === 0) return;
+    configAckQueueRef.current = [];
+    const text = configAckMessage(events);
+    appendMessage({ role: "assistant", text, avatarLabel: settings.agentName[0]?.toUpperCase() || "A" });
+    // Fire-and-forget: the local bubble already showed, so a failed persist isn't worth a
+    // second failure notice — see configAckMessage.ts.
+    if (shouldPersistConfigAck(events) && hasAgentsAPI()) {
+      void window.agentsAPI.chat.appendMessage({ role: "assistant", text });
+    }
+  }, [appendMessage, settings.agentName]);
+
+  const queueConfigAck = useCallback(
+    (event: ConfigAckEvent) => {
+      configAckQueueRef.current.push(event);
+      // Settings is closed (e.g. a file dropped from the main UI) — nothing will flush this
+      // later, so show it right away instead of waiting for a Settings session that may
+      // never happen.
+      if (!settingsOpen) flushConfigAcks();
+    },
+    [settingsOpen, flushConfigAcks]
+  );
+
+  const wasSettingsOpenRef = useRef(settingsOpen);
+  useEffect(() => {
+    if (wasSettingsOpenRef.current && !settingsOpen) flushConfigAcks();
+    wasSettingsOpenRef.current = settingsOpen;
+  }, [settingsOpen, flushConfigAcks]);
+
+  // Baseline-then-diff: the first run after onboarding just records what's already there, so
+  // files seeded before this session (or during onboarding, guarded below) don't read as
+  // newly added.
+  const knownKnowledgeFileIdsRef = useRef<Set<number> | null>(null);
+  useEffect(() => {
+    if (!loaded || !settings.onboardingDone) return;
+    const ids = new Set(knowledgeFiles.files.map((f) => f.id));
+    const known = knownKnowledgeFileIdsRef.current;
+    knownKnowledgeFileIdsRef.current = ids;
+    if (known === null) return;
+    for (const file of knowledgeFiles.files) {
+      if (!known.has(file.id)) queueConfigAck({ type: "file", fileName: file.title || file.originalName });
+    }
+  }, [knowledgeFiles.files, loaded, settings.onboardingDone, queueConfigAck]);
+
+  // Only the false→true edge is an ack-worthy event — toggling off says nothing new, and
+  // onboarding's own initial value must not read as "just enabled".
+  const knownLocationEnabledRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (!loaded || !settings.onboardingDone) return;
+    const known = knownLocationEnabledRef.current;
+    knownLocationEnabledRef.current = settings.locationEnabled;
+    if (known === null) return;
+    if (!known && settings.locationEnabled) queueConfigAck({ type: "location" });
+  }, [settings.locationEnabled, loaded, settings.onboardingDone, queueConfigAck]);
+
   // Ticks once a minute purely to force a re-render so the greeting's time-of-day band
   // (morning/afternoon/evening/night) updates for a session left open for hours, rather
   // than only refreshing whenever some unrelated state (e.g. `thinking`) happens to change.
@@ -222,6 +286,31 @@ export default function AgentsApp() {
     const start = Date.now();
     const interval = setInterval(() => setSessionElapsedMs(Date.now() - start), 60_000);
     return () => clearInterval(interval);
+  }, []);
+
+  // Checked once, on launch, against this build's own version — not the reverse of the old
+  // build-time check (see AboutTab.tsx / semver.ts), which could only ever compare a build
+  // against itself and so could never actually detect a release published afterward. No
+  // auto-download here, only the badge on #aboutbtn (AppControls.tsx) — see ipc/updateCheck.ts
+  // for why.
+  const [appVersion, setAppVersion] = useState("");
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  useEffect(() => {
+    if (!hasAgentsAPI()) return;
+    let cancelled = false;
+    Promise.all([window.agentsAPI.appInfo.get(), window.agentsAPI.appInfo.latestRelease()])
+      .then(([info, release]) => {
+        if (cancelled) return;
+        setAppVersion(info.packageVersion);
+        setUpdateAvailable(isUpdateAvailable(release.version, info.packageVersion));
+      })
+      .catch(() => {
+        // Version display and the update badge are both cosmetic — nothing here should
+        // interrupt launch or surface an error the user can't act on.
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // A time-of-day greeting by the user's own name reads as more "alive" than a static
@@ -819,6 +908,8 @@ export default function AgentsApp() {
         entering={entering}
         locationEnabled={settings.locationEnabled}
         cognitiveState={cognitiveState}
+        version={appVersion}
+        updateAvailable={updateAvailable}
         sessionStats={sessionStats}
       >
         <ErrorBoundary fallbackTitle="The chat failed to load">
@@ -863,6 +954,7 @@ export default function AgentsApp() {
         onExportAgent={exportAgent}
         onExportAllAgents={exportAllAgents}
         onImportAgents={importAgents}
+        onConfigAck={queueConfigAck}
       />
       <KnowledgeModal open={kbModalOpen} onClose={() => setKbModalOpen(false)} />
       {/* Mounted conditionally rather than kept alive with open={false}: a fresh mount is

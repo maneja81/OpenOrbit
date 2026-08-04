@@ -5,6 +5,98 @@ All notable changes to OpenOrbit are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.1.1] — 2026-08-05
+
+### Added
+
+- **A Help button in the bottom-right dock** opens the OpenOrbit GitHub wiki in the
+  default browser. The bottom chrome dock is now split in two — Info and the app
+  version stay bottom-left, Help and Settings move to a new bottom-right dock — and
+  the tour-replay button switches from a question-mark icon to a route icon to free
+  `?` for Help.
+  ([#97](https://github.com/maneja81/OpenOrbit/pull/97))
+- **The app checks for a new release at launch** and badges the existing About icon
+  rather than adding a new toast/banner system. The previous build-time-only check
+  could only ever compare a build against itself, so it could never detect a release
+  published after the build ran. No auto-download or install — the project isn't
+  code-signed, so `electron-updater`'s silent-install path can't run on macOS, and a
+  Windows/Linux-only version would give a different experience per platform; this
+  only tells the user a release exists.
+  ([#98](https://github.com/maneja81/OpenOrbit/pull/98))
+- **Orbit now acknowledges config changes in chat.** Adding a knowledge file,
+  enabling location, or connecting a connector attached to an agent produces one
+  coalesced message (e.g. "I've got report.pdf. How can I help?"), shown immediately
+  if Settings is closed or once on close if several changes were made together.
+  ([#99](https://github.com/maneja81/OpenOrbit/pull/99))
+- **A dedicated `@` agent-mention menu in the chat input**, separate from the
+  existing `/` command menu. Typing `@` (or clicking the new "Agents" toolbar chip)
+  opens a menu of every enabled agent, grouped under "System" (the four built-in
+  agents) and "Custom" (user-created ones); selecting one inserts a plain-name
+  mention.
+  ([#101](https://github.com/maneja81/OpenOrbit/pull/101))
+- A Download section in the README linking directly to each v0.1.0 release asset
+  (macOS arm64/x64 `.dmg`, Windows `.exe`, Linux `.AppImage`), noting these are
+  versioned filenames that change next release, and flagging that builds are
+  unsigned so the Gatekeeper/SmartScreen prompt on first run isn't a surprise.
+  ([#96](https://github.com/maneja81/OpenOrbit/pull/96))
+- **A Playwright E2E test suite (`e2e/`)** driving the real built Electron app,
+  starting with the onboarding wizard and verifying selected-provider credentials
+  land correctly in SQLite. Two run modes — `npm run test:e2e` (isolated: spins up
+  a throwaway git worktree, installs/builds/tests there, tears itself down) and
+  `npm run test:e2e:local` (fast, against the current checkout). Which provider a
+  spec authenticates against is configurable via `E2E_PROVIDER` in a gitignored
+  `.env.test`, so live runs don't have to hit OpenAI billing every time.
+  ([#103](https://github.com/maneja81/OpenOrbit/pull/103))
+- **E2E coverage across every major settings surface and the core chat flow**,
+  built out in six phases on top of #103: Agents, HTTP Tools, General, Privacy &
+  Safety, App Sounds and Tasks
+  ([#107](https://github.com/maneja81/OpenOrbit/pull/107)); MCP Servers and Models
+  ([#108](https://github.com/maneja81/OpenOrbit/pull/108)); knowledge-base
+  Add-from-URL discovery and the About tab's update check
+  ([#109](https://github.com/maneja81/OpenOrbit/pull/109)); the core chat
+  send/reply flow and slash-command interception, the suite's first spec against
+  a real billed provider call
+  ([#110](https://github.com/maneja81/OpenOrbit/pull/110)); and Connectors-tab
+  disconnect
+  ([#111](https://github.com/maneja81/OpenOrbit/pull/111)). Shares a common
+  `e2e/helpers.ts` for sandboxed launch, click/type, and DB-poll assertions across
+  all specs. CLAUDE.md now documents this as a standing process — when a UI
+  surface needs a spec, and the shared conventions to reuse
+  ([#112](https://github.com/maneja81/OpenOrbit/pull/112)).
+
+### Changed
+
+- The orchestrator's internal reasoning now explicitly decomposes multi-part user
+  messages, checks which specialist/resource actually covers each part, and is
+  honest about the one-handoff-per-message architectural limit instead of implying
+  a same-turn multi-specialist chain it can't execute. Atlas no longer offers to
+  search "outside the knowledge base" since it has no web tools to back that up.
+  A pre-existing routing defect — the orchestrator can pick the wrong specialist
+  based on which one ran the previous turn — is not fixed by this change and is
+  tracked as follow-up.
+  ([#100](https://github.com/maneja81/OpenOrbit/pull/100))
+
+### Fixed
+
+- **Errors in MCP Servers, Connectors and HTTP Tools settings never cleared.** The
+  panels' data hooks live for the app's lifetime, and 8 methods across
+  `useMcpServers`/`useConnectors`/`useHttpTools` set `error` on failure but
+  bypassed the hooks' shared `run()` helper that clears it on entry — so a stale
+  failure could survive a tab switch or a full Settings close/reopen, outliving
+  the mutation that caused it.
+  ([#99](https://github.com/maneja81/OpenOrbit/pull/99))
+- **The orbit orchestrator node and lower agent orbs could sit under the chat
+  log.** At a 900px window the chat panel's 40vh max-height left the orbit node
+  about 5px of clearance, and the panel's fade gradient made that read as a
+  full overlap once the log grew. The chat log now caps at 28vh and the orbit's
+  vertical center moved from 41% to 38.5% of the container, about 136px of
+  clearance instead of 5px.
+  ([#105](https://github.com/maneja81/OpenOrbit/pull/105))
+- Dependency update for `hono` 4.12.33 → 4.13.0.
+  ([#104](https://github.com/maneja81/OpenOrbit/pull/104))
+
 ## [0.1.0] — 2026-08-03
 
 The first release. Installers for macOS, Windows and Linux are attached to
@@ -356,4 +448,6 @@ build from source.
   low), `fast-csv` (denial of service, low), and `exceljs` 3.4.0 → 3.10.0.
   ([#5](https://github.com/maneja81/OpenOrbit/pull/5))
 
+[Unreleased]: https://github.com/maneja81/OpenOrbit/compare/v0.1.1...develop
+[0.1.1]: https://github.com/maneja81/OpenOrbit/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/maneja81/OpenOrbit/releases/tag/v0.1.0

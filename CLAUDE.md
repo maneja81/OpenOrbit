@@ -6,7 +6,7 @@ Use live code evidence before planning or editing. Make the smallest safe change
 
 OpenOrbit — a desktop app that runs a team of AI agents locally, with a central orchestrator delegating to specialist sub-agents, each with its own tools and access to the user's files, apps, and Google account.
 
-**Status:** implemented and under active development on `develop-ai`. ~290 source files across an Electron main process, a preload bridge, and a React renderer. The source tree is currently untracked in git (only `README.md`, `LICENSE`, `.gitignore`, and this file are committed) — `README.md` still describes the project as "idea phase" and is stale.
+**Status:** released (v0.1.0) and under active development on `develop`. ~290 source files across an Electron main process, a preload bridge, and a React renderer.
 
 Four built-in sub-agents ship seeded from `electron/main/ai/defaultAgents.json`: Cipher (`configAgent`), Atlas (`knowledgeAgent`), Explorer (`explorerAgent`), Chrono (`taskAgent`). The orchestrator ("Orbit") is singular, not an `agents` row, and is configured from its own prompt file plus settings.
 
@@ -86,6 +86,7 @@ Four built-in sub-agents ship seeded from `electron/main/ai/defaultAgents.json`:
 - **Dev, renderer only in a browser**: `npm run dev:web`
 - **Build**: `npm run build` (`tsc -b && electron-vite build`) · **Package**: `npm run package`
 - **Test**: `npm test` (`vitest run`) · watch: `npm run test:watch`
+- **E2E test** (real Electron app via Playwright, sandboxed `--user-data-dir`): `npm run test:e2e:local` (needs `.env.test`) · isolated worktree runner: `npm run test:e2e`. See `## E2E Tests` for when to add one and the shared helper conventions.
 - **Lint**: `npm run lint`
 - **Drive the running app** (screenshots, clicking through the UI, confirming a change works for real rather than only in vitest): the `run-openorbit` skill — `.claude/skills/run-openorbit/SKILL.md`, a Playwright REPL over the built app.
 - ⚠ **Never launch the app from a worktree without `--user-data-dir`.** `app.getPath("userData")` resolves to the same `~/Library/Application Support/OpenOrbit` from *every* checkout and worktree, so an exploratory launch writes into the real database — settings, chat history, agents, encrypted API keys. The `run-openorbit` driver sandboxes it and aborts if the isolation doesn't take; use it rather than launching by hand.
@@ -105,7 +106,7 @@ Four built-in sub-agents ship seeded from `electron/main/ai/defaultAgents.json`:
 
 ## Worktrees
 
-- ⚠ **Branch every new worktree from `develop`.** `develop` is the default working branch and carries the entire app. `main` sits at `ca1f8d8` — a README-only "idea phase" commit with no `src/`, no `electron/`, no `package.json`. A worktree cut from `main` (or from whatever HEAD happened to be) reads as an *empty project*, and has now misled three separate sessions into concluding the feature they were sent to fix doesn't exist.
+- ⚠ **Branch every new worktree from `develop`.** `develop` is the default working branch and is always ahead of `main` — `main` only moves at a release cut or hotfix, so a worktree cut from `main` (or from whatever HEAD happened to be) is missing whatever has merged into `develop` since the last release, reading as stale or feature-incomplete. This has now misled four separate sessions, including one that skipped `main`'s old idea-phase commit entirely and instead branched from a `main`-based release-sync merge that was itself several PRs behind `develop`.
 
   ```bash
   git worktree add -b <branch> .claude/worktrees/<name> develop
@@ -147,6 +148,17 @@ Four built-in sub-agents ship seeded from `electron/main/ai/defaultAgents.json`:
   ls node_modules/electron/path.txt node_modules/electron/dist    # both must exist
   rm -rf node_modules/electron/dist node_modules/electron/path.txt && node node_modules/electron/install.js
   ```
+
+## E2E Tests
+
+- **When a change adds or materially alters a UI surface — a Settings tab, a widget, a modal, the chat flow — add or extend a Playwright spec under `e2e/` alongside it, not as separate follow-up work.** Not every change needs one (a copy tweak or a pure-logic refactor with vitest coverage doesn't), but a new interactive surface without one should be the exception, called out explicitly, not the silent default. `0-cowork/plans/active/e2e-full-coverage.md` (or its successor once that roadmap is fully shipped) tracks what's covered and what's deliberately deferred and why — check it before assuming a surface has no coverage.
+- **Reuse `e2e/helpers.ts` before writing new DOM plumbing.** `launchSandboxedApp`/`launchApp`/`completeOnboarding` for setup; `clickSelector`/`clickByText`/`typeIntoField`/`typeIntoNth`/`typeIntoLabeledRow`/`clickInLabeledRow` for interaction (all click via `page.evaluate()`, never a locator click — this app's continuous framer-motion animation times out `page.click()` as "element is not stable"); `pickCombobox`/`selectComboboxOption` for the app's custom dropdown and `SlashCommandMenu` (both select on **mousedown**, not click); `confirmTypeToDelete` for the shared type-DELETE modal; `openDb`/`pollUntil` to assert against the sandboxed SQLite DB rather than fragile DOM text.
+- **Assert against the DB or a stable DOM signal, never exact text from a live model.** Any spec touching a real AI provider call (see `e2e/chat-flow.spec.ts`) must poll for structural facts (a new `messages` row exists, has non-empty text, has a `trace_id`) — a live model's wording isn't something a test controls.
+- **Settings text/number fields commit onBlur, not per keystroke** — `typeIntoField`/`typeIntoNth` focus the element first for exactly this reason; a blur without a real prior focus is a no-op.
+- **A hook that only fetches once on mount** (`useTasks`, `useConnectors`, others like them) **needs its update broadcast fired manually** after a direct DB seed, or the UI never reflects the seeded state — see `connectors-disconnect.spec.ts` firing `connectors:update` via `app.evaluate`.
+- **Cost- and network-aware by design, not by accident.** `e2e/providerConfig.ts`'s `resolveE2EProvider()` decides which AI provider a spec's onboarding uses — set `E2E_PROVIDER=openrouter` in `.env.test` for cheap-model runs; unset or `openai` bills against `gpt-4.1-mini`. Live-network specs (registry search, knowledge-base URL discovery, the About tab's release check) are fine to write, but say so in a comment — don't let a spec's real external dependency read as a local one.
+- **Not part of the mandatory four-command Verify Gate below.** `npm run test:e2e:local` needs a build, a real `.env.test`, and for `chat-flow.spec.ts` specifically, real money — run it deliberately when a spec is added or a UI surface it covers changes, not on every commit.
+- **Some flows are deliberately out of scope, not silently skipped — name the reason when one is.** Native OS file/save dialogs need `app.evaluate` to stub Electron's `dialog` module (see `agents-tab.spec.ts`'s export/import); a live OAuth consent screen opens the real system browser via `shell.openExternal`, entirely outside Playwright's `_electron` control surface, and needs either a dedicated test account with real browser automation or a human-in-the-loop step — neither attempted as of this writing (`connectors-disconnect.spec.ts` only covers `disconnect`).
 
 ## Conventions
 
@@ -239,7 +251,7 @@ Be direct. Sound like a senior engineer, not a language model.
 
 8. Handle errors where the existing code expects them to be handled.
 
-9. Add or update tests when behavior changes.
+9. Add or update tests when behavior changes — including a Playwright spec under `e2e/` when the change touches a UI surface (see `## E2E Tests`), not just vitest coverage for the underlying logic.
 
 10. Do not weaken, delete, skip, or bypass tests to make the build pass.
 

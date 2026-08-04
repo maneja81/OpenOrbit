@@ -13,6 +13,7 @@ import type { ConnectorCatalogEntry } from "../main/ipc/connectors";
 import type { HttpToolCollectionRow, HttpToolRow, HttpToolParam } from "../main/ipc/httpTools";
 import type { TaskCreateInput, TaskRow, TaskUpdatePatch } from "../main/ipc/tasks";
 import type { AppInfo, AppStorageInfo, AppStats } from "../main/ipc/appInfo";
+import type { ReleaseInfo } from "../../scripts/releaseInfo";
 
 function subscribe(channel: string, callback: () => void): () => void {
   const listener = () => callback();
@@ -380,6 +381,9 @@ const agentsAPI = {
     stats: (): Promise<AppStats> => ipcRenderer.invoke("app:stats"),
     /** Resolves with the cache size remaining after the clear, so the UI can update in place. */
     clearCache: (): Promise<number> => ipcRenderer.invoke("app:clearCache"),
+    /** Live, once per call — unlike everything else here this hits the network. Never
+     * rejects; see ipc/updateCheck.ts. */
+    latestRelease: (): Promise<ReleaseInfo> => ipcRenderer.invoke("app:latestRelease"),
   },
 
   // Forwards renderer-side debug logs into the same userData/debug.log the main process
