@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-08-05
+
 ### Added
 
 - **A Help button in the bottom-right dock** opens the OpenOrbit GitHub wiki in the
@@ -39,6 +41,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   versioned filenames that change next release, and flagging that builds are
   unsigned so the Gatekeeper/SmartScreen prompt on first run isn't a surprise.
   ([#96](https://github.com/maneja81/OpenOrbit/pull/96))
+- **A Playwright E2E test suite (`e2e/`)** driving the real built Electron app,
+  starting with the onboarding wizard and verifying selected-provider credentials
+  land correctly in SQLite. Two run modes — `npm run test:e2e` (isolated: spins up
+  a throwaway git worktree, installs/builds/tests there, tears itself down) and
+  `npm run test:e2e:local` (fast, against the current checkout). Which provider a
+  spec authenticates against is configurable via `E2E_PROVIDER` in a gitignored
+  `.env.test`, so live runs don't have to hit OpenAI billing every time.
+  ([#103](https://github.com/maneja81/OpenOrbit/pull/103))
+- **E2E coverage across every major settings surface and the core chat flow**,
+  built out in six phases on top of #103: Agents, HTTP Tools, General, Privacy &
+  Safety, App Sounds and Tasks
+  ([#107](https://github.com/maneja81/OpenOrbit/pull/107)); MCP Servers and Models
+  ([#108](https://github.com/maneja81/OpenOrbit/pull/108)); knowledge-base
+  Add-from-URL discovery and the About tab's update check
+  ([#109](https://github.com/maneja81/OpenOrbit/pull/109)); the core chat
+  send/reply flow and slash-command interception, the suite's first spec against
+  a real billed provider call
+  ([#110](https://github.com/maneja81/OpenOrbit/pull/110)); and Connectors-tab
+  disconnect
+  ([#111](https://github.com/maneja81/OpenOrbit/pull/111)). Shares a common
+  `e2e/helpers.ts` for sandboxed launch, click/type, and DB-poll assertions across
+  all specs. CLAUDE.md now documents this as a standing process — when a UI
+  surface needs a spec, and the shared conventions to reuse
+  ([#112](https://github.com/maneja81/OpenOrbit/pull/112)).
 
 ### Changed
 
@@ -68,6 +94,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   vertical center moved from 41% to 38.5% of the container, about 136px of
   clearance instead of 5px.
   ([#105](https://github.com/maneja81/OpenOrbit/pull/105))
+- Dependency update for `hono` 4.12.33 → 4.13.0.
+  ([#104](https://github.com/maneja81/OpenOrbit/pull/104))
 
 ## [0.1.0] — 2026-08-03
 
@@ -420,5 +448,6 @@ build from source.
   low), `fast-csv` (denial of service, low), and `exceljs` 3.4.0 → 3.10.0.
   ([#5](https://github.com/maneja81/OpenOrbit/pull/5))
 
-[Unreleased]: https://github.com/maneja81/OpenOrbit/compare/v0.1.0...develop
+[Unreleased]: https://github.com/maneja81/OpenOrbit/compare/v0.2.0...develop
+[0.2.0]: https://github.com/maneja81/OpenOrbit/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/maneja81/OpenOrbit/releases/tag/v0.1.0
