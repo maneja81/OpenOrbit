@@ -6,7 +6,9 @@
 # builds and runs the suite there, writes a markdown report back into this worktree, then
 # removes the throwaway worktree — pass or fail.
 #
-# Usage: scripts/run-e2e-isolated.sh
+# Usage:
+#   scripts/run-e2e-isolated.sh              # run every spec under e2e/
+#   scripts/run-e2e-isolated.sh onboarding   # forwarded to `playwright test` as a name filter
 #
 set -euo pipefail
 
@@ -14,6 +16,11 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MAIN_CHECKOUT="/Users/mohitaneja/Projects/OpenOrbit"
 ENV_TEST="$MAIN_CHECKOUT/.env.test"
 BRANCH="$(git -C "$HERE" branch --show-current)"
+
+# node_modules cache, keyed by package-lock.json content — outside .claude/worktrees/ so it is
+# never mistaken for a worktree, and already covered by .gitignore's blanket `.claude/*`.
+CACHE_ROOT="$MAIN_CHECKOUT/.claude/.e2e-npm-cache"
+KEEP_REPORTS=10
 
 if [[ -z "$BRANCH" ]]; then
   echo "ERROR: HEAD is detached in $HERE — run this from a worktree on a named branch." >&2
@@ -57,14 +64,31 @@ cp "$ENV_TEST" "$WORKTREE_PATH/.env"
 
 pushd "$WORKTREE_PATH" >/dev/null
 
-echo "== npm install =="
-npm install
+LOCK_HASH="$(shasum -a 256 package-lock.json | cut -d' ' -f1)"
+CACHE_DIR="$CACHE_ROOT/$LOCK_HASH"
+
+if [[ -d "$CACHE_DIR/node_modules" ]]; then
+  echo "== restoring node_modules from cache ($LOCK_HASH) =="
+  # -c: APFS clonefile — instant, copy-on-write, and safe: a build process editing a file here
+  # forks a private copy at the filesystem level rather than mutating the shared cache.
+  cp -c -R "$CACHE_DIR/node_modules" node_modules
+else
+  echo "== npm install (no cache for $LOCK_HASH) =="
+  npm install
+  echo "== populating node_modules cache =="
+  mkdir -p "$CACHE_DIR"
+  cp -c -R node_modules "$CACHE_DIR/node_modules"
+fi
 
 # Documented gotcha: npm ci/install regularly leaves Electron half-installed while exiting 0.
+# Cheap enough to check unconditionally, cache hit or not.
 if [[ ! -f node_modules/electron/path.txt || ! -d node_modules/electron/dist ]]; then
   echo "== repairing Electron binary =="
   rm -rf node_modules/electron/dist node_modules/electron/path.txt
   node node_modules/electron/install.js
+  # A repaired binary belongs in the cache too, or every future run repeats the repair.
+  rm -rf "$CACHE_DIR/node_modules"
+  cp -c -R node_modules "$CACHE_DIR/node_modules"
 fi
 
 echo "== npm run build =="
@@ -73,7 +97,7 @@ npm run build
 echo "== playwright test =="
 RESULTS_JSON="$WORKTREE_PATH/e2e-results.json"
 set +e
-node --env-file-if-exists=.env node_modules/.bin/playwright test -c e2e/playwright.config.ts --reporter=json > "$RESULTS_JSON"
+node --env-file-if-exists=.env node_modules/.bin/playwright test -c e2e/playwright.config.ts --reporter=json "$@" > "$RESULTS_JSON"
 TEST_EXIT=$?
 set -e
 
@@ -90,6 +114,13 @@ set -e
 echo
 echo "report: $REPORT_DIR/report.md"
 cat "$REPORT_DIR/report.md"
+
+# Keep only the newest KEEP_REPORTS report directories.
+mapfile -t OLD_REPORTS < <(ls -1dt "$HERE"/e2e/reports/*/ 2>/dev/null | tail -n "+$((KEEP_REPORTS + 1))")
+if [[ ${#OLD_REPORTS[@]} -gt 0 ]]; then
+  echo "pruning ${#OLD_REPORTS[@]} old report(s), keeping the newest $KEEP_REPORTS"
+  rm -rf "${OLD_REPORTS[@]}"
+fi
 
 if [[ $TEST_EXIT -ne 0 ]]; then
   echo
