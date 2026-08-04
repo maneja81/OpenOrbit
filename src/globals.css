@@ -582,7 +582,7 @@ svg#oc {
 
 #chat-log {
   min-height: 36px;
-  max-height: 40vh;
+  max-height: 28vh;
   overflow-y: auto;
   padding: 10px 20px 4px;
   display: flex;
@@ -2881,7 +2881,7 @@ svg#oc {
    centre-anchored and pointer-events: none, so it neither overlaps nor blocks these columns.
 
    bottom: 96px is the chat's *resting* height (#bar: a one-line input card plus its 12/22
-   padding). It is deliberately not the chat's maximum: #chat-log grows to 40vh, and sizing
+   padding). It is deliberately not the chat's maximum: #chat-log grows to 28vh, and sizing
    these columns for that would shorten them by ~430px permanently to avoid an overlap that
    only exists while the backlog is long. The overlap is handled by z-order instead — #chat
    is z-index 30 against these columns' 15, so a grown chat paints over the bottom of a

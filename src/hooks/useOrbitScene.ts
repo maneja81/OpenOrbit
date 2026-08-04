@@ -95,7 +95,7 @@ export function useOrbitScene({
   const sizesRef = useRef({ orchestratorHalf: 70, innerRadius: 210, outerRadius: 210 + BAND_GAP });
 
   function getCenter(container: HTMLDivElement) {
-    return { x: container.clientWidth / 2, y: container.clientHeight * 0.41 };
+    return { x: container.clientWidth / 2, y: container.clientHeight * 0.385 };
   }
 
   function updateSizes(container: HTMLDivElement, orchestratorEl: HTMLDivElement) {
