@@ -6,7 +6,7 @@ Use live code evidence before planning or editing. Make the smallest safe change
 
 OpenOrbit — a desktop app that runs a team of AI agents locally, with a central orchestrator delegating to specialist sub-agents, each with its own tools and access to the user's files, apps, and Google account.
 
-**Status:** implemented and under active development on `develop-ai`. ~290 source files across an Electron main process, a preload bridge, and a React renderer. The source tree is currently untracked in git (only `README.md`, `LICENSE`, `.gitignore`, and this file are committed) — `README.md` still describes the project as "idea phase" and is stale.
+**Status:** released (v0.1.0) and under active development on `develop`. ~290 source files across an Electron main process, a preload bridge, and a React renderer.
 
 Four built-in sub-agents ship seeded from `electron/main/ai/defaultAgents.json`: Cipher (`configAgent`), Atlas (`knowledgeAgent`), Explorer (`explorerAgent`), Chrono (`taskAgent`). The orchestrator ("Orbit") is singular, not an `agents` row, and is configured from its own prompt file plus settings.
 
@@ -105,7 +105,7 @@ Four built-in sub-agents ship seeded from `electron/main/ai/defaultAgents.json`:
 
 ## Worktrees
 
-- ⚠ **Branch every new worktree from `develop`.** `develop` is the default working branch and carries the entire app. `main` sits at `ca1f8d8` — a README-only "idea phase" commit with no `src/`, no `electron/`, no `package.json`. A worktree cut from `main` (or from whatever HEAD happened to be) reads as an *empty project*, and has now misled three separate sessions into concluding the feature they were sent to fix doesn't exist.
+- ⚠ **Branch every new worktree from `develop`.** `develop` is the default working branch and is always ahead of `main` — `main` only moves at a release cut or hotfix, so a worktree cut from `main` (or from whatever HEAD happened to be) is missing whatever has merged into `develop` since the last release, reading as stale or feature-incomplete. This has now misled four separate sessions, including one that skipped `main`'s old idea-phase commit entirely and instead branched from a `main`-based release-sync merge that was itself several PRs behind `develop`.
 
   ```bash
   git worktree add -b <branch> .claude/worktrees/<name> develop
