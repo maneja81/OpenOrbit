@@ -115,11 +115,16 @@ echo
 echo "report: $REPORT_DIR/report.md"
 cat "$REPORT_DIR/report.md"
 
-# Keep only the newest KEEP_REPORTS report directories.
-mapfile -t OLD_REPORTS < <(ls -1dt "$HERE"/e2e/reports/*/ 2>/dev/null | tail -n "+$((KEEP_REPORTS + 1))")
-if [[ ${#OLD_REPORTS[@]} -gt 0 ]]; then
-  echo "pruning ${#OLD_REPORTS[@]} old report(s), keeping the newest $KEEP_REPORTS"
-  rm -rf "${OLD_REPORTS[@]}"
+# Keep only the newest KEEP_REPORTS report directories. Built-in macOS bash is 3.2 (no mapfile),
+# so this reads the list the same way, one path at a time, rather than into an array.
+PRUNE_COUNT=0
+while IFS= read -r old_dir; do
+  [[ -z "$old_dir" ]] && continue
+  rm -rf "$old_dir"
+  PRUNE_COUNT=$((PRUNE_COUNT + 1))
+done < <(ls -1dt "$HERE"/e2e/reports/*/ 2>/dev/null | tail -n "+$((KEEP_REPORTS + 1))")
+if [[ $PRUNE_COUNT -gt 0 ]]; then
+  echo "pruned $PRUNE_COUNT old report(s), kept the newest $KEEP_REPORTS"
 fi
 
 if [[ $TEST_EXIT -ne 0 ]]; then
