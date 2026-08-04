@@ -4,10 +4,16 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
+import { resolveE2EProvider } from "./providerConfig";
 
-// Drives the real Electron app through onboarding, selecting OpenAI, and asserts the credential
-// landed in the sandbox DB. See .claude/skills/run-openorbit/driver.mjs for the manual-REPL
-// version of the same sandbox/click/DB-read conventions this spec reuses.
+// Drives the real Electron app through onboarding, selecting whichever provider E2E_PROVIDER
+// resolves to (see providerConfig.ts), and asserts the credential landed in the sandbox DB.
+// See .claude/skills/run-openorbit/driver.mjs for the manual-REPL version of the same
+// sandbox/click/DB-read conventions this spec reuses.
+
+// Resolved at module load, not inside a test/hook: a bad or unconfigured E2E_PROVIDER should
+// fail the whole suite immediately, not surface as a confusing mid-test failure.
+const provider = resolveE2EProvider();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_DIR = path.resolve(__dirname, "..");
@@ -66,9 +72,7 @@ async function clickByText(page: Page, text: string): Promise<void> {
   if (!found) throw new Error(`clickByText: no element with text "${text}"`);
 }
 
-test.describe("onboarding — OpenAI", () => {
-  test.skip(!process.env.OPENAI_API_KEY, "OPENAI_API_KEY not set — skipping live-provider onboarding test");
-
+test.describe(`onboarding — ${provider.label}`, () => {
   let app: ElectronApplication;
   let page: Page;
   let userData: string;
@@ -103,7 +107,7 @@ test.describe("onboarding — OpenAI", () => {
     await app?.close().catch(() => {});
   });
 
-  test("completes onboarding selecting OpenAI and persists the provider", async () => {
+  test(`completes onboarding selecting ${provider.label} and persists the provider`, async () => {
     await typeIntoField(page, 'input[aria-label="Give me a name?"]', "TestOrbit");
     await page.keyboard.press("Enter");
 
@@ -118,12 +122,12 @@ test.describe("onboarding — OpenAI", () => {
       await clickSelector(page, '[aria-label="Skip"]');
     }
 
-    await clickByText(page, "OpenAI");
+    await clickByText(page, provider.label);
 
-    // apiUrl step is prefilled from the OpenAI registry entry — accept the default.
+    // apiUrl step is prefilled from the provider's registry entry — accept the default.
     await page.keyboard.press("Enter");
 
-    await typeIntoField(page, 'input[aria-label="Enter your API key"]', process.env.OPENAI_API_KEY!);
+    await typeIntoField(page, 'input[aria-label="Enter your API key"]', provider.apiKey);
     await page.keyboard.press("Enter");
 
     // model step is prefilled — accept the default.
@@ -138,7 +142,7 @@ test.describe("onboarding — OpenAI", () => {
       try {
         row = db
           .prepare("SELECT id, api_url, length(api_key) AS keylen FROM providers WHERE id = ?")
-          .get("openai") as typeof row;
+          .get(provider.id) as typeof row;
       } catch {
         // table may not exist yet on the very first poll — keep waiting.
       } finally {
@@ -148,7 +152,7 @@ test.describe("onboarding — OpenAI", () => {
       await new Promise((r) => setTimeout(r, 200));
     }
 
-    expect(row, "openai provider row never appeared in the sandbox DB").toBeDefined();
+    expect(row, `${provider.id} provider row never appeared in the sandbox DB`).toBeDefined();
     expect(row!.keylen).toBeGreaterThan(0);
     expect(row!.api_url).not.toBe("");
 
@@ -158,6 +162,6 @@ test.describe("onboarding — OpenAI", () => {
       .get("appSettings.chatProviderId") as { setting_value: string } | undefined;
     settingsDb.close();
 
-    expect(chatProviderRow?.setting_value).toBe(JSON.stringify("openai"));
+    expect(chatProviderRow?.setting_value).toBe(JSON.stringify(provider.id));
   });
 });
