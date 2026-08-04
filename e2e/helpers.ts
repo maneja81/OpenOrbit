@@ -110,6 +110,56 @@ export async function typeIntoNth(
   );
 }
 
+// For rows with no aria-label/id at all (e.g. ApiKeyField, whose <span>{label}</span> is only
+// ever visible text) — finds a `rowSelector` element whose text starts with `labelText` and types
+// into its first `input`/`textarea`.
+export async function typeIntoLabeledRow(
+  page: Page,
+  rowSelector: string,
+  labelText: string,
+  value: string
+): Promise<void> {
+  await page.evaluate(
+    ({ rowSelector, labelText, value }) => {
+      const rows = [...document.querySelectorAll(rowSelector)];
+      const row = rows.find((r) => r.textContent?.trim().startsWith(labelText));
+      if (!row) throw new Error(`typeIntoLabeledRow: no "${rowSelector}" starting with "${labelText}"`);
+      const el = row.querySelector("input, textarea") as HTMLInputElement | HTMLTextAreaElement | null;
+      if (!el) throw new Error(`typeIntoLabeledRow: no input/textarea inside row "${labelText}"`);
+      el.focus();
+      const proto = el.tagName === "TEXTAREA" ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, "value")!.set!;
+      setter.call(el, value);
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    },
+    { rowSelector, labelText, value }
+  );
+}
+
+// Companion to typeIntoLabeledRow — clicks a button by text inside the row starting with
+// `labelText`, e.g. ApiKeyField's per-provider "Remove" button.
+export async function clickInLabeledRow(
+  page: Page,
+  rowSelector: string,
+  labelText: string,
+  buttonText: string
+): Promise<void> {
+  const found = await page.evaluate(
+    ({ rowSelector, labelText, buttonText }) => {
+      const rows = [...document.querySelectorAll(rowSelector)];
+      const row = rows.find((r) => r.textContent?.trim().startsWith(labelText));
+      if (!row) return false;
+      const buttons = [...row.querySelectorAll("button")];
+      const btn = buttons.find((b) => b.textContent?.trim() === buttonText);
+      if (!btn) return false;
+      btn.click();
+      return true;
+    },
+    { rowSelector, labelText, buttonText }
+  );
+  if (!found) throw new Error(`clickInLabeledRow: no "${buttonText}" button in row "${labelText}"`);
+}
+
 // Blurs whatever currently holds focus — Settings text/number fields commit onBlur, not per
 // keystroke, so a test must blur after typing (which focuses the field, see typeIntoField above)
 // before the write lands.
