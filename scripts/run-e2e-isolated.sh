@@ -13,7 +13,9 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MAIN_CHECKOUT="/Users/mohitaneja/Projects/OpenOrbit"
+# The main checkout is always the first entry `git worktree list` reports, from any worktree —
+# no hardcoded path, so this works from any clone location on any machine.
+MAIN_CHECKOUT="$(git -C "$HERE" worktree list --porcelain | head -1 | cut -d' ' -f2-)"
 ENV_TEST="$MAIN_CHECKOUT/.env.test"
 BRANCH="$(git -C "$HERE" branch --show-current)"
 
