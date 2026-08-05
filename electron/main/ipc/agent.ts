@@ -2,6 +2,7 @@ import { ipcMain, BrowserWindow, dialog } from "electron";
 import {
   run,
   setTracingDisabled,
+  Agent,
   AgentInputItem,
   RunAgentUpdatedStreamEvent,
   RunItemStreamEvent,
@@ -25,6 +26,7 @@ import {
   AgentExport,
 } from "../ai/agents";
 import { closeMcpServers } from "../ai/mcp";
+import { resolveApprovalsAndRun } from "../ai/runLoop";
 import { extractApprovalMeta, extractRunItemMeta } from "../ai/runItemMeta";
 import { configureChatClient, estimateGenerationCost, providerIdForModel } from "../ai/provider";
 import { insertTokenUsage, updateTokenUsageCost } from "../db/tokenUsageStore";
@@ -343,16 +345,6 @@ export function registerAgentHandlers() {
       // Sent before the run starts so the renderer can attach it to the turn even if the
       // run later fails: a partial turn that still burned tokens should still show a cost.
       event.sender.send("agent:stream-trace", { requestId, traceId });
-      const { agent: orchestrator, mcpServers, allAgents } = await buildOrchestrator();
-      // Deterministic routing (e.g. "/cipher <message>") bypasses the orchestrator's own
-      // handoff judgment entirely and runs the named agent directly — falls back to the
-      // orchestrator if the name doesn't match (agent renamed/deleted between menu-open
-      // and send), never surfacing an error to the user for that race.
-      const runTarget =
-        (typeof targetAgentName === "string" && targetAgentName.length > 0
-          ? allAgents.find((a) => a.name.toLowerCase() === targetAgentName.toLowerCase())
-          : undefined) ?? orchestrator;
-      devLog(`[agent:runStream] requestId=${requestId} input="${input}" target=${runTarget.name}`);
       // The timeout only races the promise returned to the caller — it can't cancel the
       // SDK's own run() once started. If we closed MCP servers / logged / appended messages
       // in an outer `finally` keyed to the race, a timed-out run would still be consuming
@@ -387,11 +379,20 @@ export function registerAgentHandlers() {
             // APPROVAL_TIMEOUT_MS can silently drift away from.
             expiresAt: Date.now() + APPROVAL_TIMEOUT_MS,
           });
-        }).finally(() => {
-          // Resumed here rather than at each call site so an approval that times out or is
-          // abandoned still restarts the clock exactly once.
-          deadline.resume();
-        });
+        })
+          .then((approved) => {
+            devLog(
+              `[agent:runStream] requestId=${requestId} approval ${approved ? "granted" : "declined"} for ${
+                meta.toolName ?? "(unknown)"
+              }`
+            );
+            return approved;
+          })
+          .finally(() => {
+            // Resumed here rather than at each call site so an approval that times out or is
+            // abandoned still restarts the clock exactly once.
+            deadline.resume();
+          });
       };
 
       /** Forwards one run segment's stream events to the renderer. Called once per segment:
@@ -446,44 +447,55 @@ export function registerAgentHandlers() {
         }
       };
 
+      // Runs one agent (the orchestrator, or a specialist invoked as a tool) to completion,
+      // resolving any approval interruptions along the way via the same requestApproval/
+      // forwardStreamEvents this request already has — one round-trip to the renderer per
+      // approval regardless of how deep the call is nested. Logged per segment, not once at
+      // the end: a resumed run is a fresh result whose rawResponses covers only its own
+      // segment, so logging after the loop would silently drop the cost of every model call
+      // made before an approval pause. Same traceId throughout, so the rows still add up to
+      // one turn even when a specialist tool call is what triggered the resume.
+      const runToCompletion = (target: Agent, input: unknown, label: string) => {
+        const runOnce = async (segmentInput: unknown) => {
+          const segment = await run(target, segmentInput as Parameters<typeof run>[1], { stream: true });
+          await forwardStreamEvents(segment);
+          await segment.completed;
+          if (!timedOut) logTokenUsage(segment, traceId);
+          return segment;
+        };
+        devLog(`[agent:runStream] requestId=${requestId} running ${label}`);
+        return resolveApprovalsAndRun(runOnce, input, requestApproval, () => timedOut);
+      };
+
+      // Passed into buildOrchestrator so every specialist agent gets wrapped as a tool the
+      // orchestrator can call directly — see ai/agents.ts's agentAsTool. A specialist run
+      // this way is a fully independent nested run: it does not automatically see the prior
+      // conversation the way a handoff used to forward it, only the `input` string the
+      // orchestrator's tool call supplies (see orchestrator.md's updated guidance on
+      // packaging context). Its own approval-gated tools (Cipher's update_agent, Chrono's
+      // create_task, any agent's HTTP write) still pause for the same user-facing dialog —
+      // that is the entire reason this shares runToCompletion with the top-level run rather
+      // than using the SDK's own Agent.asTool(), which resolves nested interruptions nowhere.
+      const runSubAgent = async (agent: Agent, subInput: string, displayName: string): Promise<string> => {
+        const result = await runToCompletion(agent, subInput, `specialist=${displayName}`);
+        return result?.finalOutput ?? "";
+      };
+
+      const { agent: orchestrator, mcpServers, allAgents } = await buildOrchestrator(runSubAgent);
+      // Deterministic routing (e.g. "/cipher <message>") bypasses the orchestrator's own
+      // routing judgment entirely and runs the named agent directly — falls back to the
+      // orchestrator if the name doesn't match (agent renamed/deleted between menu-open
+      // and send), never surfacing an error to the user for that race.
+      const runTarget =
+        (typeof targetAgentName === "string" && targetAgentName.length > 0
+          ? allAgents.find((a) => a.name.toLowerCase() === targetAgentName.toLowerCase())
+          : undefined) ?? orchestrator;
+      devLog(`[agent:runStream] requestId=${requestId} input="${input}" target=${runTarget.name}`);
+
       const runPromise = (async () => {
         try {
-          let result = await run(runTarget, buildInputWithHistory(history, input), { stream: true });
-
-          // Loops only when a tool needs the user's approval; a run with no
-          // confirmation-gated tools goes round exactly once, as it always did.
-          for (;;) {
-            await forwardStreamEvents(result);
-            await result.completed;
-            if (timedOut) return "";
-
-            // Logged per segment, not once at the end. A resumed run is a fresh result whose
-            // rawResponses covers only its own segment — logging after the loop would silently
-            // drop the cost of every model call made before the approval pause. Same traceId
-            // throughout, so the rows still add up to one turn.
-            logTokenUsage(result, traceId);
-
-            const interruptions = result.interruptions ?? [];
-            if (interruptions.length === 0) break;
-
-            // SDK-native human-in-the-loop: a tool declaring needsApproval stops the run
-            // here, before it executes, and only runs once approved. See ai/httpTools.ts.
-            for (const interruption of interruptions) {
-              const approved = await requestApproval(interruption);
-              if (timedOut) return "";
-              if (approved) {
-                result.state.approve(interruption);
-              } else {
-                result.state.reject(interruption, { message: "The user declined this call." });
-              }
-              devLog(
-                `[agent:runStream] requestId=${requestId} approval ${approved ? "granted" : "declined"} for ${
-                  extractApprovalMeta(interruption).toolName ?? "(unknown)"
-                }`
-              );
-            }
-            result = await run(runTarget, result.state, { stream: true });
-          }
+          const result = await runToCompletion(runTarget, buildInputWithHistory(history, input), "top-level run");
+          if (!result) return "";
 
           broadcastSettingsUpdate();
           broadcastConnectorsUpdate();

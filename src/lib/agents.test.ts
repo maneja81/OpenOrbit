@@ -35,6 +35,10 @@ describe("ORCHESTRATOR_TOOL_NAMES", () => {
       "search_conversation_history",
       "get_current_location",
       "save_user_info",
+      "cipher",
+      "atlas",
+      "explorer",
+      "chrono",
     ]);
   });
 
@@ -45,6 +49,10 @@ describe("ORCHESTRATOR_TOOL_NAMES", () => {
       "Search History",
       "Get Current Location",
       "Save User Info",
+      "Cipher",
+      "Atlas",
+      "Explorer",
+      "Chrono",
     ]);
   });
 });

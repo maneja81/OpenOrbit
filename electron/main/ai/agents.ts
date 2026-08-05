@@ -1079,9 +1079,52 @@ export interface BuiltOrchestrator {
   mcpServers: MCPServerStdio[];
   /** Every agent (system + custom) built this pass, orchestrator excluded — lets a
    * caller run a single agent directly (deterministic `/agentname` routing) instead of
-   * going through the orchestrator's own handoff judgment. Matched by name, case-insensitively,
-   * by the caller (see electron/main/ipc/agent.ts's agent:runStream). */
+   * going through the orchestrator. Matched by name, case-insensitively, by the caller
+   * (see electron/main/ipc/agent.ts's agent:runStream). */
   allAgents: Agent[];
+}
+
+/**
+ * Runs one specialist agent to completion for a single tool call and returns its final text
+ * output. Supplied by the caller (ipc/agent.ts for an interactive chat turn,
+ * tasks/scheduler.ts for a headless prompt-task run) because only the caller has the
+ * approval-dialog / streaming machinery a nested run still needs — buildOrchestrator only
+ * wires the specialist up as a callable tool, it doesn't execute anything itself.
+ */
+export type RunSubAgentFn = (agent: Agent, input: string, displayName: string) => Promise<string>;
+
+/**
+ * Wraps one specialist agent as a tool the orchestrator can call directly and get a text
+ * result back from — replacing the old handoff-based `handoffs: [...]` wiring, which
+ * transferred control away permanently and let the orchestrator use exactly one specialist
+ * per message (see orchestrator.md's former "Sequencing reality check"). This lets Orbit call
+ * several specialists in one turn, in sequence or based on each other's results, and
+ * synthesize the final reply itself.
+ *
+ * Deliberately not the SDK's own `Agent.asTool()`: that helper runs the nested agent
+ * internally and returns its text, but never inspects or resolves `interruptions` from that
+ * nested run — a needsApproval tool inside it (Cipher's update_agent, Chrono's create_task,
+ * any agent's approval-gated HTTP tool) would silently never execute, with no dialog and no
+ * explanation. `runSubAgent` is built by the caller from the exact same approval-resolution
+ * loop the top-level run uses (see ipc/agent.ts's runToCompletion / ai/runLoop.ts), so a
+ * nested approval gets the identical dialog it always did.
+ *
+ * A specialist run this way is a fully independent nested `run()` — unlike a handoff, it
+ * does not automatically receive the prior conversation, only the `input` string the
+ * orchestrator's tool call supplies. The tool description says so explicitly so the model
+ * doesn't assume otherwise.
+ */
+function agentAsTool(row: AgentRow, agentInstance: Agent, description: string, runSubAgent: RunSubAgentFn): Tool {
+  return tool({
+    name: slugify(row.name).replace(/-/g, "_"),
+    description:
+      `${description} This specialist does not see the rest of this conversation — write a ` +
+      `self-contained request in "input" with every fact or prior finding it needs.`,
+    parameters: z.object({
+      input: z.string().describe("The full, self-contained request to hand to this specialist."),
+    }),
+    execute: async ({ input }) => runSubAgent(agentInstance, input, row.name),
+  });
 }
 
 /** Rebuilt fresh on every agent:run/agent:runStream call (nothing is cached across runs
@@ -1089,7 +1132,7 @@ export interface BuiltOrchestrator {
  * `mcp_server_ids` must be closed by the caller after the run completes (`mcpServers`
  * collects every server connected across every agent, orchestrator included, so one
  * `closeMcpServers(result.mcpServers)` in a `finally` covers all of them). */
-export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
+export async function buildOrchestrator(runSubAgent: RunSubAgentFn): Promise<BuiltOrchestrator> {
   const db = getDb();
   ensureDefaultAgentsSeeded(db);
 
@@ -1134,17 +1177,17 @@ export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
     "an entry. Use this whenever you need to persist your own data across turns or conversations — no other " +
     "agent can read or change it.";
 
-  // handoffDescription (an @openai/agents field, distinct from `instructions`) is what
-  // the orchestrator actually sees on each generated "transfer_to_X" handoff tool — it's
-  // the SDK-native way to keep routing guidance in sync with which agents genuinely exist
-  // right now, rather than relying solely on the static prose in orchestrator.md (which
-  // only describes the three fixed built-ins and has no way to know about custom agents).
+  // This description feeds agentAsTool below — it's what the orchestrator actually sees on
+  // the generated tool for this specialist, the same job handoffDescription used to do for
+  // the generated "transfer_to_X" handoff tool, kept in sync with which agents genuinely
+  // exist right now rather than relying solely on the static prose in orchestrator.md (which
+  // only describes the four fixed built-ins and has no way to know about custom agents).
+  const CONFIG_AGENT_TOOL_DESCRIPTION =
+    "Manages app configuration: onboarding, settings (agent names, models, API keys, toggles) — including reading/checking a setting's current value, not just changing it — and creating new custom agents.";
   const configAgentRow = db.prepare("SELECT * FROM agents WHERE id = ?").get("configAgent") as AgentRow;
   const configAgent = new Agent({
     name: configAgentRow.name,
     instructions: renderPrompt(configAgentRow.prompt, promptVars) + httpToolsPromptForRow(configAgentRow) + userInfoBlock,
-    handoffDescription:
-      "Manages app configuration: onboarding, settings (agent names, models, API keys, toggles) — including reading/checking a setting's current value, not just changing it — and creating new custom agents.",
     model: modelForAgent(configAgentRow),
     tools: [
       getSettingsTool,
@@ -1165,13 +1208,13 @@ export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
     mcpServers: await connectForRow(configAgentRow),
   });
 
+  const KNOWLEDGE_AGENT_TOOL_DESCRIPTION =
+    "Reads and searches the user's knowledge base documents (resumes, notes, reference material) for anything a personal document might answer, and browses/reads the local folders the user has granted via the Folders widget.";
   const knowledgeAgentRow = db.prepare("SELECT * FROM agents WHERE id = ?").get("knowledgeAgent") as AgentRow;
   const knowledgeAgent = new Agent({
     name: knowledgeAgentRow.name,
     instructions:
       renderPrompt(knowledgeAgentRow.prompt, promptVars) + httpToolsPromptForRow(knowledgeAgentRow) + userInfoBlock,
-    handoffDescription:
-      "Reads and searches the user's knowledge base documents (resumes, notes, reference material) for anything a personal document might answer, and browses/reads the local folders the user has granted via the Folders widget.",
     model: modelForAgent(knowledgeAgentRow),
     tools: [
       listKnowledgebaseFilesTool,
@@ -1186,13 +1229,13 @@ export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
     mcpServers: await connectForRow(knowledgeAgentRow),
   });
 
+  const EXPLORER_AGENT_TOOL_DESCRIPTION =
+    "Searches the live web for current information: news, comparisons, products, or anything about the outside world that needs up-to-date data rather than the user's own documents.";
   const explorerAgentRow = db.prepare("SELECT * FROM agents WHERE id = ?").get("explorerAgent") as AgentRow;
   const explorerAgent = new Agent({
     name: explorerAgentRow.name,
     instructions:
       renderPrompt(explorerAgentRow.prompt, promptVars) + httpToolsPromptForRow(explorerAgentRow) + userInfoBlock,
-    handoffDescription:
-      "Searches the live web for current information: news, comparisons, products, or anything about the outside world that needs up-to-date data rather than the user's own documents.",
     model: modelForAgent(explorerAgentRow),
     tools: [
       webSearchTool,
@@ -1213,15 +1256,15 @@ export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
   // once, for itself and every other agent, while the agent-data tools (save/get/list/delete,
   // bound to row.id) give it a private per-agent store for its own structured data (e.g. a
   // budget agent's saved entries) that other agents can't read.
-  // Its handoffDescription comes straight from whatever the user (via Cipher) set as its
-  // tagline/description, so routing guidance appears/disappears with the agent itself —
-  // no orchestrator.md edits needed as custom agents are added, edited, or removed.
+  // A custom agent's tool description comes straight from whatever the user (via Cipher) set
+  // as its tagline/description, so routing guidance appears/disappears with the agent itself
+  // — no orchestrator.md edits needed as custom agents are added, edited, or removed.
+  const TASK_AGENT_TOOL_DESCRIPTION =
+    "Manages reminders and prompt tasks — one-shot or recurring, with dynamic parameters substituted at run time — and notifies the user when they're due.";
   const taskAgentRow = db.prepare("SELECT * FROM agents WHERE id = ?").get("taskAgent") as AgentRow;
   const taskAgent = new Agent({
     name: taskAgentRow.name,
     instructions: renderPrompt(taskAgentRow.prompt, promptVars) + httpToolsPromptForRow(taskAgentRow) + userInfoBlock,
-    handoffDescription:
-      "Manages reminders and prompt tasks — one-shot or recurring, with dynamic parameters substituted at run time — and notifies the user when they're due.",
     model: modelForAgent(taskAgentRow),
     tools: [
       createTaskTool,
@@ -1253,7 +1296,6 @@ export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
           agentDataContext +
           httpToolsPromptForRow(row) +
           userInfoBlock,
-        handoffDescription: row.description || row.tagline || `Handles requests related to ${row.name}.`,
         model: modelForAgent(row),
         tools: [
           createSaveUserInfoTool(row.name),
@@ -1272,6 +1314,20 @@ export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
   const orchestratorMcpServers = await connectMcpServersForAgent(orchestratorMcpServerIds);
   allConnected.push(...orchestratorMcpServers);
 
+  // Every specialist is wired in as a callable tool, not a handoff target — Orbit can call
+  // several of these in one turn, in sequence or based on each other's results, and
+  // synthesize the final reply itself instead of transferring control away permanently. See
+  // agentAsTool's own comment for why this isn't the SDK's built-in Agent.asTool().
+  const specialistTools = [
+    agentAsTool(configAgentRow, configAgent, CONFIG_AGENT_TOOL_DESCRIPTION, runSubAgent),
+    agentAsTool(knowledgeAgentRow, knowledgeAgent, KNOWLEDGE_AGENT_TOOL_DESCRIPTION, runSubAgent),
+    agentAsTool(explorerAgentRow, explorerAgent, EXPLORER_AGENT_TOOL_DESCRIPTION, runSubAgent),
+    agentAsTool(taskAgentRow, taskAgent, TASK_AGENT_TOOL_DESCRIPTION, runSubAgent),
+    ...customRows.map((row, i) =>
+      agentAsTool(row, customAgents[i], row.description || row.tagline || `Handles requests related to ${row.name}.`, runSubAgent)
+    ),
+  ];
+
   const orchestrator = new Agent({
     name: agentName,
     instructions:
@@ -1283,11 +1339,11 @@ export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
       searchHistoryTool,
       getCurrentLocationTool,
       createSaveUserInfoTool(agentName),
+      ...specialistTools,
       ...attachConnectorsForIds(orchestratorConnectorIds),
       ...buildHttpToolsForCollectionIds(orchestratorHttpToolCollectionIds),
     ],
     mcpServers: orchestratorMcpServers,
-    handoffs: [configAgent, knowledgeAgent, explorerAgent, taskAgent, ...customAgents],
   });
 
   return {

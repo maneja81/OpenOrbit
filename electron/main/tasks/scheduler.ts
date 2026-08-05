@@ -8,13 +8,27 @@
  */
 
 import { Notification, BrowserWindow } from "electron";
-import { run } from "@openai/agents";
-import { buildOrchestrator, listAgents } from "../ai/agents";
+import { run, Agent } from "@openai/agents";
+import { buildOrchestrator, listAgents, RunSubAgentFn } from "../ai/agents";
 import { closeMcpServers } from "../ai/mcp";
+import { resolveApprovalsAndRun } from "../ai/runLoop";
 import { getDueTasks, recordTaskRun, TaskRow } from "../db/tasksStore";
 import { devLog } from "../devLog";
 import { parseStringMap } from "../db/jsonColumn";
 import { extractApprovalMeta } from "../ai/runItemMeta";
+
+// A scheduled task runs unattended — there is no user to show an approval dialog to. A
+// specialist called as a tool during a headless run (e.g. Chrono's Explorer call) gets the
+// same auto-reject the top-level run has always applied to its own approval-gated tools
+// (see the KI-5 comment in runPromptTask below), then resumes so the specialist can report
+// back that it was blocked, rather than leaving buildOrchestrator with no runSubAgent to
+// give its wrapped specialist tools at all.
+const runSubAgentHeadless: RunSubAgentFn = async (agent: Agent, input: string, displayName: string) => {
+  const runOnce = (segmentInput: unknown) => run(agent, segmentInput as Parameters<typeof run>[1]);
+  devLog(`[taskScheduler] running specialist=${displayName} headlessly`);
+  const result = await resolveApprovalsAndRun(runOnce, input, async () => false);
+  return result?.finalOutput ?? "";
+};
 
 const POLL_INTERVAL_MS = 30_000;
 // Truncated in the OS notification body so a long agent reply doesn't overflow the
@@ -78,7 +92,7 @@ export function notify(title: string, body: string): void {
 /** Exported for testing — the interruption/auto-reject handling below is the KI-5 fix and is
  * otherwise only reachable through the poll loop's setInterval callback. */
 export async function runPromptTask(task: TaskRow): Promise<string> {
-  const { agent: orchestrator, mcpServers, allAgents } = await buildOrchestrator();
+  const { agent: orchestrator, mcpServers, allAgents } = await buildOrchestrator(runSubAgentHeadless);
   try {
     let runTarget = orchestrator;
     if (task.prompt_target_agent_id) {

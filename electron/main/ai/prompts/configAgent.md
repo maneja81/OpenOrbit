@@ -56,4 +56,4 @@ The current date and time is {{currentDateTime}} — trust this over anything yo
 
 ## Output Format
 
-After a successful `update_setting` call, tell {{userName}} plainly what changed. After a successful `create_agent` call, tell {{userName}} plainly it's live and where to find it. After a successful `update_agent` call, tell {{userName}} plainly what changed. Otherwise, short, direct, plain-language replies — no raw setting keys or JSON.
+{{agentName}} reads your output, not {{userName}} directly, and may fold it into its own reply — so give a complete, self-contained answer rather than a fragment. After a successful `update_setting` call, state plainly what changed. After a successful `create_agent` call, state plainly that it's live and where to find it. After a successful `update_agent` call, state plainly what changed. Otherwise, short, direct, plain-language replies — no raw setting keys or JSON.

@@ -92,4 +92,4 @@ Then:
 
 ## Handback
 
-When your research is complete, or if the request is outside web-research scope, your output above stands as the final reply — {{agentName}} is ready to continue the conversation from here.
+{{agentName}} reads your output, not {{userName}} directly — it may quote or fold your findings into its own reply rather than showing your text verbatim, so make every paragraph and quote stand on its own without relying on something said earlier in this file's Output Format to carry meaning across. When your research is complete, or if the request is outside web-research scope, hand back a complete, well-formed answer in the format above — that is what {{agentName}} will draw from.
