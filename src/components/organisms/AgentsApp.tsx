@@ -607,6 +607,13 @@ export default function AgentsApp() {
         // tool_output specifically because that's when the DB write has actually committed
         // (see ai/tools/checklistTools.ts) — fetching on tool_called would race the write.
         if (step.type === "tool_output" && step.toolName === "write_checklist" && traceId) {
+          // Deliberately silent on failure, unlike useAgents.ts's mount-time fetch (which
+          // surfaces via setError — a failed agent list there is indistinguishable from a
+          // fresh install otherwise). This is lower stakes: the actual reply the user cares
+          // about doesn't depend on it, a failed refetch just leaves the widget showing
+          // whichever state it last successfully fetched (stale, not silently wrong), and
+          // it can retry on the very next write_checklist call this same turn — no reason
+          // to interrupt the conversation over a side widget not updating once.
           window.agentsAPI.checklist.get(traceId).then(setChecklist).catch(() => {});
         }
 
