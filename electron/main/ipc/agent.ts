@@ -66,10 +66,14 @@ function getHistoryMessageLimit(): number {
   return readAppSetting("chatHistoryMessageLimit", DEFAULT_HISTORY_MESSAGE_LIMIT);
 }
 
-/** The orchestrator is the only agent given prior turns directly. When it hands off to a
- * sub-agent (ConfigAgent/KnowledgeAgent) within the same `run()` call, the SDK forwards
- * the full input history to the sub-agent automatically (see HandoffInputData.inputHistory
- * in @openai/agents-core) — so sub-agents don't need history threaded through separately. */
+/** The orchestrator is the only agent given prior turns directly. A specialist it calls as a
+ * tool (Cipher/Atlas/Explorer/Chrono/custom — see agentAsTool in ai/agents.ts) runs as a
+ * fully independent nested `run()` and does NOT receive this history automatically — it
+ * only sees the `input` string the orchestrator's own tool call supplies, which is why
+ * orchestrator.md explicitly tells Orbit to pack self-contained context into every
+ * specialist call. (This changed when handoffs were replaced with tool calls: a handoff used
+ * to forward the full input history to the sub-agent automatically via the SDK's
+ * HandoffInputData.inputHistory — that mechanism doesn't apply to a nested tool-call run.) */
 function buildInputWithHistory(history: ChatMessageRecord[], input: string): AgentInputItem[] {
   const historyItems: AgentInputItem[] = history.map((m) =>
     m.role === "assistant"

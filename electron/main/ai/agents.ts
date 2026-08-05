@@ -838,6 +838,47 @@ function slugify(name: string): string {
   return slug || "agent";
 }
 
+/** The natural tool-name slug for a display name — what agentAsTool would register if no
+ * other agent's name produced the same slug. Two agents can share a display name today by
+ * design (uniqueAgentId already disambiguates the *id* for that exact case — e.g. importing
+ * an agent config you already have under the same name), so this can't be enforced unique
+ * at write time without breaking that. dedupeToolNames (below) is what actually resolves a
+ * collision, at the one point it matters: assembling the orchestrator's tool list. */
+function agentToolNameSlug(name: string): string {
+  return slugify(name).replace(/-/g, "_");
+}
+
+/**
+ * Assigns each row a unique tool name, preferring its own natural slug and appending `_2`,
+ * `_3`, … only when that slug was already claimed earlier in `rows` — same
+ * auto-disambiguate-rather-than-reject philosophy as uniqueAgentId, applied here because
+ * nothing in the @openai/agents SDK itself detects or rejects a duplicate function-tool name
+ * (checked: it only guards against duplicate names across MCP servers). Without this, two
+ * agents sharing a display name — or a custom agent named the same as a built-in specialist
+ * — would silently register two identically-named tools, and which one the model actually
+ * reaches would be undefined SDK/provider behavior with no error surfaced anywhere.
+ *
+ * Callers must list the four built-in rows first so they always keep their plain slug
+ * ("cipher", "atlas", …) — the exact names orchestrator.md's prompt hardcodes — and only a
+ * colliding custom agent further down the list gets suffixed.
+ */
+export function dedupeToolNames(rows: { id: string; name: string }[]): Map<string, string> {
+  const used = new Set<string>();
+  const assigned = new Map<string, string>();
+  for (const row of rows) {
+    const base = agentToolNameSlug(row.name);
+    let candidate = base;
+    let suffix = 2;
+    while (used.has(candidate)) {
+      candidate = `${base}_${suffix}`;
+      suffix += 1;
+    }
+    used.add(candidate);
+    assigned.set(row.id, candidate);
+  }
+  return assigned;
+}
+
 // Custom agents are user-named, so collisions with existing ids (built-in or
 // previously created) are expected — appends "-2", "-3", … until free.
 function uniqueAgentId(db: Database.Database, base: string): string {
@@ -1113,10 +1154,20 @@ export type RunSubAgentFn = (agent: Agent, input: string, displayName: string) =
  * does not automatically receive the prior conversation, only the `input` string the
  * orchestrator's tool call supplies. The tool description says so explicitly so the model
  * doesn't assume otherwise.
+ *
+ * `toolName` is passed in rather than derived here from `row.name` — see dedupeToolNames,
+ * which is what actually resolves two agents sharing a name (or a display name colliding
+ * with a built-in) into two distinct tool names before any of these get built.
  */
-function agentAsTool(row: AgentRow, agentInstance: Agent, description: string, runSubAgent: RunSubAgentFn): Tool {
+function agentAsTool(
+  row: AgentRow,
+  agentInstance: Agent,
+  description: string,
+  toolName: string,
+  runSubAgent: RunSubAgentFn
+): Tool {
   return tool({
-    name: slugify(row.name).replace(/-/g, "_"),
+    name: toolName,
     description:
       `${description} This specialist does not see the rest of this conversation — write a ` +
       `self-contained request in "input" with every fact or prior finding it needs.`,
@@ -1318,13 +1369,38 @@ export async function buildOrchestrator(runSubAgent: RunSubAgentFn): Promise<Bui
   // several of these in one turn, in sequence or based on each other's results, and
   // synthesize the final reply itself instead of transferring control away permanently. See
   // agentAsTool's own comment for why this isn't the SDK's built-in Agent.asTool().
+  //
+  // Built-ins listed first so dedupeToolNames always leaves their plain slug ("cipher",
+  // "atlas", …) alone — the exact names orchestrator.md's prompt hardcodes — and only a
+  // custom agent colliding with one of those (or with another custom agent's name) gets
+  // suffixed.
+  const specialistRows = [configAgentRow, knowledgeAgentRow, explorerAgentRow, taskAgentRow, ...customRows];
+  const toolNames = dedupeToolNames(specialistRows);
   const specialistTools = [
-    agentAsTool(configAgentRow, configAgent, CONFIG_AGENT_TOOL_DESCRIPTION, runSubAgent),
-    agentAsTool(knowledgeAgentRow, knowledgeAgent, KNOWLEDGE_AGENT_TOOL_DESCRIPTION, runSubAgent),
-    agentAsTool(explorerAgentRow, explorerAgent, EXPLORER_AGENT_TOOL_DESCRIPTION, runSubAgent),
-    agentAsTool(taskAgentRow, taskAgent, TASK_AGENT_TOOL_DESCRIPTION, runSubAgent),
+    agentAsTool(configAgentRow, configAgent, CONFIG_AGENT_TOOL_DESCRIPTION, toolNames.get(configAgentRow.id)!, runSubAgent),
+    agentAsTool(
+      knowledgeAgentRow,
+      knowledgeAgent,
+      KNOWLEDGE_AGENT_TOOL_DESCRIPTION,
+      toolNames.get(knowledgeAgentRow.id)!,
+      runSubAgent
+    ),
+    agentAsTool(
+      explorerAgentRow,
+      explorerAgent,
+      EXPLORER_AGENT_TOOL_DESCRIPTION,
+      toolNames.get(explorerAgentRow.id)!,
+      runSubAgent
+    ),
+    agentAsTool(taskAgentRow, taskAgent, TASK_AGENT_TOOL_DESCRIPTION, toolNames.get(taskAgentRow.id)!, runSubAgent),
     ...customRows.map((row, i) =>
-      agentAsTool(row, customAgents[i], row.description || row.tagline || `Handles requests related to ${row.name}.`, runSubAgent)
+      agentAsTool(
+        row,
+        customAgents[i],
+        row.description || row.tagline || `Handles requests related to ${row.name}.`,
+        toolNames.get(row.id)!,
+        runSubAgent
+      )
     ),
   ];
 

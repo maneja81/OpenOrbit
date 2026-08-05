@@ -20,6 +20,7 @@ import {
   attachConnectorsForRow,
   buildUpdateAgentPatch,
   createAgent,
+  dedupeToolNames,
   deleteAgent,
   exportAgent,
   exportAllAgents,
@@ -183,6 +184,50 @@ describe("createAgent (backs Cipher's create_agent tool)", () => {
   });
 });
 
+// Every enabled agent is wired in as a callable tool on the orchestrator (agentAsTool in
+// agents.ts) — nothing in the @openai/agents SDK detects two tools sharing a name, so two
+// agents with the same display name (a supported, existing case — see
+// "dedupes ids for agents with colliding names" above) or a custom agent named the same as
+// a built-in specialist would otherwise silently register two identically-named tools.
+// dedupeToolNames is what resolves that, at the point it's actually assembled.
+describe("dedupeToolNames (backs buildOrchestrator's specialist tool wiring)", () => {
+  it("gives each row its own natural slug when there's no collision", () => {
+    const result = dedupeToolNames([
+      { id: "configAgent", name: "Cipher" },
+      { id: "knowledgeAgent", name: "Atlas" },
+    ]);
+    expect(result.get("configAgent")).toBe("cipher");
+    expect(result.get("knowledgeAgent")).toBe("atlas");
+  });
+
+  it("suffixes a later row that collides with an earlier one, leaving the earlier row untouched", () => {
+    const result = dedupeToolNames([
+      { id: "configAgent", name: "Cipher" },
+      { id: "custom-1", name: "Cipher" },
+    ]);
+    expect(result.get("configAgent")).toBe("cipher");
+    expect(result.get("custom-1")).toBe("cipher_2");
+  });
+
+  it("keeps suffixing past _2 for three or more colliding rows", () => {
+    const result = dedupeToolNames([
+      { id: "a", name: "Helper" },
+      { id: "b", name: "Helper" },
+      { id: "c", name: "Helper" },
+    ]);
+    expect([result.get("a"), result.get("b"), result.get("c")]).toEqual(["helper", "helper_2", "helper_3"]);
+  });
+
+  it("collides names that only differ by case or punctuation, since both slugify the same", () => {
+    const result = dedupeToolNames([
+      { id: "a", name: "Trip Planner" },
+      { id: "b", name: "trip planner!" },
+    ]);
+    expect(result.get("a")).toBe("trip_planner");
+    expect(result.get("b")).toBe("trip_planner_2");
+  });
+});
+
 describe("updateAgent (backs Cipher's update_agent tool)", () => {
   beforeEach(() => {
     db = new Database(":memory:");
@@ -229,6 +274,7 @@ describe("updateAgent (backs Cipher's update_agent tool)", () => {
     const created = createAgent({ name: "Recipe Helper", prompt: "p1" });
     expect(() => updateAgent(created.id, { name: "   " })).toThrow("Agent name cannot be blank.");
   });
+
 });
 
 // The bug these cover: both writers resolved a blank model to the *static*
