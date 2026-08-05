@@ -99,6 +99,7 @@ export interface AgentsSettings {
   soundVariantStartup: number;
   soundVariantAgentCreated: number;
   soundVariantAgentDeleted: number;
+  soundVariantConsult: number;
 }
 
 export const DEFAULT_SETTINGS: AgentsSettings = {
@@ -148,6 +149,7 @@ export const DEFAULT_SETTINGS: AgentsSettings = {
   soundVariantStartup: 1,
   soundVariantAgentCreated: 1,
   soundVariantAgentDeleted: 1,
+  soundVariantConsult: 1,
 };
 
 /**

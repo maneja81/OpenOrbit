@@ -113,6 +113,9 @@ interface AgentRow {
 interface AgentDisplayRow extends AgentRow {
   toolNames: string[];
   connectorToolCount: number;
+  /** The exact tool name Orbit calls this agent by right now — "" for a disabled agent.
+   * See electron/main/ai/agents.ts's AgentDisplayRow for the full explanation. */
+  orchestratorToolName: string;
 }
 
 interface McpServerRow {

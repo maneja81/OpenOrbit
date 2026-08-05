@@ -142,6 +142,7 @@ export const SETTINGS_SCHEMA = {
   soundVariantStartup: { type: "number", min: 1, max: 5, integer: true },
   soundVariantAgentCreated: { type: "number", min: 1, max: 5, integer: true },
   soundVariantAgentDeleted: { type: "number", min: 1, max: 5, integer: true },
+  soundVariantConsult: { type: "number", min: 1, max: 5, integer: true },
 } as const satisfies Record<string, SettingKind>;
 
 export type SettingKey = keyof typeof SETTINGS_SCHEMA;
@@ -216,6 +217,7 @@ export const SETTING_DEFAULTS: { [K in SettingKey]: SettingValue<K> } = {
   soundVariantStartup: 1,
   soundVariantAgentCreated: 1,
   soundVariantAgentDeleted: 1,
+  soundVariantConsult: 1,
 };
 
 export function isSettingKey(key: string): key is SettingKey {

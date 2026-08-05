@@ -26,6 +26,7 @@ import {
   exportAllAgents,
   importAgent,
   listAgents,
+  listAgentsForDisplay,
   protectedSettingRefusal,
   updateAgent,
   updateAgentNeedsApproval,
@@ -225,6 +226,53 @@ describe("dedupeToolNames (backs buildOrchestrator's specialist tool wiring)", (
     ]);
     expect(result.get("a")).toBe("trip_planner");
     expect(result.get("b")).toBe("trip_planner_2");
+  });
+});
+
+// orchestratorToolName is what the renderer matches a live agent:stream-step event's
+// `toolName` back to an orbit node with (see AgentsApp.tsx's communicatingAgents wiring) —
+// it must exactly match what buildOrchestrator actually calls the agent by at run time, or
+// the orbit-view highlight silently never lights up for that agent.
+describe("listAgentsForDisplay's orchestratorToolName (backs the orbit-view highlight)", () => {
+  beforeEach(() => {
+    db = new Database(":memory:");
+    runMigrations(db);
+  });
+
+  it("gives every built-in its plain slug", () => {
+    const rows = listAgentsForDisplay();
+    const byId = new Map(rows.map((r) => [r.id, r.orchestratorToolName]));
+    expect(byId.get("configAgent")).toBe("cipher");
+    expect(byId.get("knowledgeAgent")).toBe("atlas");
+    expect(byId.get("explorerAgent")).toBe("explorer");
+    expect(byId.get("taskAgent")).toBe("chrono");
+  });
+
+  it("suffixes a custom agent that collides with a built-in's name", () => {
+    createAgent({ name: "Atlas", prompt: "p" });
+    const rows = listAgentsForDisplay();
+    const real = rows.find((r) => r.id === "knowledgeAgent")!;
+    const impostor = rows.find((r) => r.name === "Atlas" && r.id !== "knowledgeAgent")!;
+    expect(real.orchestratorToolName).toBe("atlas");
+    expect(impostor.orchestratorToolName).toBe("atlas_2");
+  });
+
+  it("gives a disabled custom agent no tool name, since it's never wired as a tool", () => {
+    const created = createAgent({ name: "Disabled Helper", prompt: "p" });
+    updateAgent(created.id, { enabled: false });
+    const rows = listAgentsForDisplay();
+    const row = rows.find((r) => r.id === created.id)!;
+    expect(row.orchestratorToolName).toBe("");
+  });
+
+  it("doesn't let a disabled agent's name reserve a slug an enabled agent then needs", () => {
+    // If the disabled row were still fed into the dedupe pass, it would silently steal the
+    // plain "atlas" slug and force the real Atlas onto "atlas_2" — wrong, since the disabled
+    // row is never actually wired as a tool at all.
+    const created = createAgent({ name: "Atlas", prompt: "p" });
+    updateAgent(created.id, { enabled: false });
+    const rows = listAgentsForDisplay();
+    expect(rows.find((r) => r.id === "knowledgeAgent")!.orchestratorToolName).toBe("atlas");
   });
 });
 

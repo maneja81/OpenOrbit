@@ -14,6 +14,10 @@ import ErrorBoundary from "@/components/atoms/ErrorBoundary";
  * onboarding-failure notice below has to queue behind it — a warning that arrives before
  * "Hi, I'm Orbit" reads as though something broke on launch. */
 const GREETING_DELAY_MS = 1400;
+// A specialist tool call held on the orbit view for at least this long once activated —
+// some calls (e.g. a plain settings read) resolve in a couple of milliseconds, which would
+// otherwise read as a flash rather than something that visibly "communicated".
+const MIN_COMMUNICATING_VISIBLE_MS = 450;
 import ToolApprovalCard from "@/components/molecules/ToolApprovalCard";
 import OnboardingScreen, { type OnboardingAnswers } from "@/components/organisms/OnboardingScreen";
 import { findProvider } from "@/lib/providers";
@@ -79,7 +83,12 @@ export default function AgentsApp() {
   const resetStepsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [thinking, setThinking] = useState(false);
-  const [activeAgent, setActiveAgent] = useState<AgentId | null>(null);
+  // callId -> agentId for a specialist tool call Orbit itself made this turn — a Map, not a
+  // single value, because Orbit can now call more than one specialist in the same turn (see
+  // agents-as-tools: handoffs no longer cap it at one). Insertion order doubles as "most
+  // recently activated" for the single traveling pulse-dot (see pulseLineAgent below).
+  const [communicatingAgents, setCommunicatingAgents] = useState<Map<string, AgentId>>(new Map());
+  const communicatingClearTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const [steps, setSteps] = useState<StepEvent[]>([{ type: "waiting", label: "Waiting for message…" }]);
   const [orchestratorResponding, setOrchestratorResponding] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -172,6 +181,7 @@ export default function AgentsApp() {
       startup: settings.soundVariantStartup,
       agentCreated: settings.soundVariantAgentCreated,
       agentDeleted: settings.soundVariantAgentDeleted,
+      consult: settings.soundVariantConsult,
     }),
     [
       settings.soundVariantSend,
@@ -181,6 +191,7 @@ export default function AgentsApp() {
       settings.soundVariantStartup,
       settings.soundVariantAgentCreated,
       settings.soundVariantAgentDeleted,
+      settings.soundVariantConsult,
     ]
   );
   const playSfx = useSoundFX(settings.soundFxEnabled, soundFxVariants);
@@ -333,12 +344,23 @@ export default function AgentsApp() {
     []
   );
 
+  // Every orb currently lit up (0, 1, or more — see communicatingAgents above).
+  const communicatingAgentIds = useMemo(() => new Set(communicatingAgents.values()), [communicatingAgents]);
+  // useOrbitScene's traveling pulse-dot is a single SVG element, so it follows whichever
+  // specialist was activated most recently rather than trying to show every active line at
+  // once — the orb/line glow itself (communicatingAgentIds above) still lights up for all of
+  // them simultaneously, this only picks where the one decorative dot travels.
+  const pulseLineAgent = useMemo(() => {
+    const ids = [...communicatingAgents.values()];
+    return ids.length > 0 ? ids[ids.length - 1] : null;
+  }, [communicatingAgents]);
+
   const { ringGeometry, lineGeometry } = useOrbitScene({
     containerRef,
     bgCanvasRef,
     orchestratorRef,
     agentRefs,
-    activeAgent,
+    activeAgent: pulseLineAgent,
     agents,
     ready: loaded && settings.onboardingDone,
   });
@@ -551,27 +573,57 @@ export default function AgentsApp() {
         }
       });
 
-      // Handoff subscription — lights up the correct orbit node when the orchestrator delegates.
-      const unsubAgent = window.agentsAPI.agent.onStreamAgent(({ requestId: rid, agentName }) => {
-        if (rid !== requestId) return;
-        // Match by name (case-insensitive) against the live agent roster.
-        const match = rawAgents.find((a) => a.name.toLowerCase() === agentName.toLowerCase());
-        setActiveAgent(match?.id ?? null);
-        playSfx("handoff");
-        turnSteps = [
-          ...turnSteps,
-          { type: "handoff_occurred", label: `Delegating to ${agentName}`, handoffTo: agentName },
-        ];
-        setSteps(turnSteps);
-      });
+      // Specialist tool name -> orbit node id, for matching a step's `toolName` back to the
+      // node it belongs to (see agentAsTool/orchestratorToolName in ai/agents.ts). Built once
+      // per run from the live roster snapshot already in scope.
+      const toolNameToAgentId = new Map(
+        rawAgents.filter((a) => a.orchestratorToolName).map((a) => [a.orchestratorToolName, a.id])
+      );
 
-      // Step subscription — feeds the live step progress UI. Everything but requestId is
-      // kept: the payload minus the routing id is exactly a StepEvent, and dropping the
-      // tool/agent/timing fields here would leave the feed on its generic fallback labels.
+      // Step subscription — feeds the live step progress UI, and lights up the orbit node
+      // for whichever specialist Orbit is currently calling as a tool. This replaces the old
+      // onStreamAgent-driven "handoff" highlight: Orbit no longer hands control away to a
+      // specialist (SDK handoffs), it calls one as a tool and gets a result back — so that
+      // event never fires anymore, and this is the live signal in its place. Only a
+      // tool_called/tool_output whose `agentName` is Orbit's own name counts: a specialist's
+      // own internal tool call (e.g. Cipher calling get_settings) arrives with
+      // agentName="Cipher" and must not light up any node, or a nested call would
+      // misattribute activity to the wrong orb.
       const unsubStep = window.agentsAPI.agent.onStreamStep(({ requestId: rid, ...step }) => {
         if (rid !== requestId) return;
         turnSteps = [...turnSteps, step];
         setSteps(turnSteps);
+
+        const isOrbitsOwnCall = step.agentName?.toLowerCase() === settings.agentName.toLowerCase();
+        if (!isOrbitsOwnCall || !step.callId) return;
+
+        if (step.type === "tool_called") {
+          const targetAgentId = toolNameToAgentId.get(step.toolName ?? "");
+          if (!targetAgentId) return; // not a specialist call (e.g. save_user_info) — no orb to light
+          const callId = step.callId;
+          const pendingClear = communicatingClearTimersRef.current.get(callId);
+          if (pendingClear) {
+            clearTimeout(pendingClear);
+            communicatingClearTimersRef.current.delete(callId);
+          }
+          setCommunicatingAgents((prev) => new Map(prev).set(callId, targetAgentId));
+          playSfx("consult");
+        } else if (step.type === "tool_output") {
+          const callId = step.callId;
+          // Held briefly rather than cleared immediately: some calls resolve in a couple of
+          // milliseconds (e.g. a plain settings read), which would otherwise read as a flash
+          // rather than something that visibly "communicated".
+          const timer = setTimeout(() => {
+            setCommunicatingAgents((prev) => {
+              if (!prev.has(callId)) return prev;
+              const next = new Map(prev);
+              next.delete(callId);
+              return next;
+            });
+            communicatingClearTimersRef.current.delete(callId);
+          }, MIN_COMMUNICATING_VISIBLE_MS);
+          communicatingClearTimersRef.current.set(callId, timer);
+        }
       });
 
       // Trace subscription — the id linking this turn to its token_usage rows. It arrives
@@ -640,10 +692,13 @@ export default function AgentsApp() {
         })
         .finally(() => {
           unsubChunk();
-          unsubAgent();
           unsubStep();
           unsubTrace();
-          setActiveAgent(null);
+          // Clears any node still lit up even if the run ended mid-call (error, approval
+          // timeout) — a stale highlight would otherwise sit there until the next run.
+          communicatingClearTimersRef.current.forEach((timer) => clearTimeout(timer));
+          communicatingClearTimersRef.current.clear();
+          setCommunicatingAgents(new Map());
           setOrchestratorResponding(false);
           setThinking(false);
           playSfx("complete");
@@ -871,7 +926,7 @@ export default function AgentsApp() {
     speaking,
     thinking,
     orchestratorResponding,
-    hasActiveAgent: activeAgent !== null,
+    hasActiveAgent: communicatingAgents.size > 0,
   });
   const sessionStats = formatSessionStats(messages.filter((m) => m.role === "user").length, sessionElapsedMs);
 
@@ -889,7 +944,8 @@ export default function AgentsApp() {
         bgCanvasRef={bgCanvasRef}
         orchestratorRef={orchestratorRef}
         setAgentRef={setAgentRef}
-        activeAgent={activeAgent}
+        communicatingAgents={communicatingAgentIds}
+        pulseLineAgent={pulseLineAgent}
         orchestratorResponding={orchestratorResponding || speaking}
         agents={agents}
         steps={steps}

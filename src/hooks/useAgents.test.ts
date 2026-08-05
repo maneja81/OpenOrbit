@@ -19,6 +19,7 @@ function row(id: string, overrides: Partial<AgentDisplayRow> = {}): AgentDisplay
     connector_ids: "[]",
     http_tool_collection_ids: "[]",
     toolNames: [],
+    orchestratorToolName: id,
     connectorToolCount: 0,
     ...overrides,
   } as AgentDisplayRow;

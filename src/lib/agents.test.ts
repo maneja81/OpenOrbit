@@ -19,6 +19,7 @@ function makeRows(n: number): AgentDisplayRow[] {
     connector_ids: "[]",
     http_tool_collection_ids: "[]", provider_id: "",
     toolNames: [],
+    orchestratorToolName: `agent_${i}`,
     connectorToolCount: 0,
   }));
 }

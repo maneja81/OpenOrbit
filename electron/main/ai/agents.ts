@@ -731,6 +731,26 @@ export function listAgents(): AgentRow[] {
 export interface AgentDisplayRow extends AgentRow {
   toolNames: string[];
   connectorToolCount: number;
+  /** The exact tool name Orbit calls this agent by right now (see agentAsTool/
+   * dedupeToolNames) — "" for a disabled agent, since those aren't wired as a tool at all.
+   * Lets the renderer match a live `agent:stream-step` event's `toolName` back to the orbit
+   * node it belongs to, without duplicating the dedup logic client-side. */
+  orchestratorToolName: string;
+}
+
+/** Same built-ins-first ordering, and the same enabled-only filter for custom agents, that
+ * buildOrchestrator uses when it calls dedupeToolNames — so a row's `orchestratorToolName`
+ * here always matches what Orbit will actually call it by at run time. A disabled custom
+ * agent is excluded (never wired as a tool), matching buildOrchestrator's own `customRows`
+ * query (`... AND enabled = 1`). */
+function assignOrchestratorToolNames(rows: AgentRow[]): Map<string, string> {
+  const BUILTIN_IDS = ["configAgent", "knowledgeAgent", "explorerAgent", "taskAgent"];
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const wired = [
+    ...BUILTIN_IDS.map((id) => byId.get(id)).filter((r): r is AgentRow => Boolean(r)),
+    ...rows.filter((r) => !BUILTIN_IDS.includes(r.id) && r.enabled),
+  ];
+  return dedupeToolNames(wired);
 }
 
 // Stored prompts keep {{agentName}}/{{userName}}/{{currentDateTime}} placeholders
@@ -740,10 +760,13 @@ export function listAgentsForDisplay(): AgentDisplayRow[] {
   const agentName = readAppSetting("agentName");
   const userName = readAppSetting("userName");
   const currentDateTime = getCurrentDateTime();
-  return listAgents().map((row) => ({
+  const rows = listAgents();
+  const toolNames = assignOrchestratorToolNames(rows);
+  return rows.map((row) => ({
     ...row,
     prompt: renderPrompt(row.prompt, { agentName, userName, currentDateTime }),
     toolNames: getBuiltinToolNamesForRole(row),
+    orchestratorToolName: toolNames.get(row.id) ?? "",
     connectorToolCount:
       parseMcpServerIds(row).length + parseConnectorIds(row).length + parseHttpToolCollectionIds(row).length,
   }));

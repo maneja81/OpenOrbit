@@ -143,6 +143,7 @@ describe("mergeWithDefaults", () => {
       expect(mergeWithDefaults({ soundVariantSend: 99 }).soundVariantSend).toBe(SOUND_FX_VARIANT_COUNT);
       expect(mergeWithDefaults({ soundVariantReceive: 0 }).soundVariantReceive).toBe(1);
       expect(mergeWithDefaults({ soundVariantStartup: -3 }).soundVariantStartup).toBe(1);
+      expect(mergeWithDefaults({ soundVariantConsult: 99 }).soundVariantConsult).toBe(SOUND_FX_VARIANT_COUNT);
     });
 
     it("rounds a fractional variant to a real file", () => {

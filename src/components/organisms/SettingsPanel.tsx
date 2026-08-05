@@ -150,6 +150,7 @@ interface SoundEventConfig {
     | "soundVariantStartup"
     | "soundVariantAgentCreated"
     | "soundVariantAgentDeleted"
+    | "soundVariantConsult"
   );
   label: string;
   hint?: string;
@@ -172,6 +173,7 @@ const SOUND_EVENT_GROUPS: SoundEventGroup[] = [
     label: "Agents",
     events: [
       { event: "handoff", settingKey: "soundVariantHandoff", label: "Agent handoff" },
+      { event: "consult", settingKey: "soundVariantConsult", label: "Consulting a specialist" },
       { event: "complete", settingKey: "soundVariantComplete", label: "Task complete" },
       { event: "agentCreated", settingKey: "soundVariantAgentCreated", label: "Agent created" },
       { event: "agentDeleted", settingKey: "soundVariantAgentDeleted", label: "Agent deleted" },
