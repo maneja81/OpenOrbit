@@ -1,7 +1,11 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 const runMock = vi.hoisted(() => vi.fn());
-vi.mock("@openai/agents", () => ({ run: runMock }));
+// AgentMock: replyGuard.ts's repair path constructs a real `new Agent(...)` — a plain
+// constructor stub is enough since runMock (shared with the main task run) ignores the
+// instance it's called with anyway.
+const AgentMock = vi.hoisted(() => vi.fn());
+vi.mock("@openai/agents", () => ({ run: runMock, Agent: AgentMock }));
 
 const buildOrchestratorMock = vi.hoisted(() => vi.fn());
 vi.mock("../ai/agents", () => ({
@@ -129,11 +133,25 @@ describe("runPromptTask", () => {
   // known-issues.md KI-6: a leaked write_checklist argument shape must never reach a task's
   // recorded result/notification text — this is the guard's actual wiring, not just the
   // isLeakedChecklistJson predicate in isolation (see checklistTools.test.ts for that).
-  it("replaces a leaked write_checklist JSON reply with an honest fallback message (KI-6)", async () => {
-    runMock.mockResolvedValue({
-      finalOutput: '{"items":[{"text":"Check location setting","status":"completed"}]}',
-      interruptions: [],
-    });
+  it("repairs a leaked write_checklist JSON reply into a natural-language answer (KI-6/KI-1)", async () => {
+    runMock
+      .mockResolvedValueOnce({
+        finalOutput: '{"items":[{"text":"Answer greeting directly, no tools needed","status":"pending"}]}',
+        interruptions: [],
+      })
+      // The repair agent's own run() call — replyGuard.ts's rewriter.
+      .mockResolvedValueOnce({ finalOutput: "Hi there! How can I help today?" });
+    const output = await runPromptTask(makeTask());
+    expect(output).toBe("Hi there! How can I help today?");
+  });
+
+  it("falls back to an honest generic message if the repair attempt also produces JSON", async () => {
+    runMock
+      .mockResolvedValueOnce({
+        finalOutput: '{"items":[{"text":"Check location setting","status":"completed"}]}',
+        interruptions: [],
+      })
+      .mockResolvedValueOnce({ finalOutput: '{"items":[{"text":"still leaking","status":"pending"}]}' });
     const output = await runPromptTask(makeTask());
     expect(output).not.toContain("{");
     expect(output).not.toContain("items");

@@ -15,7 +15,7 @@ import { closeMcpServers } from "../ai/mcp";
 import { resolveApprovalsAndRun } from "../ai/runLoop";
 import { getDueTasks, recordTaskRun, TaskRow } from "../db/tasksStore";
 import { cancelPendingForTrace } from "../db/checklistStore";
-import { isLeakedChecklistJson } from "../ai/tools/checklistTools";
+import { guardLeakedChecklistJson } from "../ai/replyGuard";
 import { NO_ANSWER_TIMEOUT_SENTINEL, type RequestAnswerFn } from "../ai/tools/askUserTools";
 import { devLog } from "../devLog";
 import { parseStringMap } from "../db/jsonColumn";
@@ -34,11 +34,7 @@ const runSubAgentHeadless: RunSubAgentFn = async (agent: Agent, input: string, d
   const output = result?.finalOutput ?? "";
   // KI-6: same guard as ipc/agent.ts's runSubAgent — a specialist leaking its own
   // write_checklist JSON here would poison the orchestrator's context with raw JSON too.
-  if (isLeakedChecklistJson(output)) {
-    devLog(`[taskScheduler] specialist=${displayName} suppressed a leaked write_checklist JSON reply: "${output}"`);
-    return "(the specialist's reply didn't come through in a usable format — ask again or rephrase if you need this.)";
-  }
-  return output;
+  return guardLeakedChecklistJson(output, input, agent.model, `specialist=${displayName}`);
 };
 
 // Same "no one to ask, resolve immediately" posture as runSubAgentHeadless above, applied
@@ -168,11 +164,7 @@ export async function runPromptTask(task: TaskRow): Promise<string> {
     const output = result.finalOutput ?? "";
     // KI-6: same guard as ipc/agent.ts — never let a leaked write_checklist JSON reply
     // become the notification body or last_result text a task run is recorded with.
-    if (isLeakedChecklistJson(output)) {
-      devLog(`[taskScheduler] task id=${task.id} suppressed a leaked write_checklist JSON reply: "${output}"`);
-      return "Done — the reply didn't come through in a usable format. Check the Tasks widget or ask again in chat.";
-    }
-    return output;
+    return await guardLeakedChecklistJson(output, prompt, runTarget.model, `task id=${task.id}`);
   } catch (e) {
     cancelPendingForTrace(traceId);
     throw e;
