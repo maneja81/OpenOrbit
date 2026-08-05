@@ -15,6 +15,7 @@ import type { TaskCreateInput, TaskRow, TaskUpdatePatch } from "../main/ipc/task
 import type { AppInfo, AppStorageInfo, AppStats } from "../main/ipc/appInfo";
 import type { ReleaseInfo } from "../../scripts/releaseInfo";
 import type { ChecklistItemRow } from "../main/ipc/checklist";
+import type { AskUserField } from "../main/ai/tools/askUserTools";
 
 function subscribe(channel: string, callback: () => void): () => void {
   const listener = () => callback();
@@ -195,6 +196,27 @@ const agentsAPI = {
     ): (() => void) => subscribeWithPayload("agent:stream-approval-settled", callback),
     respondToApproval: (approvalId: string, approved: boolean): Promise<void> =>
       ipcRenderer.invoke("agent:approveTool", approvalId, approved),
+    /** Fires when ask_user is called — a genuine pause, same as onToolApproval, until
+     * respondToQuestion answers with the same questionId. `field` carries the schema (text
+     * vs single_select, its options/placeholder/required) the UI renders from directly. */
+    onQuestion: (
+      callback: (payload: {
+        requestId: string;
+        questionId: string;
+        agentName: string;
+        question: string;
+        field: AskUserField;
+        /** Absolute epoch ms at which main resolves with the fallback answer on the user's behalf. */
+        expiresAt: number;
+      }) => void
+    ): (() => void) => subscribeWithPayload("agent:stream-question", callback),
+    /** Fires when a question was resolved without the user — same reasoning as
+     * onToolApprovalSettled. */
+    onQuestionSettled: (
+      callback: (payload: { questionId: string; reason: "timeout" | "abandoned" }) => void
+    ): (() => void) => subscribeWithPayload("agent:stream-question-settled", callback),
+    respondToQuestion: (questionId: string, answer: string): Promise<void> =>
+      ipcRenderer.invoke("agent:answerQuestion", questionId, answer),
     list: (): Promise<AgentDisplayRow[]> => ipcRenderer.invoke("agent:list"),
     update: (
       id: string,

@@ -7,6 +7,8 @@ import KnowledgeModal from "@/components/organisms/KnowledgeModal";
 import ChatHistoryModal from "@/components/organisms/ChatHistoryModal";
 import HttpToolApprovalModal, { type PendingToolApproval } from "@/components/molecules/HttpToolApprovalModal";
 import { approvalSettledMessage } from "@/lib/approvalSettledMessage";
+import AskUserCard, { type PendingQuestion } from "@/components/molecules/AskUserCard";
+import { questionSettledMessage } from "@/lib/questionSettledMessage";
 import { configAckMessage, shouldPersistConfigAck, type ConfigAckEvent } from "@/lib/configAckMessage";
 import ErrorBoundary from "@/components/atoms/ErrorBoundary";
 
@@ -803,6 +805,45 @@ export default function AgentsApp() {
     void window.agentsAPI.agent.respondToApproval(approvalId, approved);
   }, []);
 
+  // Same queue/settle/respond shape as approvalQueue above — ask_user is a different pause
+  // (a real answer, not a boolean gate) but the same "several can interrupt one turn, the
+  // SDK hands them over one at a time" reasoning applies identically.
+  const [questionQueue, setQuestionQueue] = useState<PendingQuestion[]>([]);
+  useEffect(() => {
+    if (!hasAgentsAPI()) return;
+    return window.agentsAPI.agent.onQuestion(({ questionId, agentName, question, field, expiresAt }) => {
+      const requestedAt = Date.now();
+      setQuestionQueue((prev) => [...prev, { questionId, agentName, question, field, expiresAt, requestedAt }]);
+    });
+  }, []);
+
+  const questionQueueRef = useRef<PendingQuestion[]>([]);
+  useEffect(() => {
+    questionQueueRef.current = questionQueue;
+  }, [questionQueue]);
+
+  useEffect(() => {
+    if (!hasAgentsAPI()) return;
+    return window.agentsAPI.agent.onQuestionSettled(({ questionId, reason }) => {
+      const settled = questionQueueRef.current.find((item) => item.questionId === questionId);
+      if (!settled) return;
+      setQuestionQueue((prev) => prev.filter((item) => item.questionId !== questionId));
+      appendMessage({
+        role: "assistant",
+        text: questionSettledMessage(settled.question, reason, settled.expiresAt - settled.requestedAt),
+        avatarLabel: settings.agentName[0]?.toUpperCase() || "A",
+      });
+    });
+  }, [appendMessage, settings.agentName]);
+
+  const pendingQuestion = questionQueue[0] ?? null;
+
+  const respondToQuestion = useCallback((questionId: string, answer: string) => {
+    setQuestionQueue((prev) => prev.filter((item) => item.questionId !== questionId));
+    if (!hasAgentsAPI()) return;
+    void window.agentsAPI.agent.respondToQuestion(questionId, answer);
+  }, []);
+
   const startupPlayedRef = useRef(false);
   useEffect(() => {
     if (startupPlayedRef.current) return;
@@ -1006,9 +1047,11 @@ export default function AgentsApp() {
               <ToolApprovalCard approval={pendingApproval} onRespond={respondToApproval} />
             ) : null
           }
+          questionCard={pendingQuestion ? <AskUserCard pending={pendingQuestion} onAnswer={respondToQuestion} /> : null}
           // Locked in both display modes: the modal already blocks interaction, and the
-          // inline card would otherwise leave the input live while a run is paused.
-          sendDisabled={pendingApproval !== null}
+          // inline card would otherwise leave the input live while a run is paused. Same
+          // reasoning extends to a pending question — always an in-chat card, never a modal.
+          sendDisabled={pendingApproval !== null || pendingQuestion !== null}
           onShowFullHistory={() => setChatHistoryOpen(true)}
           autoLoadRemoteImages={settings.remoteImagesAutoLoad}
           onSend={() => handleSend()}

@@ -132,6 +132,15 @@ interface ChecklistItemRow {
   updated_at: string;
 }
 
+/** The schema for one ask_user question — see electron/main/ai/tools/askUserTools.ts's
+ * askUserFieldSchema for the source of truth. The renderer builds its UI directly from
+ * this: "text" is a single input (+ Skip, pre-filled from placeholder, only when not
+ * required); "single_select" is numbered option buttons plus an always-present free-text
+ * "something else" fallback the UI adds itself, never authored by the model. */
+type AskUserField =
+  | { type: "text"; placeholder?: string; required: boolean }
+  | { type: "single_select"; options: { label: string; value: string }[]; placeholder?: string; required: boolean };
+
 interface McpServerRow {
   id: string;
   name: string;
@@ -495,6 +504,20 @@ interface Window {
         callback: (payload: { approvalId: string; reason: "timeout" | "abandoned" }) => void
       ) => () => void;
       respondToApproval: (approvalId: string, approved: boolean) => Promise<void>;
+      onQuestion: (
+        callback: (payload: {
+          requestId: string;
+          questionId: string;
+          agentName: string;
+          question: string;
+          field: AskUserField;
+          expiresAt: number;
+        }) => void
+      ) => () => void;
+      onQuestionSettled: (
+        callback: (payload: { questionId: string; reason: "timeout" | "abandoned" }) => void
+      ) => () => void;
+      respondToQuestion: (questionId: string, answer: string) => Promise<void>;
       list: () => Promise<AgentDisplayRow[]>;
       update: (
         id: string,

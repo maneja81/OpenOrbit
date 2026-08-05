@@ -13,6 +13,7 @@ import { listGrantedFoldersTool, listFolderContentsTool, readFolderFileTool } fr
 import { findSkillTool } from "./tools/skillFinderTool";
 import { createSaveUserInfoTool } from "./tools/userInfoTools";
 import { createWriteChecklistTool } from "./tools/checklistTools";
+import { createAskUserTool, type RequestAnswerFn } from "./tools/askUserTools";
 import {
   createDeleteAgentDataTool,
   createGetAgentDataTool,
@@ -1089,6 +1090,11 @@ export function attachConnectorsForRow(row: AgentRow): Tool[] {
  * drift out of sync with what an agent run actually attaches. Connector/MCP-attached
  * tools are excluded (those are only resolvable by live-connecting, see
  * attachConnectorsForRow) — callers show a separate attached-connector count instead. */
+// Throwaway — getBuiltinToolNamesForRole below only reads each tool's static `.name` for
+// display, it never executes, so a no-op is fine (same reasoning as the "" traceId already
+// used there for createWriteChecklistTool).
+const NOOP_REQUEST_ANSWER: RequestAnswerFn = async () => "";
+
 export function getBuiltinToolNamesForRole(row: AgentRow): string[] {
   // traceId is irrelevant here — this only reads each tool's static `.name` for display,
   // it never executes, so a throwaway value is fine (same reasoning as calling
@@ -1103,6 +1109,7 @@ export function getBuiltinToolNamesForRole(row: AgentRow): string[] {
       findSkillTool,
       createSaveUserInfoTool(row.name),
       createWriteChecklistTool(row.name, ""),
+      createAskUserTool(row.name, NOOP_REQUEST_ANSWER),
       listConnectorsTool,
       connectConnectorTool,
       disconnectConnectorTool,
@@ -1116,15 +1123,20 @@ export function getBuiltinToolNamesForRole(row: AgentRow): string[] {
       readKnowledgebaseFileTool,
       createSaveUserInfoTool(row.name),
       createWriteChecklistTool(row.name, ""),
+      createAskUserTool(row.name, NOOP_REQUEST_ANSWER),
       listGrantedFoldersTool,
       listFolderContentsTool,
       readFolderFileTool,
     ].map((t) => t.name);
   }
   if (row.id === "explorerAgent") {
-    return [webSearchTool, fetchWebContentTool, createSaveUserInfoTool(row.name), createWriteChecklistTool(row.name, "")].map(
-      (t) => t.name
-    );
+    return [
+      webSearchTool,
+      fetchWebContentTool,
+      createSaveUserInfoTool(row.name),
+      createWriteChecklistTool(row.name, ""),
+      createAskUserTool(row.name, NOOP_REQUEST_ANSWER),
+    ].map((t) => t.name);
   }
   if (row.id === "taskAgent") {
     return [
@@ -1136,11 +1148,13 @@ export function getBuiltinToolNamesForRole(row: AgentRow): string[] {
       deleteTaskTool,
       createSaveUserInfoTool(row.name),
       createWriteChecklistTool(row.name, ""),
+      createAskUserTool(row.name, NOOP_REQUEST_ANSWER),
     ].map((t) => t.name);
   }
   return [
     createSaveUserInfoTool(row.name),
     createWriteChecklistTool(row.name, ""),
+    createAskUserTool(row.name, NOOP_REQUEST_ANSWER),
     createSaveAgentDataTool(row.id),
     createGetAgentDataTool(row.id),
     createListAgentDataTool(row.id),
@@ -1216,7 +1230,11 @@ function agentAsTool(
  * `mcp_server_ids` must be closed by the caller after the run completes (`mcpServers`
  * collects every server connected across every agent, orchestrator included, so one
  * `closeMcpServers(result.mcpServers)` in a `finally` covers all of them). */
-export async function buildOrchestrator(runSubAgent: RunSubAgentFn, traceId: string): Promise<BuiltOrchestrator> {
+export async function buildOrchestrator(
+  runSubAgent: RunSubAgentFn,
+  traceId: string,
+  requestAnswer: RequestAnswerFn
+): Promise<BuiltOrchestrator> {
   const db = getDb();
   ensureDefaultAgentsSeeded(db);
 
@@ -1282,6 +1300,7 @@ export async function buildOrchestrator(runSubAgent: RunSubAgentFn, traceId: str
       findSkillTool,
       createSaveUserInfoTool(configAgentRow.name),
       createWriteChecklistTool(configAgentRow.name, traceId),
+      createAskUserTool(configAgentRow.name, requestAnswer),
       listConnectorsTool,
       connectConnectorTool,
       disconnectConnectorTool,
@@ -1306,6 +1325,7 @@ export async function buildOrchestrator(runSubAgent: RunSubAgentFn, traceId: str
       readKnowledgebaseFileTool,
       createSaveUserInfoTool(knowledgeAgentRow.name),
       createWriteChecklistTool(knowledgeAgentRow.name, traceId),
+      createAskUserTool(knowledgeAgentRow.name, requestAnswer),
       listGrantedFoldersTool,
       listFolderContentsTool,
       readFolderFileTool,
@@ -1328,6 +1348,7 @@ export async function buildOrchestrator(runSubAgent: RunSubAgentFn, traceId: str
       fetchWebContentTool,
       createSaveUserInfoTool(explorerAgentRow.name),
       createWriteChecklistTool(explorerAgentRow.name, traceId),
+      createAskUserTool(explorerAgentRow.name, requestAnswer),
       ...attachConnectorsForRow(explorerAgentRow),
       ...attachHttpToolsForRow(explorerAgentRow),
     ],
@@ -1362,6 +1383,7 @@ export async function buildOrchestrator(runSubAgent: RunSubAgentFn, traceId: str
       deleteTaskTool,
       createSaveUserInfoTool(taskAgentRow.name),
       createWriteChecklistTool(taskAgentRow.name, traceId),
+      createAskUserTool(taskAgentRow.name, requestAnswer),
       ...attachConnectorsForRow(taskAgentRow),
       ...attachHttpToolsForRow(taskAgentRow),
     ],
@@ -1388,6 +1410,7 @@ export async function buildOrchestrator(runSubAgent: RunSubAgentFn, traceId: str
         tools: [
           createSaveUserInfoTool(row.name),
           createWriteChecklistTool(row.name, traceId),
+          createAskUserTool(row.name, requestAnswer),
           createSaveAgentDataTool(row.id),
           createGetAgentDataTool(row.id),
           createListAgentDataTool(row.id),
@@ -1454,6 +1477,7 @@ export async function buildOrchestrator(runSubAgent: RunSubAgentFn, traceId: str
       getCurrentLocationTool,
       createSaveUserInfoTool(agentName),
       createWriteChecklistTool(agentName, traceId),
+      createAskUserTool(agentName, requestAnswer),
       ...specialistTools,
       ...attachConnectorsForIds(orchestratorConnectorIds),
       ...buildHttpToolsForCollectionIds(orchestratorHttpToolCollectionIds),

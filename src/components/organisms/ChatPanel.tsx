@@ -38,8 +38,12 @@ interface ChatPanelProps {
   /** Rendered at the end of the log when a tool is waiting on the user and the "Ask me
    * with" setting is the in-chat card. Null in modal mode, or when nothing is pending. */
   approvalCard?: ReactNode;
-  /** True while an approval is outstanding — blocks sending so a second turn can't start
-   * a concurrent run against a conversation that's mid-approval. */
+  /** Rendered at the end of the log when ask_user is waiting on an answer — always an
+   * in-chat card, no modal mode (unlike approvals, there's no "Ask me with" setting for
+   * this). Null when nothing is pending. */
+  questionCard?: ReactNode;
+  /** True while an approval or a question is outstanding — blocks sending so a second turn
+   * can't start a concurrent run against a conversation that's mid-approval/mid-question. */
   sendDisabled?: boolean;
   /** Opens the full paged archive (ChatHistoryModal) — the log itself only keeps the last
    * MAX_VISIBLE_MESSAGES turns on screen. */
@@ -93,6 +97,7 @@ export default function ChatPanel({
   voiceEnabled,
   agents,
   approvalCard,
+  questionCard,
   sendDisabled,
   onShowFullHistory,
   autoLoadRemoteImages,
@@ -166,6 +171,7 @@ export default function ChatPanel({
           );
         })}
         {approvalCard}
+        {questionCard}
       </div>
       {!isAtBottom && (
         <button

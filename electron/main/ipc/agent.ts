@@ -28,6 +28,7 @@ import {
 import { closeMcpServers } from "../ai/mcp";
 import { resolveApprovalsAndRun } from "../ai/runLoop";
 import { cancelPendingForTrace } from "../db/checklistStore";
+import { NO_ANSWER_TIMEOUT_SENTINEL, type RequestAnswerFn } from "../ai/tools/askUserTools";
 import { extractApprovalMeta, extractRunItemMeta } from "../ai/runItemMeta";
 import { configureChatClient, estimateGenerationCost, providerIdForModel } from "../ai/provider";
 import { insertTokenUsage, updateTokenUsageCost } from "../db/tokenUsageStore";
@@ -315,6 +316,43 @@ function abandonApprovalsFor(requestId: string): void {
   }
 }
 
+/** Questions awaiting an answer from the renderer, keyed by a main-generated questionId.
+ * Same shape and reasoning as pendingApprovals above, with one addition: `fallbackAnswer`
+ * is precomputed once (the field's placeholder, or the fixed timeout sentinel if there
+ * isn't one) so the timeout/abandonment paths don't need to re-derive it from the field —
+ * they just resolve with it directly, same value askUser's own optional-and-skipped path
+ * would produce. */
+const pendingQuestions = new Map<
+  string,
+  {
+    requestId: string;
+    resolve: (answer: string) => void;
+    timer: NodeJS.Timeout;
+    sender: Electron.WebContents;
+    fallbackAnswer: string;
+  }
+>();
+
+function settleQuestion(questionId: string, answer: string, reason?: ApprovalSettledReason): void {
+  const pending = pendingQuestions.get(questionId);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pendingQuestions.delete(questionId);
+  if (reason && !pending.sender.isDestroyed()) {
+    pending.sender.send("agent:stream-question-settled", { questionId, reason });
+  }
+  pending.resolve(answer);
+}
+
+/** Resolves every question still outstanding for a run with its own fallback answer —
+ * called when the run times out or fails, mirroring abandonApprovalsFor. */
+function abandonQuestionsFor(requestId: string): void {
+  for (const [questionId, pending] of pendingQuestions) {
+    if (pending.requestId !== requestId) continue;
+    settleQuestion(questionId, pending.fallbackAnswer, "abandoned");
+  }
+}
+
 export function registerAgentHandlers() {
   // The non-streaming "agent:run" channel was unreachable from the renderer — no hook or
   // component called it, ChatInputBar/AgentsApp only ever use agent:runStream below — and
@@ -396,6 +434,39 @@ export function registerAgentHandlers() {
           .finally(() => {
             // Resumed here rather than at each call site so an approval that times out or is
             // abandoned still restarts the clock exactly once.
+            deadline.resume();
+          });
+      };
+
+      /** Asks the user a real question via ask_user and waits for their answer, with the run
+       * clock paused for the duration — same shape as requestApproval, but resolves with the
+       * answer text itself rather than a boolean. On timeout, resolves with the field's own
+       * placeholder if it has one, or the fixed NO_ANSWER_TIMEOUT_SENTINEL otherwise, so the
+       * calling agent always gets a real string back and can react instead of hanging. */
+      const requestAnswer: RequestAnswerFn = (agentName, question, field) => {
+        const questionId = randomUUID();
+        const fallbackAnswer = field.placeholder ?? NO_ANSWER_TIMEOUT_SENTINEL;
+        devLog(`[agent:runStream] requestId=${requestId} awaiting answer from ${agentName} for question="${question}"`);
+        deadline.pause();
+        return new Promise<string>((resolve) => {
+          const timer = setTimeout(() => settleQuestion(questionId, fallbackAnswer, "timeout"), APPROVAL_TIMEOUT_MS);
+          pendingQuestions.set(questionId, { requestId, resolve, timer, sender: event.sender, fallbackAnswer });
+          event.sender.send("agent:stream-question", {
+            requestId,
+            questionId,
+            agentName,
+            question,
+            field,
+            // Same reasoning as requestApproval's expiresAt — an absolute deadline the
+            // renderer counts down to, immune to IPC latency or a slow first render.
+            expiresAt: Date.now() + APPROVAL_TIMEOUT_MS,
+          });
+        })
+          .then((answer) => {
+            devLog(`[agent:runStream] requestId=${requestId} answered: "${answer}"`);
+            return answer;
+          })
+          .finally(() => {
             deadline.resume();
           });
       };
@@ -486,7 +557,7 @@ export function registerAgentHandlers() {
         return result?.finalOutput ?? "";
       };
 
-      const { agent: orchestrator, mcpServers, allAgents } = await buildOrchestrator(runSubAgent, traceId);
+      const { agent: orchestrator, mcpServers, allAgents } = await buildOrchestrator(runSubAgent, traceId, requestAnswer);
       // Deterministic routing (e.g. "/cipher <message>") bypasses the orchestrator's own
       // routing judgment entirely and runs the named agent directly — falls back to the
       // orchestrator if the name doesn't match (agent renamed/deleted between menu-open
@@ -529,6 +600,8 @@ export function registerAgentHandlers() {
           // A dialog waiting on a run that just died would otherwise hang until its own
           // 5-minute timeout.
           abandonApprovalsFor(requestId);
+          // Same reasoning, for a question that never got answered.
+          abandonQuestionsFor(requestId);
           // Same reasoning, for the checklist widget: a run that dies mid-plan must not
           // leave an item stuck showing "in progress" forever.
           cancelPendingForTrace(traceId);
@@ -549,6 +622,21 @@ export function registerAgentHandlers() {
       throw new Error("agent:approveTool requires a boolean approved flag");
     }
     settleApproval(approvalId, approved);
+  });
+
+  /** The renderer's answer to an agent:stream-question prompt. Same no-op-on-unknown-id
+   * reasoning as agent:approveTool. `answer` may be empty only when the field wasn't
+   * required — askUser's own execute() doesn't otherwise validate this, since a required
+   * question with no answer is exactly what the UI's own Skip-button visibility is meant
+   * to prevent, not something the IPC boundary needs to re-police. */
+  ipcMain.handle("agent:answerQuestion", (_event, questionId: string, answer: string) => {
+    if (typeof questionId !== "string" || questionId.length === 0) {
+      throw new Error("agent:answerQuestion requires a non-empty questionId");
+    }
+    if (typeof answer !== "string") {
+      throw new Error("agent:answerQuestion requires a string answer");
+    }
+    settleQuestion(questionId, answer);
   });
 
   ipcMain.handle("agent:list", () => listAgentsForDisplay());

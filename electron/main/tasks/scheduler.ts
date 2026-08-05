@@ -15,6 +15,7 @@ import { closeMcpServers } from "../ai/mcp";
 import { resolveApprovalsAndRun } from "../ai/runLoop";
 import { getDueTasks, recordTaskRun, TaskRow } from "../db/tasksStore";
 import { cancelPendingForTrace } from "../db/checklistStore";
+import { NO_ANSWER_TIMEOUT_SENTINEL, type RequestAnswerFn } from "../ai/tools/askUserTools";
 import { devLog } from "../devLog";
 import { parseStringMap } from "../db/jsonColumn";
 import { extractApprovalMeta } from "../ai/runItemMeta";
@@ -30,6 +31,18 @@ const runSubAgentHeadless: RunSubAgentFn = async (agent: Agent, input: string, d
   devLog(`[taskScheduler] running specialist=${displayName} headlessly`);
   const result = await resolveApprovalsAndRun(runOnce, input, async () => false);
   return result?.finalOutput ?? "";
+};
+
+// Same "no one to ask, resolve immediately" posture as runSubAgentHeadless above, applied
+// to ask_user instead of approvals — a scheduled task can't wait on a human to answer a
+// question either. Resolves with the field's own placeholder when there is one (identical
+// to what an interactive run does when the user skips an optional question), or the fixed
+// timeout sentinel when there isn't — never actually waits, since there's no timeout to
+// wait out unattended.
+const requestAnswerHeadless: RequestAnswerFn = async (agentName, question, field) => {
+  const answer = field.placeholder ?? NO_ANSWER_TIMEOUT_SENTINEL;
+  devLog(`[taskScheduler] ${agentName} asked "${question}" headlessly — answered with: ${answer}`);
+  return answer;
 };
 
 const POLL_INTERVAL_MS = 30_000;
@@ -100,7 +113,11 @@ export async function runPromptTask(task: TaskRow): Promise<string> {
   // this same value since buildOrchestrator bakes it into every agent's write_checklist
   // tool at construction time, not per call.
   const traceId = randomUUID();
-  const { agent: orchestrator, mcpServers, allAgents } = await buildOrchestrator(runSubAgentHeadless, traceId);
+  const { agent: orchestrator, mcpServers, allAgents } = await buildOrchestrator(
+    runSubAgentHeadless,
+    traceId,
+    requestAnswerHeadless
+  );
   try {
     let runTarget = orchestrator;
     if (task.prompt_target_agent_id) {
