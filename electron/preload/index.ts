@@ -14,6 +14,7 @@ import type { HttpToolCollectionRow, HttpToolRow, HttpToolParam } from "../main/
 import type { TaskCreateInput, TaskRow, TaskUpdatePatch } from "../main/ipc/tasks";
 import type { AppInfo, AppStorageInfo, AppStats } from "../main/ipc/appInfo";
 import type { ReleaseInfo } from "../../scripts/releaseInfo";
+import type { ChecklistItemRow } from "../main/ipc/checklist";
 
 function subscribe(channel: string, callback: () => void): () => void {
   const listener = () => callback();
@@ -120,6 +121,10 @@ const agentsAPI = {
       ipcRenderer.invoke("agentData:set", agentId, key, value),
     list: (agentId: string): Promise<Record<string, unknown>> => ipcRenderer.invoke("agentData:list", agentId),
     delete: (agentId: string, key: string): Promise<void> => ipcRenderer.invoke("agentData:delete", agentId, key),
+  },
+
+  checklist: {
+    get: (traceId: string): Promise<ChecklistItemRow[]> => ipcRenderer.invoke("checklist:get", traceId),
   },
 
   chat: {

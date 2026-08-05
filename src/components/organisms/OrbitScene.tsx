@@ -9,6 +9,7 @@ import AgentOrb from "@/components/molecules/AgentOrb";
 import SystemStatusWidget from "@/components/molecules/SystemStatusWidget";
 import KnowledgeWidget from "@/components/molecules/KnowledgeWidget";
 import TokenUsageWidget from "@/components/molecules/TokenUsageWidget";
+import ChecklistWidget from "@/components/molecules/ChecklistWidget";
 import TasksWidget from "@/components/molecules/TasksWidget";
 import { AgentId, AgentLayoutItem, StepEvent } from "@/lib/agents";
 import { RingGeometry } from "@/hooks/useOrbitScene";
@@ -24,6 +25,8 @@ interface OrbitSceneProps {
   /** Which single line the traveling pulse-dot follows — a subset of communicatingAgents
    * (the most recently activated one); the dot itself is one SVG element. */
   pulseLineAgent: AgentId | null;
+  /** The current turn's plan, as reported via write_checklist — see ChecklistWidget. */
+  checklist: ChecklistItemRow[];
   orchestratorResponding: boolean;
   agents: AgentLayoutItem[];
   steps: StepEvent[];
@@ -55,6 +58,7 @@ export default function OrbitScene({
   setAgentRef,
   communicatingAgents,
   pulseLineAgent,
+  checklist,
   orchestratorResponding,
   agents,
   steps,
@@ -130,6 +134,7 @@ export default function OrbitScene({
       />
       <div id="widgets-left" className={entering ? "entering" : undefined}>
         <TokenUsageWidget steps={steps} />
+        <ChecklistWidget items={checklist} />
       </div>
       <div id="widgets-right" className={entering ? "entering" : undefined}>
         <SystemStatusWidget locationEnabled={locationEnabled} />

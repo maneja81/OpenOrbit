@@ -45,7 +45,11 @@ test.describe("Core chat flow", () => {
     const beforeCount = before.prepare("SELECT COUNT(*) AS n FROM messages").get() as { n: number };
     before.close();
 
-    await typeIntoField(page, "#inp", "Reply with just the word OK, nothing else.");
+    // Deliberately not "...nothing else" — that phrasing instructs the model against any
+    // side action, including calling write_checklist, which is a live-widget update the
+    // user sees, not part of the reply text itself. A plain "say hi" doesn't create that
+    // conflict.
+    await typeIntoField(page, "#inp", "Say hi.");
     await page.keyboard.press("Enter");
 
     const assistantRow = await pollUntil(() => {
@@ -69,5 +73,26 @@ test.describe("Core chat flow", () => {
     after.close();
     // At least the user turn and the assistant reply — an orchestrator handoff can add more.
     expect(afterCount.n).toBeGreaterThanOrEqual(beforeCount.n + 2);
+
+    // Reuses this same turn/trace rather than a second billed call — see the file comment on
+    // why only one spec here makes a real provider call. orchestrator.md instructs Orbit to
+    // call write_checklist before anything else — asserted as a structural DB fact (a row
+    // was written for this trace_id), which is what actually proves the tool → DB → widget
+    // mechanism works end-to-end.
+    //
+    // Deliberately NOT asserting every item ends "completed"/"cancelled": that's model
+    // discipline (did it remember to call write_checklist a second time before replying?),
+    // not code correctness, and live-testing during development showed gpt-4.1-mini doesn't
+    // reliably do the closing call even with a strongly-worded prompt instruction. Same
+    // "a live model's wording isn't something a test controls" principle this file already
+    // applies to reply text extends to tool-calling completeness — asserting it here would
+    // make this spec flaky against model behavior variance, not against a real bug.
+    const checklistDb = openDb(userData);
+    const checklistRows = checklistDb
+      .prepare("SELECT status FROM checklist_items WHERE trace_id = ?")
+      .all(assistantRow!.trace_id) as { status: string }[];
+    checklistDb.close();
+
+    expect(checklistRows.length, "no checklist_items row was written for this turn's trace_id").toBeGreaterThan(0);
   });
 });

@@ -118,6 +118,20 @@ interface AgentDisplayRow extends AgentRow {
   orchestratorToolName: string;
 }
 
+/** One item of one agent's plan for the current turn, as reported via the write_checklist
+ * tool. See electron/main/db/checklistStore.ts's ChecklistItemRow for the full explanation —
+ * self-reported (what the model says its plan is), not ground truth of what executed. */
+interface ChecklistItemRow {
+  id: number;
+  trace_id: string;
+  agent_name: string;
+  position: number;
+  text: string;
+  status: "pending" | "in_progress" | "completed" | "cancelled";
+  created_at: string;
+  updated_at: string;
+}
+
 interface McpServerRow {
   id: string;
   name: string;
@@ -510,6 +524,9 @@ interface Window {
       delete: (id: string) => Promise<void>;
       exportToFile: (ids?: string[]) => Promise<{ canceled: boolean }>;
       importFromFile: () => Promise<AgentRow[]>;
+    };
+    checklist: {
+      get: (traceId: string) => Promise<ChecklistItemRow[]>;
     };
     knowledgebase: {
       list: () => Promise<KnowledgebaseFileRecord[]>;

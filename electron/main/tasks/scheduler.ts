@@ -7,12 +7,14 @@
  * alongside the explorer daemon.
  */
 
+import { randomUUID } from "node:crypto";
 import { Notification, BrowserWindow } from "electron";
 import { run, Agent } from "@openai/agents";
 import { buildOrchestrator, listAgents, RunSubAgentFn } from "../ai/agents";
 import { closeMcpServers } from "../ai/mcp";
 import { resolveApprovalsAndRun } from "../ai/runLoop";
 import { getDueTasks, recordTaskRun, TaskRow } from "../db/tasksStore";
+import { cancelPendingForTrace } from "../db/checklistStore";
 import { devLog } from "../devLog";
 import { parseStringMap } from "../db/jsonColumn";
 import { extractApprovalMeta } from "../ai/runItemMeta";
@@ -92,7 +94,13 @@ export function notify(title: string, body: string): void {
 /** Exported for testing — the interruption/auto-reject handling below is the KI-5 fix and is
  * otherwise only reachable through the poll loop's setInterval callback. */
 export async function runPromptTask(task: TaskRow): Promise<string> {
-  const { agent: orchestrator, mcpServers, allAgents } = await buildOrchestrator(runSubAgentHeadless);
+  // Scopes this task run's checklist_items rows (see ai/tools/checklistTools.ts) the same
+  // way ipc/agent.ts's interactive traceId does — scheduled runs had no equivalent id
+  // before the checklist feature needed one; nested specialist calls automatically share
+  // this same value since buildOrchestrator bakes it into every agent's write_checklist
+  // tool at construction time, not per call.
+  const traceId = randomUUID();
+  const { agent: orchestrator, mcpServers, allAgents } = await buildOrchestrator(runSubAgentHeadless, traceId);
   try {
     let runTarget = orchestrator;
     if (task.prompt_target_agent_id) {
@@ -126,10 +134,16 @@ export async function runPromptTask(task: TaskRow): Promise<string> {
         });
       }
       devLog(`[taskScheduler] task id=${task.id} blocked on approval-gated tool(s): ${toolNames.join(", ")}`);
+      // The run stops here, unattended and unresolved — any checklist item still pending
+      // for this trace never will resolve, same reasoning as ipc/agent.ts's abandon path.
+      cancelPendingForTrace(traceId);
       return `Blocked — needs your approval for: ${toolNames.join(", ")}. Run this task interactively in chat instead.`;
     }
 
     return result.finalOutput ?? "";
+  } catch (e) {
+    cancelPendingForTrace(traceId);
+    throw e;
   } finally {
     await closeMcpServers(mcpServers);
   }

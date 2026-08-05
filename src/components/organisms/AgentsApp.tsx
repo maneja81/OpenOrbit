@@ -88,6 +88,10 @@ export default function AgentsApp() {
   // agents-as-tools: handoffs no longer cap it at one). Insertion order doubles as "most
   // recently activated" for the single traveling pulse-dot (see pulseLineAgent below).
   const [communicatingAgents, setCommunicatingAgents] = useState<Map<string, AgentId>>(new Map());
+  // The current turn's plan, as reported via write_checklist — see ChecklistWidget. Unlike
+  // communicatingAgents this isn't gated to Orbit's own top-level calls: any agent's own
+  // checklist (Orbit's, or a specialist's for its own multi-step flow) should show up here.
+  const [checklist, setChecklist] = useState<ChecklistItemRow[]>([]);
   const communicatingClearTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const [steps, setSteps] = useState<StepEvent[]>([{ type: "waiting", label: "Waiting for message…" }]);
   const [orchestratorResponding, setOrchestratorResponding] = useState(false);
@@ -544,6 +548,9 @@ export default function AgentsApp() {
         { type: "interpreting", label: "Interpreting…" },
       ];
       setSteps(turnSteps);
+      // Cleared per new turn, same lifecycle as turnSteps above — a checklist from the
+      // previous message must not linger once a new one starts.
+      setChecklist([]);
 
       // Text delta subscription — for typed turns, first chunk also flips "thinking…" to
       // live reply text. Voice turns skip the live text update entirely (the reply is
@@ -593,6 +600,15 @@ export default function AgentsApp() {
         if (rid !== requestId) return;
         turnSteps = [...turnSteps, step];
         setSteps(turnSteps);
+
+        // Unlike the communicatingAgents block below, this isn't gated to Orbit's own
+        // calls — any agent's write_checklist call (Orbit's own plan, or a specialist's for
+        // its own multi-step flow, e.g. Cipher) should refresh the widget. Triggered on
+        // tool_output specifically because that's when the DB write has actually committed
+        // (see ai/tools/checklistTools.ts) — fetching on tool_called would race the write.
+        if (step.type === "tool_output" && step.toolName === "write_checklist" && traceId) {
+          window.agentsAPI.checklist.get(traceId).then(setChecklist).catch(() => {});
+        }
 
         const isOrbitsOwnCall = step.agentName?.toLowerCase() === settings.agentName.toLowerCase();
         if (!isOrbitsOwnCall || !step.callId) return;
@@ -945,6 +961,7 @@ export default function AgentsApp() {
         orchestratorRef={orchestratorRef}
         setAgentRef={setAgentRef}
         communicatingAgents={communicatingAgentIds}
+        checklist={checklist}
         pulseLineAgent={pulseLineAgent}
         orchestratorResponding={orchestratorResponding || speaking}
         agents={agents}

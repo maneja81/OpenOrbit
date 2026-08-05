@@ -16,6 +16,9 @@ const getDueTasksMock = vi.hoisted(() => vi.fn<(nowIso: string) => import("../db
 const recordTaskRunMock = vi.hoisted(() => vi.fn());
 vi.mock("../db/tasksStore", () => ({ getDueTasks: getDueTasksMock, recordTaskRun: recordTaskRunMock }));
 
+const cancelPendingForTraceMock = vi.hoisted(() => vi.fn());
+vi.mock("../db/checklistStore", () => ({ cancelPendingForTrace: cancelPendingForTraceMock }));
+
 const notificationConstructorMock = vi.hoisted(() => vi.fn());
 vi.mock("electron", () => {
   class MockNotification {
@@ -69,6 +72,7 @@ beforeEach(() => {
   closeMcpServersMock.mockReset();
   buildOrchestratorMock.mockReset();
   buildOrchestratorMock.mockResolvedValue({ agent: ORCHESTRATOR, mcpServers: [], allAgents: [ORCHESTRATOR] });
+  cancelPendingForTraceMock.mockReset();
 });
 
 // KI-5: a scheduled task's run() call previously never inspected result.interruptions, so a
@@ -98,6 +102,28 @@ describe("runPromptTask", () => {
     expect(output).toContain("Blocked");
     expect(output).toContain("send_email");
     expect(output).not.toBe("");
+    // A run that stops here unattended must not leave a checklist item stuck "in progress"
+    // forever — same reasoning as ipc/agent.ts's abandonApprovalsFor on the interactive path.
+    expect(cancelPendingForTraceMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes a fresh traceId to buildOrchestrator on every run, distinct per call", async () => {
+    runMock.mockResolvedValue({ finalOutput: "ok", interruptions: [] });
+
+    await runPromptTask(makeTask());
+    await runPromptTask(makeTask());
+
+    const traceIds = buildOrchestratorMock.mock.calls.map((call) => call[1]);
+    expect(traceIds).toHaveLength(2);
+    expect(typeof traceIds[0]).toBe("string");
+    expect(traceIds[0]).not.toBe(traceIds[1]);
+  });
+
+  it("cancels pending checklist items when the run throws", async () => {
+    runMock.mockRejectedValue(new Error("boom"));
+
+    await expect(runPromptTask(makeTask())).rejects.toThrow("boom");
+    expect(cancelPendingForTraceMock).toHaveBeenCalledTimes(1);
   });
 });
 

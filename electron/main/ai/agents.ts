@@ -12,6 +12,7 @@ import { searchHistoryTool } from "./tools/history";
 import { listGrantedFoldersTool, listFolderContentsTool, readFolderFileTool } from "./tools/folderAccessTools";
 import { findSkillTool } from "./tools/skillFinderTool";
 import { createSaveUserInfoTool } from "./tools/userInfoTools";
+import { createWriteChecklistTool } from "./tools/checklistTools";
 import {
   createDeleteAgentDataTool,
   createGetAgentDataTool,
@@ -1089,6 +1090,9 @@ export function attachConnectorsForRow(row: AgentRow): Tool[] {
  * tools are excluded (those are only resolvable by live-connecting, see
  * attachConnectorsForRow) — callers show a separate attached-connector count instead. */
 export function getBuiltinToolNamesForRole(row: AgentRow): string[] {
+  // traceId is irrelevant here — this only reads each tool's static `.name` for display,
+  // it never executes, so a throwaway value is fine (same reasoning as calling
+  // createSaveUserInfoTool purely for its `.name` below).
   if (row.id === "configAgent") {
     return [
       getSettingsTool,
@@ -1098,6 +1102,7 @@ export function getBuiltinToolNamesForRole(row: AgentRow): string[] {
       listAgentsTool,
       findSkillTool,
       createSaveUserInfoTool(row.name),
+      createWriteChecklistTool(row.name, ""),
       listConnectorsTool,
       connectConnectorTool,
       disconnectConnectorTool,
@@ -1110,13 +1115,16 @@ export function getBuiltinToolNamesForRole(row: AgentRow): string[] {
       listKnowledgebaseFilesTool,
       readKnowledgebaseFileTool,
       createSaveUserInfoTool(row.name),
+      createWriteChecklistTool(row.name, ""),
       listGrantedFoldersTool,
       listFolderContentsTool,
       readFolderFileTool,
     ].map((t) => t.name);
   }
   if (row.id === "explorerAgent") {
-    return [webSearchTool, fetchWebContentTool, createSaveUserInfoTool(row.name)].map((t) => t.name);
+    return [webSearchTool, fetchWebContentTool, createSaveUserInfoTool(row.name), createWriteChecklistTool(row.name, "")].map(
+      (t) => t.name
+    );
   }
   if (row.id === "taskAgent") {
     return [
@@ -1127,10 +1135,12 @@ export function getBuiltinToolNamesForRole(row: AgentRow): string[] {
       cancelTaskTool,
       deleteTaskTool,
       createSaveUserInfoTool(row.name),
+      createWriteChecklistTool(row.name, ""),
     ].map((t) => t.name);
   }
   return [
     createSaveUserInfoTool(row.name),
+    createWriteChecklistTool(row.name, ""),
     createSaveAgentDataTool(row.id),
     createGetAgentDataTool(row.id),
     createListAgentDataTool(row.id),
@@ -1206,7 +1216,7 @@ function agentAsTool(
  * `mcp_server_ids` must be closed by the caller after the run completes (`mcpServers`
  * collects every server connected across every agent, orchestrator included, so one
  * `closeMcpServers(result.mcpServers)` in a `finally` covers all of them). */
-export async function buildOrchestrator(runSubAgent: RunSubAgentFn): Promise<BuiltOrchestrator> {
+export async function buildOrchestrator(runSubAgent: RunSubAgentFn, traceId: string): Promise<BuiltOrchestrator> {
   const db = getDb();
   ensureDefaultAgentsSeeded(db);
 
@@ -1271,6 +1281,7 @@ export async function buildOrchestrator(runSubAgent: RunSubAgentFn): Promise<Bui
       listAgentsTool,
       findSkillTool,
       createSaveUserInfoTool(configAgentRow.name),
+      createWriteChecklistTool(configAgentRow.name, traceId),
       listConnectorsTool,
       connectConnectorTool,
       disconnectConnectorTool,
@@ -1294,6 +1305,7 @@ export async function buildOrchestrator(runSubAgent: RunSubAgentFn): Promise<Bui
       listKnowledgebaseFilesTool,
       readKnowledgebaseFileTool,
       createSaveUserInfoTool(knowledgeAgentRow.name),
+      createWriteChecklistTool(knowledgeAgentRow.name, traceId),
       listGrantedFoldersTool,
       listFolderContentsTool,
       readFolderFileTool,
@@ -1315,6 +1327,7 @@ export async function buildOrchestrator(runSubAgent: RunSubAgentFn): Promise<Bui
       webSearchTool,
       fetchWebContentTool,
       createSaveUserInfoTool(explorerAgentRow.name),
+      createWriteChecklistTool(explorerAgentRow.name, traceId),
       ...attachConnectorsForRow(explorerAgentRow),
       ...attachHttpToolsForRow(explorerAgentRow),
     ],
@@ -1348,6 +1361,7 @@ export async function buildOrchestrator(runSubAgent: RunSubAgentFn): Promise<Bui
       cancelTaskTool,
       deleteTaskTool,
       createSaveUserInfoTool(taskAgentRow.name),
+      createWriteChecklistTool(taskAgentRow.name, traceId),
       ...attachConnectorsForRow(taskAgentRow),
       ...attachHttpToolsForRow(taskAgentRow),
     ],
@@ -1373,6 +1387,7 @@ export async function buildOrchestrator(runSubAgent: RunSubAgentFn): Promise<Bui
         model: modelForAgent(row),
         tools: [
           createSaveUserInfoTool(row.name),
+          createWriteChecklistTool(row.name, traceId),
           createSaveAgentDataTool(row.id),
           createGetAgentDataTool(row.id),
           createListAgentDataTool(row.id),
@@ -1438,6 +1453,7 @@ export async function buildOrchestrator(runSubAgent: RunSubAgentFn): Promise<Bui
       searchHistoryTool,
       getCurrentLocationTool,
       createSaveUserInfoTool(agentName),
+      createWriteChecklistTool(agentName, traceId),
       ...specialistTools,
       ...attachConnectorsForIds(orchestratorConnectorIds),
       ...buildHttpToolsForCollectionIds(orchestratorHttpToolCollectionIds),

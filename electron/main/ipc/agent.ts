@@ -27,6 +27,7 @@ import {
 } from "../ai/agents";
 import { closeMcpServers } from "../ai/mcp";
 import { resolveApprovalsAndRun } from "../ai/runLoop";
+import { cancelPendingForTrace } from "../db/checklistStore";
 import { extractApprovalMeta, extractRunItemMeta } from "../ai/runItemMeta";
 import { configureChatClient, estimateGenerationCost, providerIdForModel } from "../ai/provider";
 import { insertTokenUsage, updateTokenUsageCost } from "../db/tokenUsageStore";
@@ -485,7 +486,7 @@ export function registerAgentHandlers() {
         return result?.finalOutput ?? "";
       };
 
-      const { agent: orchestrator, mcpServers, allAgents } = await buildOrchestrator(runSubAgent);
+      const { agent: orchestrator, mcpServers, allAgents } = await buildOrchestrator(runSubAgent, traceId);
       // Deterministic routing (e.g. "/cipher <message>") bypasses the orchestrator's own
       // routing judgment entirely and runs the named agent directly — falls back to the
       // orchestrator if the name doesn't match (agent renamed/deleted between menu-open
@@ -528,6 +529,9 @@ export function registerAgentHandlers() {
           // A dialog waiting on a run that just died would otherwise hang until its own
           // 5-minute timeout.
           abandonApprovalsFor(requestId);
+          // Same reasoning, for the checklist widget: a run that dies mid-plan must not
+          // leave an item stuck showing "in progress" forever.
+          cancelPendingForTrace(traceId);
           throw err;
         })
         .finally(() => deadline.clear());
