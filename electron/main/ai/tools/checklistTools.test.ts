@@ -8,7 +8,7 @@ vi.mock("../../db/index", () => ({
   getDb: () => db,
 }));
 
-import { writeChecklist, writeChecklistParams } from "./checklistTools";
+import { writeChecklist, writeChecklistParams, isLeakedChecklistJson } from "./checklistTools";
 import { getChecklistForTrace } from "../../db/checklistStore";
 
 beforeEach(() => {
@@ -78,5 +78,35 @@ describe("writeChecklistParams schema", () => {
       items: [{ text: "x".repeat(201), status: "pending" }],
     });
     expect(result.success).toBe(false);
+  });
+});
+
+describe("isLeakedChecklistJson (KI-6 guard)", () => {
+  it("flags a leaked write_checklist argument shape", () => {
+    expect(isLeakedChecklistJson('{"items":[{"text":"Check location setting","status":"completed"}]}')).toBe(true);
+  });
+
+  it("flags one with surrounding whitespace/newlines", () => {
+    expect(isLeakedChecklistJson('\n  {"items":[{"text":"Do it","status":"pending"}]}  \n')).toBe(true);
+  });
+
+  it("does not flag ordinary prose", () => {
+    expect(isLeakedChecklistJson("Your location setting is currently turned off. Want me to enable it?")).toBe(false);
+  });
+
+  it("does not flag prose that merely mentions items/status", () => {
+    expect(isLeakedChecklistJson("Here's the status of your items: all good.")).toBe(false);
+  });
+
+  it("does not flag unrelated JSON", () => {
+    expect(isLeakedChecklistJson('{"temperature": 36, "city": "Delhi"}')).toBe(false);
+  });
+
+  it("does not flag malformed JSON", () => {
+    expect(isLeakedChecklistJson('{"items":[{"text":"Do it", "status":')).toBe(false);
+  });
+
+  it("does not flag an empty string", () => {
+    expect(isLeakedChecklistJson("")).toBe(false);
   });
 });

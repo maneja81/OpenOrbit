@@ -30,24 +30,41 @@ import { devLog } from "../../devLog";
  * own wording. */
 export const NO_ANSWER_TIMEOUT_SENTINEL = "[no answer — timed out]";
 
+/** What the UI's own Cancel action resolves to (see AskUserCard) — distinct from a real,
+ * user-composed answer by construction, so it can never be confused with literal input text.
+ * Unlike Skip (only available when the field is optional, and submits `placeholder` as a
+ * real value the agent asked for), Cancel is always available: it means "the user doesn't
+ * want to answer this at all," not "here's the default." KI-2: before this existed, a
+ * required question with no way out meant a user's unrelated follow-up message — typed into
+ * the only live input left, the question card's own — was silently accepted as the literal
+ * answer, derailing whichever specialist asked into acting on garbage data. */
+export const ASK_USER_CANCELLED_SENTINEL = "[user cancelled — did not answer]";
+
 export const askUserFieldSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("text"),
     placeholder: z.string().optional().describe("The real default answer to use if this is optional and skipped, or times out."),
     required: z.boolean().describe("If true, the question cannot be skipped."),
   }),
-  z.object({
-    type: z.literal("single_select"),
-    options: z
-      .array(z.object({ label: z.string(), value: z.string() }))
-      .min(1)
-      .describe("The choices to show, in order. The UI always adds its own free-text \"something else\" option too — don't include one yourself."),
-    placeholder: z
-      .string()
-      .optional()
-      .describe("The value (not label) of the option to use as the real default if this is optional and skipped, or times out."),
-    required: z.boolean().describe("If true, the question cannot be skipped."),
-  }),
+  z
+    .object({
+      type: z.literal("single_select"),
+      options: z
+        .array(z.object({ label: z.string(), value: z.string() }))
+        .min(1)
+        .describe("The choices to show, in order. The UI always adds its own free-text \"something else\" option too — don't include one yourself."),
+      placeholder: z
+        .string()
+        .optional()
+        .describe("The value (not label) of the option to use as the real default if this is optional and skipped, or times out."),
+      required: z.boolean().describe("If true, the question cannot be skipped."),
+    })
+    // KI-4: without this, a model could set placeholder to a string that isn't one of its
+    // own declared options — Skip would then submit a value the agent never actually offered.
+    .refine((field) => field.placeholder === undefined || field.options.some((o) => o.value === field.placeholder), {
+      message: "placeholder must match one of options[].value",
+      path: ["placeholder"],
+    }),
 ]);
 
 export const askUserParams = z.object({
@@ -76,7 +93,7 @@ export async function askUser(
 ): Promise<string> {
   devLog(`[ask_user] ${agentName} asked: ${question}`);
   const answer = await requestAnswer(agentName, question, field);
-  if (rememberAsUserInfo && answer !== NO_ANSWER_TIMEOUT_SENTINEL) {
+  if (rememberAsUserInfo && answer !== NO_ANSWER_TIMEOUT_SENTINEL && answer !== ASK_USER_CANCELLED_SENTINEL) {
     appendUserInfoFact({ question, answer, askedBy: agentName });
   }
   return answer;
@@ -91,7 +108,7 @@ export function createAskUserTool(agentName: string, requestAnswer: RequestAnswe
   return tool({
     name: "ask_user",
     description:
-      "Ask the user a single question and wait for their real answer — this is a tool call, never text you write in your reply. Never bundle more than one question into a single call; if you need several answers, call this again after each one resolves. Use field.type \"single_select\" with a short list of real options when the answer is naturally a pick-one choice (the UI adds its own free-text escape hatch automatically); use \"text\" for anything open-ended. Set field.required=false with a sensible field.placeholder whenever skipping is reasonable — the placeholder becomes the literal answer if skipped or timed out. Set rememberAsUserInfo=true only for facts worth every agent knowing later (the same bar as save_user_info).",
+      "Ask the user a single question and wait for their real answer — this is a tool call, never text you write in your reply. Never bundle more than one question into a single call; if you need several answers, call this again after each one resolves. Use field.type \"single_select\" with a short list of real options when the answer is naturally a pick-one choice (the UI adds its own free-text escape hatch automatically); use \"text\" for anything open-ended. Set field.required=false with a sensible field.placeholder whenever skipping is reasonable — the placeholder becomes the literal answer if skipped or timed out. Set rememberAsUserInfo=true only for facts worth every agent knowing later (the same bar as save_user_info). The answer can come back as \"[no answer — timed out]\" or \"[user cancelled — did not answer]\" — neither is real data: don't treat either as the user's actual answer. Report that you couldn't get it and continue without guessing, or ask again differently if that's more useful than dropping it.",
     parameters: askUserParams,
     execute: async (params) => askUser(params, agentName, requestAnswer),
   });

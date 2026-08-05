@@ -9,7 +9,7 @@ vi.mock("../../appDirs", () => ({
   getUserInfoDir: () => path.join(tempUserDataDir, "user-info"),
 }));
 
-import { askUser, askUserParams, NO_ANSWER_TIMEOUT_SENTINEL, type AskUserField } from "./askUserTools";
+import { askUser, askUserParams, NO_ANSWER_TIMEOUT_SENTINEL, ASK_USER_CANCELLED_SENTINEL, type AskUserField } from "./askUserTools";
 import { readUserInfoFacts } from "../userInfoStore";
 
 const textField: AskUserField = { type: "text", required: true };
@@ -50,6 +50,16 @@ describe("askUser (backs the ask_user tool)", () => {
 
   it("does not save a timed-out non-answer to user info even when rememberAsUserInfo is true", async () => {
     const requestAnswer = vi.fn().mockResolvedValue(NO_ANSWER_TIMEOUT_SENTINEL);
+    await askUser(
+      { question: "What's your job?", field: textField, rememberAsUserInfo: true },
+      "Cipher",
+      requestAnswer
+    );
+    expect(readUserInfoFacts()).toHaveLength(0);
+  });
+
+  it("does not save a cancelled non-answer to user info even when rememberAsUserInfo is true", async () => {
+    const requestAnswer = vi.fn().mockResolvedValue(ASK_USER_CANCELLED_SENTINEL);
     await askUser(
       { question: "What's your job?", field: textField, rememberAsUserInfo: true },
       "Cipher",
@@ -123,5 +133,37 @@ describe("askUserParams schema", () => {
       field: { type: "text" },
     });
     expect(result.success).toBe(false);
+  });
+
+  it("rejects a single_select placeholder that isn't one of its own options (KI-4)", () => {
+    const result = askUserParams.safeParse({
+      question: "Which currency?",
+      field: {
+        type: "single_select",
+        options: [
+          { label: "US Dollar", value: "USD" },
+          { label: "Euro", value: "EUR" },
+        ],
+        placeholder: "GBP",
+        required: false,
+      },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts a single_select placeholder that matches one of its own options", () => {
+    const result = askUserParams.safeParse({
+      question: "Which currency?",
+      field: {
+        type: "single_select",
+        options: [
+          { label: "US Dollar", value: "USD" },
+          { label: "Euro", value: "EUR" },
+        ],
+        placeholder: "USD",
+        required: false,
+      },
+    });
+    expect(result.success).toBe(true);
   });
 });

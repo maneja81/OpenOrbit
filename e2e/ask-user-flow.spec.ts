@@ -71,4 +71,45 @@ test.describe("ask_user flow", () => {
       { timeout: 90_000 }
     );
   });
+
+  // KI-2 regression: before Cancel existed, a required question with no way out meant a user
+  // trying to move on to something unrelated had nowhere to type it except the question card's
+  // own input — which then submitted their message as the literal answer. Cancel proves there's
+  // now a real way to decline any question (required or not) without it being mistaken for data.
+  test("Cancel is always available, even on a required question, and frees the main input again", async () => {
+    // Continuing the same conversation as the prior test — configAgent.md's agent-creation
+    // flow asks several domain-essential questions in sequence, so the next chat turn is very
+    // likely to surface another one.
+    await typeIntoField(page, "#inp", "What else do you need to know?");
+    await page.keyboard.press("Enter");
+    await page.waitForSelector(".ask-user-card", { timeout: 90_000 });
+
+    // KI-3: the disabled main input must describe a question, not an approval gate.
+    const placeholder = await page.getAttribute("#inp", "placeholder");
+    expect(placeholder).toContain("Answer or cancel the question above");
+
+    const questionBefore = await page.textContent(".ask-user-card-question");
+    await clickByText(page, "Cancel", ".ask-user-card");
+
+    // Cancel resolved *this* question rather than leaving the run stuck — the card either
+    // clears entirely, or (a multi-question flow) is replaced by a different question. Either
+    // way it proves the pause released, same "clears or advances" reasoning as the first test.
+    await page.waitForFunction(
+      (prevQuestion) => {
+        const card = document.querySelector(".ask-user-card-question");
+        return !card || card.textContent !== prevQuestion;
+      },
+      questionBefore,
+      { timeout: 90_000 }
+    );
+
+    // If nothing else picked up the pause, the main input's placeholder must be back to a
+    // normal "message me" prompt — not the blocked-state text — proving sendDisabled actually
+    // cleared rather than the run being left permanently paused on a cancelled question.
+    const stillBlocked = (await page.$(".ask-user-card")) !== null;
+    if (!stillBlocked) {
+      const placeholderAfter = await page.getAttribute("#inp", "placeholder");
+      expect(placeholderAfter).not.toContain("continue…");
+    }
+  });
 });

@@ -25,9 +25,14 @@ interface ChatInputBarProps {
   /** Every enabled agent (system + custom) the message could be directed at — rendered
    * as extra slash commands (e.g. typing "/cipher") that address that agent by name. */
   agents: DirectableAgent[];
-  /** Blocks sending while a tool approval is outstanding — the run is paused waiting on
-   * that answer, and a second turn would start a concurrent run against the same chat. */
+  /** Blocks sending while a tool approval or an ask_user question is outstanding — the run
+   * is paused waiting on that answer, and a second turn would start a concurrent run
+   * against the same chat. */
   sendDisabled?: boolean;
+  /** KI-3: which kind of pause is blocking send, so the placeholder can say the right
+   * thing — "approve or decline" is wrong (and was shown, misleadingly) while an ask_user
+   * card is actually what's waiting for input. Ignored when sendDisabled is false. */
+  sendDisabledReason?: "approval" | "question";
   onSend: () => void;
   onStartVoice: () => void;
   onStopVoice: () => void;
@@ -61,6 +66,7 @@ export default function ChatInputBar({
   voiceEnabled,
   agents,
   sendDisabled,
+  sendDisabledReason,
   onSend,
   onStartVoice,
   onStopVoice,
@@ -310,7 +316,9 @@ export default function ChatInputBar({
               rows={1}
               placeholder={
                 sendDisabled
-                  ? "Approve or decline the request above to continue…"
+                  ? sendDisabledReason === "question"
+                    ? "Answer or cancel the question above to continue…"
+                    : "Approve or decline the request above to continue…"
                   : `Message ${agentName}… or / for commands`
               }
               autoComplete="off"

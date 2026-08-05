@@ -36,6 +36,25 @@ describe("AskUserCard — text field", () => {
     expect(screen.queryByText("Skip")).toBeNull();
   });
 
+  it("shows Cancel even when required, submitting the cancelled sentinel rather than any typed text", () => {
+    const onAnswer = vi.fn();
+    render(<AskUserCard pending={makePending({ field: { type: "text", required: true } })} onAnswer={onAnswer} />);
+    fireEvent.click(screen.getByText("Cancel"));
+    expect(onAnswer).toHaveBeenCalledWith("q1", "[user cancelled — did not answer]");
+  });
+
+  it("Cancel is distinct from Skip when both are shown", () => {
+    const onAnswer = vi.fn();
+    render(
+      <AskUserCard
+        pending={makePending({ field: { type: "text", required: false, placeholder: "USD" } })}
+        onAnswer={onAnswer}
+      />
+    );
+    fireEvent.click(screen.getByText("Cancel"));
+    expect(onAnswer).toHaveBeenCalledWith("q1", "[user cancelled — did not answer]");
+  });
+
   it("shows Skip when not required, submitting the placeholder as the literal answer", () => {
     const onAnswer = vi.fn();
     render(

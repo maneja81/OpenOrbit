@@ -125,6 +125,25 @@ describe("runPromptTask", () => {
     await expect(runPromptTask(makeTask())).rejects.toThrow("boom");
     expect(cancelPendingForTraceMock).toHaveBeenCalledTimes(1);
   });
+
+  // known-issues.md KI-6: a leaked write_checklist argument shape must never reach a task's
+  // recorded result/notification text — this is the guard's actual wiring, not just the
+  // isLeakedChecklistJson predicate in isolation (see checklistTools.test.ts for that).
+  it("replaces a leaked write_checklist JSON reply with an honest fallback message (KI-6)", async () => {
+    runMock.mockResolvedValue({
+      finalOutput: '{"items":[{"text":"Check location setting","status":"completed"}]}',
+      interruptions: [],
+    });
+    const output = await runPromptTask(makeTask());
+    expect(output).not.toContain("{");
+    expect(output).not.toContain("items");
+  });
+
+  it("leaves an ordinary finalOutput untouched", async () => {
+    runMock.mockResolvedValue({ finalOutput: "Your location is off. Want me to enable it?", interruptions: [] });
+    const output = await runPromptTask(makeTask());
+    expect(output).toBe("Your location is off. Want me to enable it?");
+  });
 });
 
 describe("renderTaskPrompt", () => {

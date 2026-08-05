@@ -3,6 +3,14 @@ import TablerIcon from "@/components/atoms/TablerIcon";
 import { formatRemaining } from "@/lib/approvalCountdown";
 import { useApprovalCountdown } from "@/hooks/useApprovalCountdown";
 
+/** Mirrors ASK_USER_CANCELLED_SENTINEL in electron/main/ai/tools/askUserTools.ts — a fixed
+ * value distinct from any real, user-composed answer by construction. KI-2: before Cancel
+ * existed, a required question had no way out at all, so a user trying to move on to an
+ * unrelated message had nowhere to type it except this card's own input — which then
+ * submitted their message as if it were the literal answer. Cancel means "I'm not
+ * answering this," never a default value (that's still Skip, for optional fields only). */
+const ASK_USER_CANCELLED_SENTINEL = "[user cancelled — did not answer]";
+
 export interface PendingQuestion {
   questionId: string;
   agentName: string;
@@ -127,8 +135,8 @@ export default function AskUserCard({ pending, onAnswer }: AskUserCardProps) {
         </p>
       )}
 
-      {canSkip && (
-        <div className="ask-user-card-actions">
+      <div className="ask-user-card-actions">
+        {canSkip && (
           <button
             type="button"
             className="settings-action-btn-sm settings-action-btn-ghost"
@@ -136,8 +144,18 @@ export default function AskUserCard({ pending, onAnswer }: AskUserCardProps) {
           >
             Skip
           </button>
-        </div>
-      )}
+        )}
+        {/* Always available, required or not — see the sentinel comment above. Distinct from
+            Skip: this never submits a default value, it tells the asking agent the user
+            declined to answer at all. */}
+        <button
+          type="button"
+          className="settings-action-btn-sm settings-action-btn-ghost"
+          onClick={() => submit(ASK_USER_CANCELLED_SENTINEL)}
+        >
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }

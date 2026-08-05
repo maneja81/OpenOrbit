@@ -45,6 +45,9 @@ interface ChatPanelProps {
   /** True while an approval or a question is outstanding — blocks sending so a second turn
    * can't start a concurrent run against a conversation that's mid-approval/mid-question. */
   sendDisabled?: boolean;
+  /** KI-3: which kind blocked it, forwarded to ChatInputBar so its placeholder describes
+   * the actual pause instead of always assuming an approval gate. */
+  sendDisabledReason?: "approval" | "question";
   /** Opens the full paged archive (ChatHistoryModal) — the log itself only keeps the last
    * MAX_VISIBLE_MESSAGES turns on screen. */
   onShowFullHistory: () => void;
@@ -99,6 +102,7 @@ export default function ChatPanel({
   approvalCard,
   questionCard,
   sendDisabled,
+  sendDisabledReason,
   onShowFullHistory,
   autoLoadRemoteImages,
   onSend,
@@ -192,6 +196,7 @@ export default function ChatPanel({
         voiceEnabled={voiceEnabled}
         agents={agents}
         sendDisabled={sendDisabled}
+        sendDisabledReason={sendDisabledReason}
         onSend={onSend}
         onStartVoice={onStartVoice}
         onStopVoice={onStopVoice}

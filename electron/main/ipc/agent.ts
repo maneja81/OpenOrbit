@@ -28,6 +28,7 @@ import {
 import { closeMcpServers } from "../ai/mcp";
 import { resolveApprovalsAndRun } from "../ai/runLoop";
 import { cancelPendingForTrace } from "../db/checklistStore";
+import { isLeakedChecklistJson } from "../ai/tools/checklistTools";
 import { NO_ANSWER_TIMEOUT_SENTINEL, type RequestAnswerFn } from "../ai/tools/askUserTools";
 import { extractApprovalMeta, extractRunItemMeta } from "../ai/runItemMeta";
 import { configureChatClient, estimateGenerationCost, providerIdForModel } from "../ai/provider";
@@ -554,7 +555,15 @@ export function registerAgentHandlers() {
       // than using the SDK's own Agent.asTool(), which resolves nested interruptions nowhere.
       const runSubAgent = async (agent: Agent, subInput: string, displayName: string): Promise<string> => {
         const result = await runToCompletion(agent, subInput, `specialist=${displayName}`);
-        return result?.finalOutput ?? "";
+        const output = result?.finalOutput ?? "";
+        // KI-6: a specialist can leak its own write_checklist JSON the same way the
+        // top-level run can — catch it here too, so Orbit's own reply never gets built on
+        // top of raw JSON it received back from a specialist call.
+        if (isLeakedChecklistJson(output)) {
+          devLog(`[agent:runStream] requestId=${requestId} specialist=${displayName} suppressed a leaked write_checklist JSON reply: "${output}"`);
+          return "(the specialist's reply didn't come through in a usable format — ask again or rephrase if you need this.)";
+        }
+        return output;
       };
 
       const { agent: orchestrator, mcpServers, allAgents } = await buildOrchestrator(runSubAgent, traceId, requestAnswer);
@@ -576,10 +585,22 @@ export function registerAgentHandlers() {
           broadcastSettingsUpdate();
           broadcastConnectorsUpdate();
           broadcastTasksUpdate();
-          const finalOutput = result.finalOutput ?? "";
+          const rawFinalOutput = result.finalOutput ?? "";
           devLog(
-            `[agent:runStream] requestId=${requestId} lastAgent=${result.lastAgent?.name ?? "none"} finalOutput="${finalOutput}"`
+            `[agent:runStream] requestId=${requestId} lastAgent=${result.lastAgent?.name ?? "none"} finalOutput="${rawFinalOutput}"`
           );
+          // KI-6: gpt-4.1-mini sometimes writes write_checklist's own argument JSON as its
+          // reply text instead of calling the tool — never show that raw shape to the user,
+          // whatever the prompt was supposed to prevent (see isLeakedChecklistJson's comment).
+          const leakedChecklistJson = isLeakedChecklistJson(rawFinalOutput);
+          if (leakedChecklistJson) {
+            devLog(
+              `[agent:runStream] requestId=${requestId} lastAgent=${result.lastAgent?.name ?? "none"} suppressed a leaked write_checklist JSON reply: "${rawFinalOutput}"`
+            );
+          }
+          const finalOutput = leakedChecklistJson
+            ? "Done — I hit a formatting glitch relaying that. Ask me to summarize what I found and I'll answer properly."
+            : rawFinalOutput;
           appendMessage({
             role: "assistant",
             text: finalOutput || "(no response)",

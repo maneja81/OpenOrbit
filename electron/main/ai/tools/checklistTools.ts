@@ -43,6 +43,26 @@ export function writeChecklist(
 /** Builds a write_checklist tool instance bound to the calling agent's own name and the
  * current turn's traceId, so a write always lands under the right (trace, agent) slice —
  * see replaceChecklistForAgent's own comment for why that scoping matters. */
+/** KI-6: gpt-4.1-mini sometimes writes the write_checklist call's own argument shape as its
+ * *reply text* instead of actually invoking the tool — the model treats "report my plan" as
+ * something to describe rather than call. Reuses writeChecklistParams itself (the exact
+ * shape a real call would validate against) so this can only match a genuine leaked-JSON
+ * reply, never misfire on ordinary prose that happens to mention "items" or "status". Used
+ * as a last-resort guard at the point a run's finalOutput becomes the user-visible reply
+ * (ipc/agent.ts, tasks/scheduler.ts) — prompting alone hasn't reliably prevented this (see
+ * KI-1), and showing raw JSON to the user is worse than showing nothing useful at all. */
+export function isLeakedChecklistJson(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return false;
+  }
+  return writeChecklistParams.safeParse(parsed).success;
+}
+
 export function createWriteChecklistTool(agentName: string, traceId: string) {
   return tool({
     name: "write_checklist",

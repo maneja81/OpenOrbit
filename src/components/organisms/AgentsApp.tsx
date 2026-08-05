@@ -1052,6 +1052,11 @@ export default function AgentsApp() {
           // inline card would otherwise leave the input live while a run is paused. Same
           // reasoning extends to a pending question — always an in-chat card, never a modal.
           sendDisabled={pendingApproval !== null || pendingQuestion !== null}
+          // KI-3: question takes priority in the (impossible in practice, but not
+          // type-impossible) case both are somehow pending at once — either way the
+          // placeholder must never claim "approve or decline" when a question is why send
+          // is blocked, since it isn't an approval gate.
+          sendDisabledReason={pendingQuestion !== null ? "question" : pendingApproval !== null ? "approval" : undefined}
           onShowFullHistory={() => setChatHistoryOpen(true)}
           autoLoadRemoteImages={settings.remoteImagesAutoLoad}
           onSend={() => handleSend()}
