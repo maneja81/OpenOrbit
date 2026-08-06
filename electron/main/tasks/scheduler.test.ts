@@ -1,7 +1,11 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 const runMock = vi.hoisted(() => vi.fn());
-vi.mock("@openai/agents", () => ({ run: runMock }));
+// AgentMock: replyGuard.ts's repair path constructs a real `new Agent(...)` — a plain
+// constructor stub is enough since runMock (shared with the main task run) ignores the
+// instance it's called with anyway.
+const AgentMock = vi.hoisted(() => vi.fn());
+vi.mock("@openai/agents", () => ({ run: runMock, Agent: AgentMock }));
 
 const buildOrchestratorMock = vi.hoisted(() => vi.fn());
 vi.mock("../ai/agents", () => ({
@@ -15,6 +19,9 @@ vi.mock("../ai/mcp", () => ({ closeMcpServers: closeMcpServersMock }));
 const getDueTasksMock = vi.hoisted(() => vi.fn<(nowIso: string) => import("../db/tasksStore").TaskRow[]>(() => []));
 const recordTaskRunMock = vi.hoisted(() => vi.fn());
 vi.mock("../db/tasksStore", () => ({ getDueTasks: getDueTasksMock, recordTaskRun: recordTaskRunMock }));
+
+const cancelPendingForTraceMock = vi.hoisted(() => vi.fn());
+vi.mock("../db/checklistStore", () => ({ cancelPendingForTrace: cancelPendingForTraceMock }));
 
 const notificationConstructorMock = vi.hoisted(() => vi.fn());
 vi.mock("electron", () => {
@@ -69,6 +76,7 @@ beforeEach(() => {
   closeMcpServersMock.mockReset();
   buildOrchestratorMock.mockReset();
   buildOrchestratorMock.mockResolvedValue({ agent: ORCHESTRATOR, mcpServers: [], allAgents: [ORCHESTRATOR] });
+  cancelPendingForTraceMock.mockReset();
 });
 
 // KI-5: a scheduled task's run() call previously never inspected result.interruptions, so a
@@ -98,6 +106,61 @@ describe("runPromptTask", () => {
     expect(output).toContain("Blocked");
     expect(output).toContain("send_email");
     expect(output).not.toBe("");
+    // A run that stops here unattended must not leave a checklist item stuck "in progress"
+    // forever — same reasoning as ipc/agent.ts's abandonApprovalsFor on the interactive path.
+    expect(cancelPendingForTraceMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes a fresh traceId to buildOrchestrator on every run, distinct per call", async () => {
+    runMock.mockResolvedValue({ finalOutput: "ok", interruptions: [] });
+
+    await runPromptTask(makeTask());
+    await runPromptTask(makeTask());
+
+    const traceIds = buildOrchestratorMock.mock.calls.map((call) => call[1]);
+    expect(traceIds).toHaveLength(2);
+    expect(typeof traceIds[0]).toBe("string");
+    expect(traceIds[0]).not.toBe(traceIds[1]);
+  });
+
+  it("cancels pending checklist items when the run throws", async () => {
+    runMock.mockRejectedValue(new Error("boom"));
+
+    await expect(runPromptTask(makeTask())).rejects.toThrow("boom");
+    expect(cancelPendingForTraceMock).toHaveBeenCalledTimes(1);
+  });
+
+  // known-issues.md KI-6: a leaked write_checklist argument shape must never reach a task's
+  // recorded result/notification text — this is the guard's actual wiring, not just the
+  // isLeakedChecklistJson predicate in isolation (see checklistTools.test.ts for that).
+  it("repairs a leaked write_checklist JSON reply into a natural-language answer (KI-6/KI-1)", async () => {
+    runMock
+      .mockResolvedValueOnce({
+        finalOutput: '{"items":[{"text":"Answer greeting directly, no tools needed","status":"pending"}]}',
+        interruptions: [],
+      })
+      // The repair agent's own run() call — replyGuard.ts's rewriter.
+      .mockResolvedValueOnce({ finalOutput: "Hi there! How can I help today?" });
+    const output = await runPromptTask(makeTask());
+    expect(output).toBe("Hi there! How can I help today?");
+  });
+
+  it("falls back to an honest generic message if the repair attempt also produces JSON", async () => {
+    runMock
+      .mockResolvedValueOnce({
+        finalOutput: '{"items":[{"text":"Check location setting","status":"completed"}]}',
+        interruptions: [],
+      })
+      .mockResolvedValueOnce({ finalOutput: '{"items":[{"text":"still leaking","status":"pending"}]}' });
+    const output = await runPromptTask(makeTask());
+    expect(output).not.toContain("{");
+    expect(output).not.toContain("items");
+  });
+
+  it("leaves an ordinary finalOutput untouched", async () => {
+    runMock.mockResolvedValue({ finalOutput: "Your location is off. Want me to enable it?", interruptions: [] });
+    const output = await runPromptTask(makeTask());
+    expect(output).toBe("Your location is off. Want me to enable it?");
   });
 });
 

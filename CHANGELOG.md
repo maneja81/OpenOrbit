@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-08-06
+
+### Added
+
+- **A `write_checklist` tool** giving Orbit and Cipher a live plan/progress widget in
+  chat, and an **`ask_user` tool** for structured, one-at-a-time questions rendered as
+  a real quick-reply card instead of plain chat text.
+- **An LLM-generated onboarding greeting**, a live "Thinking" indicator during a run,
+  a `chat-visible-conversations` setting, and agent name/tagline suggestions when
+  creating a custom agent.
+
+### Changed
+
+- Built-in specialist agents (Cipher, Atlas, Explorer, Chrono) are now called as
+  tools from the orchestrator rather than via handoffs, so each stays a fully
+  independent, memoryless sub-run per call.
+
+### Fixed
+
+- **Cipher could get stuck in a confirmation loop** — repeating "please confirm" for
+  a change the user had already approved, because a specialist has no memory of its
+  own prior turn once it ends. The orchestrator now states the approval explicitly
+  in the handoff instead of repeating the original request.
+- **Cipher (or Orbit relaying its output) could claim an agent was created or
+  updated when no such tool call happened in that run.** A new guard checks every
+  reply that reads as a creation/update success against the actual tool calls made
+  in that run and corrects it if they don't match.
+- **The chat input box wasn't vertically centered against its buttons** on a
+  single-line message; alignment now only shifts to the top once the input grows to
+  multiple lines.
+- **Search could fabricate community quotes, usernames, or commenters** when no real
+  discussion was found. Explorer now says so instead of inventing a voice, and the
+  same no-fabrication rule was extended app-wide to cover quotes and people, not just
+  figures and records.
+- **`orchestratorPromptOverride` and Orbit's own tool/connector/MCP attachments were
+  writable through Cipher's general settings tool**, reopening a privilege-escalation
+  path the settings protection list was meant to close. Moved back under the
+  protected-settings list.
+- Two unbounded LLM calls (onboarding identity suggestions, the onboarding greeting)
+  now have explicit timeouts with a fallback instead of hanging the UI indefinitely.
+- The "type anywhere focuses chat input" behavior no longer bypasses a disabled send
+  state.
+
 ## [0.1.1] — 2026-08-05
 
 ### Added
@@ -448,6 +491,7 @@ build from source.
   low), `fast-csv` (denial of service, low), and `exceljs` 3.4.0 → 3.10.0.
   ([#5](https://github.com/maneja81/OpenOrbit/pull/5))
 
-[Unreleased]: https://github.com/maneja81/OpenOrbit/compare/v0.1.1...develop
+[Unreleased]: https://github.com/maneja81/OpenOrbit/compare/v0.1.2...develop
+[0.1.2]: https://github.com/maneja81/OpenOrbit/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/maneja81/OpenOrbit/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/maneja81/OpenOrbit/releases/tag/v0.1.0

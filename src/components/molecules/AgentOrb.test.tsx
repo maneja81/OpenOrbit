@@ -20,6 +20,7 @@ const agent: AgentLayoutItem = {
   http_tool_collection_ids: "[]",
   provider_id: "",
   toolNames: ["search_knowledge"],
+  orchestratorToolName: "atlas",
   connectorToolCount: 0,
   angle: 0,
   orbitTime: 0,

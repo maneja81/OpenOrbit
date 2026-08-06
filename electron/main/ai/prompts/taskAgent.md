@@ -41,4 +41,4 @@ After a successful tool call, tell {{userName}} plainly what happened (created/u
 
 ## Handback
 
-When your task is complete, or if the request is outside task/reminder management, say so and indicate that {{agentName}} is ready to continue.
+{{agentName}} reads your output, not {{userName}} directly, and may fold it into its own reply — so when your task is complete, or if the request is outside task/reminder management, give a complete, self-contained answer (what was created/updated/found, and when it's next due) rather than a fragment that assumes {{agentName}} already has the context.

@@ -792,6 +792,53 @@ svg#oc {
   font-size: 12px;
 }
 
+/* A finished turn with no tool calls — nothing to expand, so no chevron/button semantics,
+   just the plain "Thought for Ns" line at the same size/color as the interactive version. */
+.thinking-toggle-btn.thinking-toggle-static {
+  cursor: default;
+}
+
+.thinking-toggle-btn:disabled {
+  cursor: default;
+}
+
+/* The live indicator's own three dots, independent of ChatBubble's typing indicator (which
+   only appears once text starts streaming) — this is what shows during the silent gap
+   between send and the first token. */
+.thinking-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.thinking-dots span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.35;
+  animation: thinking-dot-pulse 1.2s ease-in-out infinite;
+}
+
+.thinking-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.thinking-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes thinking-dot-pulse {
+  0%,
+  80%,
+  100% {
+    opacity: 0.35;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
 .thinking-steps {
   display: flex;
   flex-direction: column;
@@ -1250,8 +1297,16 @@ svg#oc {
 
 .input-top {
   display: flex;
-  align-items: flex-end;
+  /* Centered by default (the resting single-line state) — flips to flex-end once the
+     textarea has actually grown past one line, so the mic/send buttons stay pinned to the
+     bottom row as it grows instead of floating to a moving vertical center. See KI-20 and
+     the resize() function in ChatInputBar.tsx, which toggles .multi-line. */
+  align-items: center;
   padding: 4px 8px 4px 4px;
+}
+
+.input-top.multi-line {
+  align-items: flex-end;
 }
 
 /* The textarea no longer carries its own chrome — the card owns the border, background and
@@ -2000,6 +2055,44 @@ svg#oc {
   margin: 2px 0 0;
   font-size: 11.5px;
   color: rgba(150, 190, 230, 0.55);
+}
+
+.detail-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+/* Transient confirmation after a save — user-driven or Cipher-driven via settings:update —
+   fades out on its own rather than needing to be dismissed. */
+.settings-saved-pill {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  background: rgba(80, 220, 150, 0.12);
+  border: 0.5px solid rgba(80, 220, 150, 0.3);
+  color: #7ee8b0;
+  font-size: 11.5px;
+  font-weight: 600;
+  animation: settings-saved-fade-in 0.15s ease-out;
+}
+
+.settings-saved-pill i {
+  font-size: 11px;
+}
+
+@keyframes settings-saved-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .window-close {
@@ -3262,6 +3355,97 @@ svg#oc {
   font-size: 10.5px;
 }
 
+/* Checklist widget */
+
+.checklist-agent-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.checklist-agent-group + .checklist-agent-group {
+  margin-top: 10px;
+}
+
+.checklist-agent-label {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(200, 230, 255, 0.45);
+}
+
+.checklist-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.checklist-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  color: rgba(200, 230, 255, 0.55);
+}
+
+.checklist-row-icon {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: rgba(200, 230, 255, 0.35);
+}
+
+.checklist-row-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checklist-row--in_progress {
+  color: #c8e6ff;
+}
+
+.checklist-row--in_progress .checklist-row-icon {
+  color: #7ec8ff;
+  animation: checklist-spin 1s linear infinite;
+}
+
+.checklist-row--completed {
+  color: rgba(200, 230, 255, 0.4);
+}
+
+.checklist-row--completed .checklist-row-icon {
+  color: #6fd68a;
+}
+
+.checklist-row--completed .checklist-row-text {
+  text-decoration: line-through;
+  text-decoration-color: rgba(200, 230, 255, 0.25);
+}
+
+.checklist-row--cancelled {
+  color: rgba(200, 230, 255, 0.3);
+}
+
+.checklist-row--cancelled .checklist-row-icon {
+  color: rgba(255, 130, 130, 0.6);
+}
+
+.checklist-row--cancelled .checklist-row-text {
+  text-decoration: line-through;
+  text-decoration-color: rgba(200, 230, 255, 0.2);
+}
+
+@keyframes checklist-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Knowledge widget */
 
 .kw-dropzone {
@@ -4326,6 +4510,42 @@ svg#oc {
   color: #ff8080;
 }
 
+.add-agent-suggest-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: -4px;
+}
+
+.add-agent-suggest-row small {
+  font-size: 11px;
+  color: rgba(150, 190, 230, 0.45);
+}
+
+.add-agent-suggest-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 10px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  background: rgba(167, 139, 250, 0.12);
+  border: 0.5px solid rgba(167, 139, 250, 0.35);
+  color: var(--purple);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.add-agent-suggest-btn:hover:not(:disabled) {
+  background: rgba(167, 139, 250, 0.2);
+}
+
+.add-agent-suggest-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .add-agent-form-actions {
   display: flex;
   justify-content: flex-end;
@@ -4998,6 +5218,158 @@ svg#oc {
 }
 
 .tool-approval-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ---- In-chat ask_user question card ---- */
+/* Same placement/pause semantics as .tool-approval-card, blue-keyed instead of amber since
+   this isn't a "this changes something" gate — it's a conversational question. */
+
+.ask-user-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 8px 0 4px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(100, 170, 255, 0.05);
+  border: 0.5px solid rgba(100, 170, 255, 0.25);
+}
+
+.ask-user-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: #d8ecff;
+  line-height: 1.45;
+}
+
+.ask-user-card-head i {
+  font-size: 15px;
+  color: #7ec8ff;
+  flex-shrink: 0;
+}
+
+.ask-user-card-head strong {
+  color: #7ec8ff;
+  font-weight: 600;
+}
+
+.ask-user-card-question {
+  margin: 0;
+  font-size: 13px;
+  color: rgba(200, 230, 255, 0.9);
+  line-height: 1.5;
+}
+
+.ask-user-card-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ask-user-card-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 0.5px solid rgba(100, 170, 255, 0.15);
+  color: rgba(200, 230, 255, 0.9);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.ask-user-card-option:hover {
+  background: rgba(100, 170, 255, 0.1);
+  border-color: rgba(100, 170, 255, 0.35);
+}
+
+.ask-user-card-option-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 5px;
+  background: rgba(100, 170, 255, 0.15);
+  color: #7ec8ff;
+  font-size: 10.5px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.ask-user-card-option-label {
+  flex: 1;
+}
+
+.ask-user-card-option--input {
+  cursor: default;
+  gap: 8px;
+}
+
+.ask-user-card-option--input i {
+  color: rgba(200, 230, 255, 0.4);
+  font-size: 13px;
+}
+
+.ask-user-card-option--input input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: rgba(200, 230, 255, 0.9);
+  font-size: 12.5px;
+}
+
+.ask-user-card-text-form {
+  display: flex;
+  gap: 8px;
+}
+
+.ask-user-card-text-form input {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 0.5px solid rgba(100, 170, 255, 0.15);
+  color: rgba(200, 230, 255, 0.9);
+  font-size: 12.5px;
+  outline: none;
+}
+
+.ask-user-card-text-form input:focus {
+  border-color: rgba(100, 170, 255, 0.4);
+}
+
+.ask-user-card-expiry {
+  margin: 0;
+  font-size: 11.5px;
+  color: rgba(200, 230, 255, 0.55);
+}
+
+.ask-user-card-expiry strong {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: rgba(200, 230, 255, 0.8);
+}
+
+.ask-user-card-expiry--soon {
+  color: #ffc97e;
+}
+
+.ask-user-card-expiry--soon strong {
+  color: #ffc97e;
+}
+
+.ask-user-card-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;

@@ -44,6 +44,10 @@ function renderPanel(messages: ChatMessage[], overrides = {}) {
       voiceEnabled={true}
       agents={[]}
       onShowFullHistory={onShowFullHistory}
+      // msg() alternates user/assistant, so 5 conversations = 10 messages — same visible
+      // count the old flat MAX_VISIBLE_MESSAGES=10 cap produced, which is what the tests
+      // below (written for that flat cap) still assert against.
+      visibleConversationCount={5}
       onSend={vi.fn()}
       onStartVoice={vi.fn()}
       onStopVoice={vi.fn()}
@@ -65,12 +69,43 @@ describe("ChatPanel", () => {
     expect(container.querySelectorAll(".turn-row .dot")).toHaveLength(2);
   });
 
-  it("caps the log at ten messages and keeps the newest", () => {
+  it("caps the log at visibleConversationCount conversations and keeps the newest", () => {
+    // 12 messages at the default visibleConversationCount=5 (see renderPanel) = the last 5
+    // conversations = 10 messages, since msg() alternates user/assistant 1:1.
     const { container } = renderPanel(Array.from({ length: 12 }, (_, i) => msg(i)));
     expect(container.querySelectorAll(".turn")).toHaveLength(10);
     const text = container.querySelector("#chat-log")?.textContent ?? "";
     expect(text).toContain("message 11");
     expect(text).not.toContain("message 0");
+  });
+
+  it("shows only the single in-progress conversation at the real default of 1", () => {
+    const { container } = renderPanel(Array.from({ length: 6 }, (_, i) => msg(i)), {
+      visibleConversationCount: 1,
+    });
+    expect(container.querySelectorAll(".turn")).toHaveLength(2);
+    const text = container.querySelector("#chat-log")?.textContent ?? "";
+    expect(text).toContain("message 5");
+    expect(text).not.toContain("message 3");
+  });
+
+  it("keeps a conversation's extra trailing messages together rather than splitting on a flat count", () => {
+    // Turn 2 (a user message plus three assistant messages — e.g. a streamed reply, a
+    // config-ack notice, and an onboarding-failure follow-up) must not be cut mid-turn.
+    const messages: ChatMessage[] = [
+      msg(0),
+      msg(1, { text: "reply 1" }),
+      msg(2, { role: "user", text: "message 2" }),
+      msg(3, { role: "assistant", text: "reply 2a" }),
+      msg(4, { role: "assistant", text: "reply 2b" }),
+      msg(5, { role: "assistant", text: "reply 2c" }),
+    ];
+    const { container } = renderPanel(messages, { visibleConversationCount: 1 });
+    expect(container.querySelectorAll(".turn")).toHaveLength(4);
+    const text = container.querySelector("#chat-log")?.textContent ?? "";
+    expect(text).toContain("reply 2c");
+    expect(text).toContain("reply 2a");
+    expect(text).not.toContain("reply 1");
   });
 
   it("offers full history only once there are older messages", () => {
@@ -178,6 +213,39 @@ describe("ChatPanel", () => {
   it("shows no steps disclosure for a message without steps", () => {
     const { container } = renderPanel([msg(1)]);
     expect(container.querySelector(".thinking-toggle")).toBeNull();
+  });
+
+  it("shows a plain non-interactive duration line for a finished turn with no tool calls", () => {
+    const { container } = renderPanel([msg(1, { elapsedMs: 3400 })]);
+    const toggle = container.querySelector(".thinking-toggle-static");
+    expect(toggle?.textContent).toBe("Thought for 3s");
+    expect(toggle?.tagName).toBe("SPAN");
+    expect(container.querySelector(".thinking-toggle button")).toBeNull();
+  });
+
+  it("shows an expandable duration toggle once a finished turn has tool-call steps", () => {
+    const { container } = renderPanel([
+      msg(1, { elapsedMs: 12000, steps: [{ type: "tool_called", label: "get_settings" }] }),
+    ]);
+    const btn = container.querySelector(".thinking-toggle-btn") as HTMLButtonElement;
+    expect(btn.textContent).toBe("Thought for 12s");
+    expect(container.querySelector(".thinking-steps")).toBeNull();
+    fireEvent.click(btn);
+    expect(container.querySelector(".thinking-steps")?.textContent).toContain("get_settings");
+  });
+
+  it("renders the live indicator while a turn is in flight, not a completed toggle", () => {
+    const { container } = renderPanel([msg(1)], {
+      liveStartedAt: Date.now(),
+      liveSteps: [{ type: "interpreting", label: "Interpreting…" }],
+    });
+    expect(container.querySelector(".thinking-dots")).not.toBeNull();
+    expect(container.querySelector(".thinking-toggle-btn")?.textContent).toContain("Interpreting…");
+  });
+
+  it("omits the live indicator once nothing is running", () => {
+    const { container } = renderPanel([msg(1)], { liveStartedAt: null });
+    expect(container.querySelector(".thinking-dots")).toBeNull();
   });
 
   it("starts at the bottom, so no jump button is offered", () => {

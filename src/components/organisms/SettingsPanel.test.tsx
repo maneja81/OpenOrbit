@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import SettingsPanel from "./SettingsPanel";
 import { mergeWithDefaults } from "@/lib/settings";
@@ -19,6 +19,7 @@ function renderDangerZone(onReset: () => Promise<void>) {
       initialSection="danger"
       onClose={vi.fn()}
       settings={mergeWithDefaults({})}
+      savedVersion={0}
       sessionElapsedMs={0}
       onUpdate={vi.fn()}
       onReset={onReset}
@@ -124,6 +125,7 @@ describe("orchestrator prompt override", () => {
         open
         onClose={vi.fn()}
         settings={mergeWithDefaults({ orchestratorPromptOverride: overrideValue })}
+        savedVersion={0}
         sessionElapsedMs={0}
         onUpdate={onUpdate}
         onReset={vi.fn()}
@@ -189,6 +191,7 @@ describe("Privacy & Safety", () => {
         open
         onClose={vi.fn()}
         settings={mergeWithDefaults(settingsPatch)}
+        savedVersion={0}
         sessionElapsedMs={0}
         onUpdate={onUpdate}
         onReset={vi.fn()}
@@ -275,6 +278,7 @@ describe("the orchestrator's enabled toggle", () => {
         open
         onClose={vi.fn()}
         settings={mergeWithDefaults({})}
+        savedVersion={0}
         sessionElapsedMs={0}
         onUpdate={onUpdate}
         onReset={vi.fn()}
@@ -320,6 +324,7 @@ describe("running onboarding again", () => {
         open
         onClose={onClose}
         settings={mergeWithDefaults({ onboardingDone: true })}
+        savedVersion={0}
         sessionElapsedMs={0}
         onUpdate={onUpdate}
         onReset={vi.fn()}
@@ -367,6 +372,7 @@ describe("AI Models section", () => {
         open
         onClose={vi.fn()}
         settings={settings}
+        savedVersion={0}
         sessionElapsedMs={0}
         onUpdate={vi.fn()}
         onReset={vi.fn()}
@@ -487,6 +493,7 @@ describe("connector-connect acknowledgement", () => {
         open
         onClose={vi.fn()}
         settings={mergeWithDefaults({})}
+        savedVersion={0}
         sessionElapsedMs={0}
         onUpdate={vi.fn()}
         onReset={vi.fn()}
@@ -529,5 +536,54 @@ describe("connector-connect acknowledgement", () => {
         agentNames: ["Cipher"],
       })
     );
+  });
+});
+
+describe("Saved pill", () => {
+  function baseProps(savedVersion: number) {
+    return {
+      open: true as const,
+      onClose: vi.fn(),
+      settings: mergeWithDefaults({}),
+      savedVersion,
+      sessionElapsedMs: 0,
+      onUpdate: vi.fn(),
+      onReset: vi.fn(async () => {}),
+      agents: [],
+      onUpdateAgent: vi.fn(),
+      onCreateAgent: vi.fn(),
+      onDeleteAgent: vi.fn(),
+      onExportAgent: vi.fn(),
+      onExportAllAgents: vi.fn(),
+      onImportAgents: vi.fn(),
+      onConfigAck: vi.fn(),
+    };
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("says nothing on first mount even though savedVersion already has a value", () => {
+    // useSettings starts savedVersion at 0 and only bumps it on a real save — but a panel
+    // that mounted after some other save already happened would otherwise see a "changed"
+    // value on its very first render and misread that as its own save.
+    render(<SettingsPanel {...baseProps(3)} />);
+    expect(screen.queryByText("Saved")).not.toBeInTheDocument();
+  });
+
+  it("shows Saved when savedVersion bumps after mount, and hides it after 3s", () => {
+    vi.useFakeTimers();
+    const { rerender } = render(<SettingsPanel {...baseProps(0)} />);
+    expect(screen.queryByText("Saved")).not.toBeInTheDocument();
+
+    rerender(<SettingsPanel {...baseProps(1)} />);
+    expect(screen.getByText("Saved")).toBeInTheDocument();
+
+    act(() => vi.advanceTimersByTime(2999));
+    expect(screen.getByText("Saved")).toBeInTheDocument();
+
+    act(() => vi.advanceTimersByTime(1));
+    expect(screen.queryByText("Saved")).not.toBeInTheDocument();
   });
 });

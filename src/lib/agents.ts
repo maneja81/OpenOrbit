@@ -2,8 +2,21 @@ export type AgentId = string;
 
 /** Mirrors the orchestrator's fixed `tools: [...]` array in buildOrchestrator()
  * (electron/main/ai/agents.ts) — the orchestrator has no AgentRow of its own (its
- * name/model come from settings), so this list is static rather than server-derived. */
-export const ORCHESTRATOR_TOOL_NAMES = ["search_conversation_history", "get_current_location", "save_user_info"];
+ * name/model come from settings), so this list is static rather than server-derived.
+ * The four specialist names (cipher/atlas/explorer/chrono) are included because the four
+ * built-in agents are wired in as callable tools, not handoff targets — agentAsTool names
+ * each tool from `slugify(row.name)` with hyphens turned to underscores, which is a no-op
+ * for these four single-word names. A custom agent's own tool name isn't listed here since
+ * the roster is dynamic; server-derived agent lists already cover those separately. */
+export const ORCHESTRATOR_TOOL_NAMES = [
+  "search_conversation_history",
+  "get_current_location",
+  "save_user_info",
+  "cipher",
+  "atlas",
+  "explorer",
+  "chrono",
+];
 
 /**
  * A single step event in a run. Two sources: the main process forwards real SDK run items
