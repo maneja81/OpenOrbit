@@ -27,13 +27,25 @@ vi.mock("../security/secretStorage", () => ({
 }));
 
 /** What configureChatClient told the SDK, per test. */
-const sdkCalls: { api: string[]; clients: { baseURL?: string }[] } = { api: [], clients: [] };
+const sdkCalls: {
+  api: string[];
+  clients: { baseURL?: string }[];
+  modelProviders: { openAIClient?: { baseURL?: string }; useResponses?: boolean }[];
+} = { api: [], clients: [], modelProviders: [] };
 vi.mock("@openai/agents", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@openai/agents")>();
   return {
     ...actual,
     setOpenAIAPI: (v: string) => sdkCalls.api.push(v),
     setDefaultOpenAIClient: (c: { baseURL?: string }) => sdkCalls.clients.push(c),
+    // Records the options the provider was built with — the client it is pinned to is the whole
+    // point, since OpenAIProvider caches whatever client it first resolves.
+    OpenAIProvider: class {
+      constructor(options: { openAIClient?: { baseURL?: string }; useResponses?: boolean }) {
+        sdkCalls.modelProviders.push(options);
+      }
+    },
+    setDefaultModelProvider: () => {},
   };
 });
 
@@ -314,6 +326,7 @@ describe("configureChatClient", () => {
     providerCredentials.clear();
     sdkCalls.api.length = 0;
     sdkCalls.clients.length = 0;
+    sdkCalls.modelProviders.length = 0;
     chatProviderId = "";
   });
 
@@ -344,6 +357,45 @@ describe("configureChatClient", () => {
     providerCredentials.set("openai", { apiUrl: "https://api.openai.com/v1", apiKey: "sk-oai" });
     configureChatClient();
     expect(sdkCalls.api).toEqual(["chat_completions", "responses"]);
+  });
+
+  // The bug this guards: OpenAIProvider resolves the default client lazily and then caches it
+  // for the life of the instance, and the default provider is a module-level singleton. So the
+  // app's first run captured its host permanently, and switching provider in Settings moved the
+  // setting, the model id and every inheriting agent while the requests kept going to the old
+  // host until restart. Observed live after Local AI -> OpenAI: `404 model 'gpt-4.1-mini' not
+  // found`, which is Ollama's error text, for a slot pointed at api.openai.com.
+  it("installs a model provider pinned to the current host, every time", () => {
+    chatProviderId = "local";
+    providerCredentials.set("local", { apiUrl: "http://localhost:11434/v1", apiKey: "" });
+    configureChatClient();
+    expect(sdkCalls.modelProviders.at(-1)?.openAIClient?.baseURL).toBe("http://localhost:11434/v1");
+
+    chatProviderId = "openai";
+    providerCredentials.set("openai", { apiUrl: "https://api.openai.com/v1", apiKey: "sk-oai" });
+    configureChatClient();
+
+    expect(sdkCalls.modelProviders).toHaveLength(2);
+    expect(sdkCalls.modelProviders.at(-1)?.openAIClient?.baseURL).toBe("https://api.openai.com/v1");
+  });
+
+  it("pins the provider to the same client it hands the SDK as default", () => {
+    chatProviderId = "openrouter";
+    providerCredentials.set("openrouter", { apiUrl: "https://openrouter.ai/api/v1", apiKey: "sk-or" });
+    configureChatClient();
+    expect(sdkCalls.modelProviders.at(-1)?.openAIClient).toBe(sdkCalls.clients.at(-1));
+  });
+
+  it("tells the provider which API surface the host serves", () => {
+    chatProviderId = "anthropic";
+    providerCredentials.set("anthropic", { apiUrl: "https://api.anthropic.com/v1", apiKey: "sk-ant" });
+    configureChatClient();
+    expect(sdkCalls.modelProviders.at(-1)?.useResponses).toBe(false);
+
+    chatProviderId = "openai";
+    providerCredentials.set("openai", { apiUrl: "https://api.openai.com/v1", apiKey: "sk-oai" });
+    configureChatClient();
+    expect(sdkCalls.modelProviders.at(-1)?.useResponses).toBe(true);
   });
 
   it("points the default client at the selected provider's host", () => {

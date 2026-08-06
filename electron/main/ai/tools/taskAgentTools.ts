@@ -17,6 +17,22 @@ export function promptTaskNeedsApproval(prompt: string | null): boolean {
   return prompt !== null;
 }
 
+/** Finds an already-pending task with the same title as one being created.
+ *
+ * The orchestrator passes a specialist only the `input` string for the current turn, so
+ * "call Amar at 10am instead" arrives at Chrono looking exactly like a new reminder — and a
+ * second row is created while the 9am one stays live. Reported rather than blocked: two
+ * same-named tasks at different times are sometimes genuinely wanted, and silently refusing
+ * a create the user did ask for is the worse failure. Exported for direct unit testing. */
+export function findDuplicatePendingTask(
+  title: string,
+  tasks: { id: string; title: string; status: string; next_run_at: string | null }[]
+): { id: string; nextRunAt: string | null } | null {
+  const normalized = title.trim().toLowerCase();
+  const match = tasks.find((t) => t.status === "pending" && t.title.trim().toLowerCase() === normalized);
+  return match ? { id: match.id, nextRunAt: match.next_run_at } : null;
+}
+
 export const createTaskTool = tool({
   name: "create_task",
   description:
@@ -24,7 +40,9 @@ export const createTaskTool = tool({
     "Set prompt for a task that runs through an agent when due — set recurrenceIntervalMs to make it repeat " +
     "every that many milliseconds after each run, or omit it for a one-shot run. recurrenceParams are dynamic " +
     "values substituted into {{key}} placeholders in the prompt at run time. Creating a prompt task pauses for " +
-    "the user's approval; a plain reminder (no prompt) does not.",
+    "the user's approval; a plain reminder (no prompt) does not. If the request could be changing something that " +
+    "already exists (a new time, a new title for the same thing), call list_tasks first and use update_task on " +
+    "that row instead — this tool always adds a new task, it never replaces one.",
   parameters: z.object({
     title: z.string().min(1),
     notes: z.string().nullable(),
@@ -39,6 +57,7 @@ export const createTaskTool = tool({
   }),
   needsApproval: async (_ctx, { prompt }) => promptTaskNeedsApproval(prompt),
   execute: async ({ title, notes, dueAt, prompt, promptTargetAgentId, recurrenceIntervalMs, recurrenceParams }) => {
+    const duplicate = findDuplicatePendingTask(title, listTasks());
     const created = createTask({
       title,
       notes: notes ?? undefined,
@@ -48,7 +67,17 @@ export const createTaskTool = tool({
       recurrenceIntervalMs: recurrenceIntervalMs ?? undefined,
       recurrenceParams: recurrenceParams ?? undefined,
     });
-    return { id: created.id, title: created.title, nextRunAt: created.next_run_at };
+    return {
+      id: created.id,
+      title: created.title,
+      nextRunAt: created.next_run_at,
+      ...(duplicate && {
+        duplicateWarning:
+          `A pending task titled "${created.title}" already existed (id ${duplicate.id}` +
+          `${duplicate.nextRunAt ? `, due ${duplicate.nextRunAt}` : ""}) and both now exist. ` +
+          "If this was meant to change that one rather than add another, tell the user both exist and ask which they want.",
+      }),
+    };
   },
 });
 

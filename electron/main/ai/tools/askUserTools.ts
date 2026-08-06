@@ -2,9 +2,13 @@
  * Lets an agent ask the user one real, structured question and get an actual answer back —
  * not just a plan (that's write_checklist) or a yes/no gate (that's needsApproval). Built
  * because prompt instructions alone ("ask one question at a time") don't reliably hold
- * against a cost-tier model — see configAgent.md's history. A tool call that genuinely
- * pauses the run makes "one question per turn" true by construction: the model cannot make
- * a second ask_user call before the first one resolves.
+ * against a cost-tier model — see configAgent.md's history.
+ *
+ * This was originally assumed to make "one question at a time" true by construction, on the
+ * reasoning that a tool call blocking the run leaves no room for a second one. That was
+ * wrong — a model emits several tool calls in one turn and the SDK runs them concurrently —
+ * so the guarantee is enforced by the caller's serial queue instead (ai/serialQueue.ts),
+ * which orders questions and approval prompts together.
  *
  * Every agent (orchestrator, every built-in specialist, every custom agent) gets its own
  * bound instance via createAskUserTool(agentName, requestAnswer), same shape as
@@ -46,25 +50,21 @@ export const askUserFieldSchema = z.discriminatedUnion("type", [
     placeholder: z.string().optional().describe("The real default answer to use if this is optional and skipped, or times out."),
     required: z.boolean().describe("If true, the question cannot be skipped."),
   }),
-  z
-    .object({
-      type: z.literal("single_select"),
-      options: z
-        .array(z.object({ label: z.string(), value: z.string() }))
-        .min(1)
-        .describe("The choices to show, in order. The UI always adds its own free-text \"something else\" option too — don't include one yourself."),
-      placeholder: z
-        .string()
-        .optional()
-        .describe("The value (not label) of the option to use as the real default if this is optional and skipped, or times out."),
-      required: z.boolean().describe("If true, the question cannot be skipped."),
-    })
-    // KI-4: without this, a model could set placeholder to a string that isn't one of its
-    // own declared options — Skip would then submit a value the agent never actually offered.
-    .refine((field) => field.placeholder === undefined || field.options.some((o) => o.value === field.placeholder), {
-      message: "placeholder must match one of options[].value",
-      path: ["placeholder"],
-    }),
+  z.object({
+    type: z.literal("single_select"),
+    options: z
+      .array(z.object({ label: z.string(), value: z.string() }))
+      .min(1)
+      .describe("The choices to show, in order. The UI always adds its own free-text \"something else\" option too — don't include one yourself."),
+    placeholder: z
+      .string()
+      .optional()
+      .describe(
+        "The default answer if this is optional and skipped, or times out. Give one of options[].value — an " +
+          "option's label works too and is matched back to its value, and anything matching neither is dropped."
+      ),
+    required: z.boolean().describe("If true, the question cannot be skipped."),
+  }),
 ]);
 
 export const askUserParams = z.object({
@@ -86,13 +86,44 @@ export type AskUserParams = z.infer<typeof askUserParams>;
  * mechanism itself. Returns the answer text. */
 export type RequestAnswerFn = (agentName: string, question: string, field: AskUserField) => Promise<string>;
 
+/**
+ * Reconciles a single_select's `placeholder` with the options it actually offered.
+ *
+ * KI-4's invariant — Skip must never submit a value the agent didn't list — used to be a
+ * schema `.refine()`, which rejected the whole call. In practice the model sends the option's
+ * *label* where its value belongs ("Beginner" against `beginner`), and the SDK reports that
+ * back as a bare "InvalidToolInputError: Invalid JSON input for tool" with none of zod's
+ * message in it. The model can't see what it got wrong: it retried the identical placeholder,
+ * failed again, gave up on the tool and typed the question as plain text instead — losing an
+ * entire agent-creation flow to a capitalization difference.
+ *
+ * So the invariant is enforced here instead, where a near-miss can be repaired rather than
+ * being fatal: match the value, else match a label back to its value, else drop the
+ * placeholder entirely. Dropping lands on a state the app already handles — a placeholder-less
+ * optional question, which the model can and does send on its own (Skip submits empty, a
+ * timeout gives NO_ANSWER_TIMEOUT_SENTINEL) — whereas honouring an unlisted placeholder is
+ * the exact thing KI-4 forbids.
+ */
+export function normalizeAskUserField(field: AskUserField): AskUserField {
+  if (field.type !== "single_select" || field.placeholder === undefined) return field;
+  const wanted = field.placeholder.trim().toLowerCase();
+  const byValue = field.options.find((o) => o.value.trim().toLowerCase() === wanted);
+  const byLabel = field.options.find((o) => o.label.trim().toLowerCase() === wanted);
+  const matched = byValue ?? byLabel;
+  if (matched) return { ...field, placeholder: matched.value };
+  return { type: field.type, options: field.options, required: field.required };
+}
+
 export async function askUser(
   { question, field, rememberAsUserInfo }: AskUserParams,
   agentName: string,
   requestAnswer: RequestAnswerFn
 ): Promise<string> {
   devLog(`[ask_user] ${agentName} asked: ${question}`);
-  const answer = await requestAnswer(agentName, question, field);
+  // Normalized before the round-trip, not after: the renderer renders this exact field, and
+  // ipc/agent.ts derives its own timeout fallback from field.placeholder — both have to see
+  // the reconciled value, not the model's near-miss.
+  const answer = await requestAnswer(agentName, question, normalizeAskUserField(field));
   if (rememberAsUserInfo && answer !== NO_ANSWER_TIMEOUT_SENTINEL && answer !== ASK_USER_CANCELLED_SENTINEL) {
     appendUserInfoFact({ question, answer, askedBy: agentName });
   }

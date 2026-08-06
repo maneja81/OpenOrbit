@@ -63,6 +63,41 @@ export function isLeakedChecklistJson(text: string): boolean {
   return writeChecklistParams.safeParse(parsed).success;
 }
 
+/** The other shape the same failure takes, and the one seen in production far more often
+ * than the JSON one: instead of pasting the arguments, the model narrates the call as prose
+ * — "write_checklist with plan "…" completed", or just "write_checklist completed" — and
+ * that becomes the whole user-visible reply. Three consecutive turns shipped it, including
+ * one where a correct researched answer was already in hand and thrown away for this.
+ *
+ * Takes the tool names actually available to the agent that produced the reply, because
+ * nothing about this failure is specific to write_checklist — that is just the tool the
+ * prompt demands most insistently, so it is where the behavior showed up first. Any tool
+ * can be narrated instead of called. `write_checklist` stays in the set unconditionally so
+ * a caller that cannot enumerate its tools still catches the known case.
+ *
+ * Matched as the whole reply — opens with a bare tool name, carries no sentence break, and
+ * closes on a status word — rather than by length, which was the first attempt and wrongly
+ * caught a genuine explanation of what a tool does (something the user can legitimately ask
+ * for, and which a repair agent would answer worse than the model already did). A real
+ * answer never both opens with a tool's name and ends on "completed". */
+const NARRATION_STATUS_WORDS = "completed|complete|done|updated|called|executed|finished";
+
+function escapeForRegex(literal: string): string {
+  return literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export function isLeakedToolNarration(text: string, toolNames: readonly string[] = []): boolean {
+  const names = [...new Set(["write_checklist", ...toolNames])].filter((n) => n.length > 0);
+  const alternation = names.map(escapeForRegex).join("|");
+  const pattern = new RegExp(`^\`?(${alternation})\`?\\b[^.!?]*\\b(${NARRATION_STATUS_WORDS})\\.?$`, "i");
+  return pattern.test(text.trim());
+}
+
+/** Every shape of the leak — the single check a user-visible reply goes through. */
+export function isLeakedChecklistReply(text: string, toolNames: readonly string[] = []): boolean {
+  return isLeakedChecklistJson(text) || isLeakedToolNarration(text, toolNames);
+}
+
 export function createWriteChecklistTool(agentName: string, traceId: string) {
   return tool({
     name: "write_checklist",

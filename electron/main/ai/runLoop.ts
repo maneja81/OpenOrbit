@@ -11,6 +11,18 @@
  * completion and returns text — which is exactly the gap this file exists to close.
  */
 
+/**
+ * Turn budget for every run this app starts, top-level or nested.
+ *
+ * The SDK's own default is 10, which a real interview flow blows through: ask_user spends
+ * one turn per question by design, and Cipher's agent-creation flow routinely plans ten or
+ * more steps before it writes anything. That surfaced as MaxTurnsExceededError mid-question,
+ * losing answers the user had already given. 40 leaves room for a long interview plus its
+ * checklist and specialist calls, while still capping a genuinely runaway loop — an
+ * unbounded budget would just bill the user for it.
+ */
+export const MAX_TURNS_PER_RUN = 40;
+
 /** The subset of a (possibly resumed) run result this loop actually needs — structural
  * rather than the SDK's concrete RunResult/StreamedRunResult types, since callers may be
  * looking at either depending on whether they stream. */

@@ -12,10 +12,10 @@ import { Notification, BrowserWindow } from "electron";
 import { run, Agent } from "@openai/agents";
 import { buildOrchestrator, listAgents, RunSubAgentFn } from "../ai/agents";
 import { closeMcpServers } from "../ai/mcp";
-import { resolveApprovalsAndRun } from "../ai/runLoop";
+import { resolveApprovalsAndRun, MAX_TURNS_PER_RUN } from "../ai/runLoop";
 import { getDueTasks, recordTaskRun, TaskRow } from "../db/tasksStore";
 import { cancelPendingForTrace } from "../db/checklistStore";
-import { guardLeakedChecklistJson } from "../ai/replyGuard";
+import { guardLeakedChecklistReply, toolNamesOf } from "../ai/replyGuard";
 import { NO_ANSWER_TIMEOUT_SENTINEL, type RequestAnswerFn } from "../ai/tools/askUserTools";
 import { devLog } from "../devLog";
 import { parseStringMap } from "../db/jsonColumn";
@@ -28,13 +28,15 @@ import { extractApprovalMeta } from "../ai/runItemMeta";
 // back that it was blocked, rather than leaving buildOrchestrator with no runSubAgent to
 // give its wrapped specialist tools at all.
 const runSubAgentHeadless: RunSubAgentFn = async (agent: Agent, input: string, displayName: string) => {
-  const runOnce = (segmentInput: unknown) => run(agent, segmentInput as Parameters<typeof run>[1]);
+  const runOnce = (segmentInput: unknown) =>
+    run(agent, segmentInput as Parameters<typeof run>[1], { maxTurns: MAX_TURNS_PER_RUN });
   devLog(`[taskScheduler] running specialist=${displayName} headlessly`);
   const result = await resolveApprovalsAndRun(runOnce, input, async () => false);
   const output = result?.finalOutput ?? "";
   // KI-6: same guard as ipc/agent.ts's runSubAgent — a specialist leaking its own
-  // write_checklist JSON here would poison the orchestrator's context with raw JSON too.
-  return guardLeakedChecklistJson(output, input, agent.model, `specialist=${displayName}`);
+  // write_checklist call (as JSON, or narrated as prose) would poison the orchestrator's
+  // context with it too.
+  return guardLeakedChecklistReply(output, input, agent.model, `specialist=${displayName}`, toolNamesOf(agent));
 };
 
 // Same "no one to ask, resolve immediately" posture as runSubAgentHeadless above, applied
@@ -138,7 +140,7 @@ export async function runPromptTask(task: TaskRow): Promise<string> {
       currentDateTime: now.toLocaleString(),
     });
     devLog(`[taskScheduler] running task id=${task.id} target=${runTarget.name}`);
-    const result = await run(runTarget, prompt);
+    const result = await run(runTarget, prompt, { maxTurns: MAX_TURNS_PER_RUN });
 
     // A headless run has no renderer to show the approval UI ipc/agent.ts's interactive path
     // uses — result.interruptions was previously never inspected here, so a call to an
@@ -162,9 +164,9 @@ export async function runPromptTask(task: TaskRow): Promise<string> {
     }
 
     const output = result.finalOutput ?? "";
-    // KI-6: same guard as ipc/agent.ts — never let a leaked write_checklist JSON reply
+    // KI-6: same guard as ipc/agent.ts — never let a leaked write_checklist reply
     // become the notification body or last_result text a task run is recorded with.
-    return await guardLeakedChecklistJson(output, prompt, runTarget.model, `task id=${task.id}`);
+    return await guardLeakedChecklistReply(output, prompt, runTarget.model, `task id=${task.id}`, toolNamesOf(runTarget));
   } catch (e) {
     cancelPendingForTrace(traceId);
     throw e;
