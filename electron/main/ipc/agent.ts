@@ -30,6 +30,7 @@ import { resolveApprovalsAndRun, MAX_TURNS_PER_RUN } from "../ai/runLoop";
 import { createSerialQueue } from "../ai/serialQueue";
 import { cancelPendingForTrace } from "../db/checklistStore";
 import { guardLeakedChecklistReply, toolNamesOf } from "../ai/replyGuard";
+import { guardFalseAgentMutationClaim, guardFalseAgentMutationClaimAtTopLevel } from "../ai/agentMutationGuard";
 import { NO_ANSWER_TIMEOUT_SENTINEL, type RequestAnswerFn } from "../ai/tools/askUserTools";
 import { createPausableDeadline } from "./pausableDeadline";
 import { extractApprovalMeta, extractRunItemMeta } from "../ai/runItemMeta";
@@ -497,16 +498,16 @@ export function registerAgentHandlers() {
       const runSubAgent = async (agent: Agent, subInput: string, displayName: string): Promise<string> => {
         const result = await runToCompletion(agent, subInput, `specialist=${displayName}`);
         const output = result?.finalOutput ?? "";
+        const label = `requestId=${requestId} specialist=${displayName}`;
+        // KI-23: a specialist (Cipher) can claim an agent was created/updated without
+        // having actually called create_agent/update_agent in this same run — checked
+        // before the checklist-leak guard since that one repairs *phrasing*, and a false
+        // mutation claim needs replacing outright, not rewording.
+        const checkedOutput = guardFalseAgentMutationClaim(output, result?.newItems ?? [], label);
         // KI-6: a specialist can leak its own write_checklist call the same way the
         // top-level run can — catch it here too, so Orbit's own reply never gets built on
         // top of raw JSON it received back from a specialist call.
-        return guardLeakedChecklistReply(
-          output,
-          subInput,
-          agent.model,
-          `requestId=${requestId} specialist=${displayName}`,
-          toolNamesOf(agent)
-        );
+        return guardLeakedChecklistReply(checkedOutput, subInput, agent.model, label, toolNamesOf(agent));
       };
 
       const { agent: orchestrator, mcpServers, allAgents } = await buildOrchestrator(runSubAgent, traceId, requestAnswer);
@@ -532,16 +533,25 @@ export function registerAgentHandlers() {
           devLog(
             `[agent:runStream] requestId=${requestId} lastAgent=${result.lastAgent?.name ?? "none"} finalOutput="${rawFinalOutput}"`
           );
+          const topLevelLabel = `requestId=${requestId} lastAgent=${result.lastAgent?.name ?? "none"}`;
+          const runTargetToolNames = toolNamesOf(runTarget);
+          // KI-23: a directed message (e.g. "/cipher ...") runs Cipher itself as runTarget,
+          // not the orchestrator — in that case its own newItems are exactly where
+          // create_agent/update_agent would appear, so check directly rather than via the
+          // weaker "did it call cipher" proxy the orchestrator path uses below.
+          const mutationChecked = runTargetToolNames.some((n) => n === "create_agent" || n === "update_agent")
+            ? guardFalseAgentMutationClaim(rawFinalOutput, result.newItems, topLevelLabel)
+            : guardFalseAgentMutationClaimAtTopLevel(rawFinalOutput, result.newItems, topLevelLabel);
           // KI-6/KI-1: gpt-4.1-mini sometimes reports write_checklist as its reply text
           // instead of calling the tool — pasting the argument JSON, or narrating the call
           // ("write_checklist completed"). Never show either to the user; repair it into a
           // real reply instead of a generic apology where possible.
           const finalOutput = await guardLeakedChecklistReply(
-            rawFinalOutput,
+            mutationChecked,
             input,
             runTarget.model,
-            `requestId=${requestId} lastAgent=${result.lastAgent?.name ?? "none"}`,
-            toolNamesOf(runTarget)
+            topLevelLabel,
+            runTargetToolNames
           );
           appendMessage({
             role: "assistant",

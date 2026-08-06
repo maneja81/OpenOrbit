@@ -16,6 +16,7 @@ import { resolveApprovalsAndRun, MAX_TURNS_PER_RUN } from "../ai/runLoop";
 import { getDueTasks, recordTaskRun, TaskRow } from "../db/tasksStore";
 import { cancelPendingForTrace } from "../db/checklistStore";
 import { guardLeakedChecklistReply, toolNamesOf } from "../ai/replyGuard";
+import { guardFalseAgentMutationClaim, guardFalseAgentMutationClaimAtTopLevel } from "../ai/agentMutationGuard";
 import { NO_ANSWER_TIMEOUT_SENTINEL, type RequestAnswerFn } from "../ai/tools/askUserTools";
 import { devLog } from "../devLog";
 import { parseStringMap } from "../db/jsonColumn";
@@ -33,10 +34,14 @@ const runSubAgentHeadless: RunSubAgentFn = async (agent: Agent, input: string, d
   devLog(`[taskScheduler] running specialist=${displayName} headlessly`);
   const result = await resolveApprovalsAndRun(runOnce, input, async () => false);
   const output = result?.finalOutput ?? "";
+  const label = `specialist=${displayName}`;
+  // KI-23: same guard as ipc/agent.ts's runSubAgent — a headless specialist run can claim
+  // an agent was created/updated without having actually called create_agent/update_agent.
+  const checkedOutput = guardFalseAgentMutationClaim(output, result?.newItems ?? [], label);
   // KI-6: same guard as ipc/agent.ts's runSubAgent — a specialist leaking its own
   // write_checklist call (as JSON, or narrated as prose) would poison the orchestrator's
   // context with it too.
-  return guardLeakedChecklistReply(output, input, agent.model, `specialist=${displayName}`, toolNamesOf(agent));
+  return guardLeakedChecklistReply(checkedOutput, input, agent.model, label, toolNamesOf(agent));
 };
 
 // Same "no one to ask, resolve immediately" posture as runSubAgentHeadless above, applied
@@ -164,9 +169,16 @@ export async function runPromptTask(task: TaskRow): Promise<string> {
     }
 
     const output = result.finalOutput ?? "";
+    const taskLabel = `task id=${task.id}`;
+    const taskRunTargetToolNames = toolNamesOf(runTarget);
+    // KI-23: same dispatch as ipc/agent.ts's top-level path — a task can target Cipher
+    // directly, whose own newItems are where create_agent/update_agent would appear.
+    const mutationChecked = taskRunTargetToolNames.some((n) => n === "create_agent" || n === "update_agent")
+      ? guardFalseAgentMutationClaim(output, result.newItems, taskLabel)
+      : guardFalseAgentMutationClaimAtTopLevel(output, result.newItems, taskLabel);
     // KI-6: same guard as ipc/agent.ts — never let a leaked write_checklist reply
     // become the notification body or last_result text a task run is recorded with.
-    return await guardLeakedChecklistReply(output, prompt, runTarget.model, `task id=${task.id}`, toolNamesOf(runTarget));
+    return await guardLeakedChecklistReply(mutationChecked, prompt, runTarget.model, taskLabel, taskRunTargetToolNames);
   } catch (e) {
     cancelPendingForTrace(traceId);
     throw e;
