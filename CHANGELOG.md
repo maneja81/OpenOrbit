@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-08-06
+
 ### Added
 
 - **A `write_checklist` tool** giving Orbit and Cipher a live plan/progress widget in
@@ -489,6 +491,7 @@ build from source.
   low), `fast-csv` (denial of service, low), and `exceljs` 3.4.0 → 3.10.0.
   ([#5](https://github.com/maneja81/OpenOrbit/pull/5))
 
-[Unreleased]: https://github.com/maneja81/OpenOrbit/compare/v0.1.1...develop
+[Unreleased]: https://github.com/maneja81/OpenOrbit/compare/v0.1.2...develop
+[0.1.2]: https://github.com/maneja81/OpenOrbit/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/maneja81/OpenOrbit/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/maneja81/OpenOrbit/releases/tag/v0.1.0
