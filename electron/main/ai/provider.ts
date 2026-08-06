@@ -1,7 +1,9 @@
 import OpenAI from "openai";
 import {
   OpenAIChatCompletionsModel,
+  OpenAIProvider,
   OpenAIResponsesModel,
+  setDefaultModelProvider,
   setDefaultOpenAIClient,
   setOpenAIAPI,
   type Model,
@@ -259,7 +261,23 @@ export function configureChatClient(): void {
   // rather than only when it differs: the value is global and sticky, so a previous run that
   // moved it would otherwise leak into this one.
   setOpenAIAPI(resolved.api);
-  setDefaultOpenAIClient(clientFor(resolved));
+  const client = clientFor(resolved);
+  setDefaultOpenAIClient(client);
+  // ...and replace the default *model provider* too, because setDefaultOpenAIClient alone does
+  // not reach a run once one has happened.
+  //
+  // OpenAIProvider reads the default client lazily and then caches it for the life of the
+  // instance (`if (!this.#client) this.#client = getDefaultOpenAIClient() ?? …`), and the default
+  // provider is a module-level singleton. So the first run of the app captures whatever host was
+  // configured then, and every later setDefaultOpenAIClient call is written to a variable nobody
+  // reads again. Switching provider in Settings looked like it worked — the setting, the model id
+  // and every inheriting agent all moved — while the requests kept going to the old host until
+  // the app was restarted. Observed after switching Local AI -> OpenAI: `404 model
+  // 'gpt-4.1-mini' not found`, which is Ollama's error, returned for a slot pointed at OpenAI.
+  //
+  // Handing the provider the client outright (rather than letting it look one up) also means the
+  // cache is correct by construction: this instance can only ever use the host it was built for.
+  setDefaultModelProvider(new OpenAIProvider({ openAIClient: client, useResponses: resolved.api === "responses" }));
 }
 
 /** Looks up the actual USD cost OpenRouter billed for a completed generation, keyed by the

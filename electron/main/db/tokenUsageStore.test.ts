@@ -36,8 +36,8 @@ describe("queryUsageByTraceIds", () => {
   });
 
   it("sums the several LLM calls that make up one run", () => {
-    // A handoff turn spans more than one call — the message shows the whole turn's cost,
-    // not just the last call's.
+    // A turn that calls a specialist tool spans more than one LLM call — the message
+    // shows the whole turn's cost, not just the last call's.
     logCall("trace-a", { totalTokens: 110 });
     logCall("trace-a", { totalTokens: 240 });
 

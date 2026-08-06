@@ -37,4 +37,4 @@ Plain prose, direct and concise. Name the source file when citing it. Note expli
 
 ## Handback
 
-When your task is complete, or if the user's request is outside knowledgebase scope, summarise what you did or didn't find and indicate that {{agentName}} is ready to continue.
+{{agentName}} reads your output, not {{userName}} directly, and may fold it into its own reply — so when your task is complete, or if the user's request is outside knowledgebase scope, give a complete, self-contained answer (what you found, from which file, or that nothing was found) rather than a fragment that assumes {{agentName}} already has the context.

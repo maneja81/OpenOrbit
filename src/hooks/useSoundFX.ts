@@ -7,7 +7,8 @@ export type SoundFxEvent =
   | "complete"
   | "startup"
   | "agentCreated"
-  | "agentDeleted";
+  | "agentDeleted"
+  | "consult";
 
 // Document-relative, not "/audio/…": built renderers load over file://, where a
 // root-absolute path resolves to file:///audio/… and the clip never loads.
@@ -90,7 +91,7 @@ interface SciFiVariant {
   thump?: ThumpLayer;
 }
 
-const SCIFI_TONES: Record<"agentCreated" | "agentDeleted", SciFiVariant> = {
+const SCIFI_TONES: Record<"agentCreated" | "agentDeleted" | "consult", SciFiVariant> = {
   // Agent created — energy resolving into being, ending on a soft landing thud.
   agentCreated: {
     noiseSweep: { freqStart: 600, freqEnd: 5000, duration: 0.12, q: 1.6, peakGain: 0.45 },
@@ -101,6 +102,14 @@ const SCIFI_TONES: Record<"agentCreated" | "agentDeleted", SciFiVariant> = {
   agentDeleted: {
     noiseSweep: { freqStart: 4000, freqEnd: 150, duration: 0.22, q: 1.1, peakGain: 0.5 },
     thump: { freq: 80, duration: 0.3, gain: 0.5, delay: 0.16 },
+  },
+  // Consulting a specialist — a brief "hailing frequency" ping: a tight resonant sweep
+  // with a bright shimmer overlay, no thump. Deliberately the shortest/lightest sci-fi
+  // variant here (~80ms) since this can fire more than once per turn (Orbit calling
+  // several specialists), unlike the one-off agentCreated/agentDeleted events.
+  consult: {
+    noiseSweep: { freqStart: 1100, freqEnd: 2400, duration: 0.05, q: 3.2, peakGain: 0.2 },
+    shimmer: { freqStart: 1400, freqEnd: 2000, duration: 0.08, gain: 0.16, delay: 0.02 },
   },
 };
 
@@ -228,7 +237,7 @@ export function useSoundFX(enabled: boolean, variants: Record<SoundFxEvent, numb
 
   const playSynthFallback = useCallback(
     (event: SoundFxEvent) => {
-      if (event === "agentCreated" || event === "agentDeleted") {
+      if (event === "agentCreated" || event === "agentDeleted" || event === "consult") {
         playSciFi(SCIFI_TONES[event]);
       } else {
         playTones(TONES[event]);

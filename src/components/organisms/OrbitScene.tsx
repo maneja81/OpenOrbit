@@ -9,6 +9,7 @@ import AgentOrb from "@/components/molecules/AgentOrb";
 import SystemStatusWidget from "@/components/molecules/SystemStatusWidget";
 import KnowledgeWidget from "@/components/molecules/KnowledgeWidget";
 import TokenUsageWidget from "@/components/molecules/TokenUsageWidget";
+import ChecklistWidget from "@/components/molecules/ChecklistWidget";
 import TasksWidget from "@/components/molecules/TasksWidget";
 import { AgentId, AgentLayoutItem, StepEvent } from "@/lib/agents";
 import { RingGeometry } from "@/hooks/useOrbitScene";
@@ -18,7 +19,14 @@ interface OrbitSceneProps {
   bgCanvasRef: RefObject<HTMLCanvasElement | null>;
   orchestratorRef: RefObject<HTMLDivElement | null>;
   setAgentRef: (id: AgentId) => (el: HTMLDivElement | null) => void;
-  activeAgent: AgentId | null;
+  /** Every orb currently lit up — Orbit can call more than one specialist tool in the same
+   * turn now (see agents-as-tools), so this is a set, not a single id. */
+  communicatingAgents: Set<AgentId>;
+  /** Which single line the traveling pulse-dot follows — a subset of communicatingAgents
+   * (the most recently activated one); the dot itself is one SVG element. */
+  pulseLineAgent: AgentId | null;
+  /** The current turn's plan, as reported via write_checklist — see ChecklistWidget. */
+  checklist: ChecklistItemRow[];
   orchestratorResponding: boolean;
   agents: AgentLayoutItem[];
   steps: StepEvent[];
@@ -48,7 +56,9 @@ export default function OrbitScene({
   bgCanvasRef,
   orchestratorRef,
   setAgentRef,
-  activeAgent,
+  communicatingAgents,
+  pulseLineAgent,
+  checklist,
   orchestratorResponding,
   agents,
   steps,
@@ -72,7 +82,7 @@ export default function OrbitScene({
   updateAvailable,
   children,
 }: OrbitSceneProps) {
-  const activeLineD = activeAgent ? lineGeometry[activeAgent] : undefined;
+  const activeLineD = pulseLineAgent ? lineGeometry[pulseLineAgent] : undefined;
 
   return (
     <div id="u" ref={containerRef}>
@@ -94,7 +104,7 @@ export default function OrbitScene({
             <motion.path
               key={agent.id}
               id={`oc-line-${agent.id}`}
-              className={`oc-line${activeAgent === agent.id ? " active" : ""}`}
+              className={`oc-line${communicatingAgents.has(agent.id) ? " active" : ""}`}
               d={lineGeometry[agent.id]}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -124,6 +134,7 @@ export default function OrbitScene({
       />
       <div id="widgets-left" className={entering ? "entering" : undefined}>
         <TokenUsageWidget steps={steps} />
+        <ChecklistWidget items={checklist} />
       </div>
       <div id="widgets-right" className={entering ? "entering" : undefined}>
         <SystemStatusWidget locationEnabled={locationEnabled} />
@@ -144,7 +155,7 @@ export default function OrbitScene({
           <AgentOrb
             key={agent.id}
             agent={agent}
-            status={activeAgent === agent.id ? "active" : "standby"}
+            status={communicatingAgents.has(agent.id) ? "active" : "standby"}
             side={Math.cos(agent.angle) >= 0 ? "right" : "left"}
             orbRef={setAgentRef(agent.id)}
           />

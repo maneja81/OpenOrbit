@@ -68,7 +68,7 @@ describe("mergeWithDefaults", () => {
   it("defaults the newly-configurable tunables", () => {
     const merged = mergeWithDefaults({});
     expect(merged.voiceTtsVoice).toBe("alloy");
-    expect(merged.agentRunTimeoutSeconds).toBe(60);
+    expect(merged.agentRunTimeoutSeconds).toBe(3600);
     expect(merged.chatHistoryMessageLimit).toBe(20);
     expect(merged.bgMusicVolume).toBe(0.1);
     expect(merged.systemStatsPollIntervalMs).toBe(3000);
@@ -114,7 +114,7 @@ describe("mergeWithDefaults", () => {
     it("falls back on a wrong primitive type", () => {
       expect(mergeWithDefaults({ agentName: 42 }).agentName).toBe("Orbit");
       expect(mergeWithDefaults({ locationEnabled: "true" }).locationEnabled).toBe(false);
-      expect(mergeWithDefaults({ agentRunTimeoutSeconds: "60" }).agentRunTimeoutSeconds).toBe(60);
+      expect(mergeWithDefaults({ agentRunTimeoutSeconds: "60" }).agentRunTimeoutSeconds).toBe(3600);
     });
 
     it("falls back when an id list isn't an array of strings", () => {
@@ -143,6 +143,7 @@ describe("mergeWithDefaults", () => {
       expect(mergeWithDefaults({ soundVariantSend: 99 }).soundVariantSend).toBe(SOUND_FX_VARIANT_COUNT);
       expect(mergeWithDefaults({ soundVariantReceive: 0 }).soundVariantReceive).toBe(1);
       expect(mergeWithDefaults({ soundVariantStartup: -3 }).soundVariantStartup).toBe(1);
+      expect(mergeWithDefaults({ soundVariantConsult: 99 }).soundVariantConsult).toBe(SOUND_FX_VARIANT_COUNT);
     });
 
     it("rounds a fractional variant to a real file", () => {

@@ -15,6 +15,7 @@ import { registerProviderHandlers } from "./ipc/providers";
 import { registerChatHistoryHandlers } from "./ipc/chatHistory";
 import { registerAgentHandlers } from "./ipc/agent";
 import { registerAgentDataHandlers } from "./ipc/agentData";
+import { registerChecklistHandlers } from "./ipc/checklist";
 import { registerMcpHandlers } from "./ipc/mcp";
 import { registerConnectorHandlers } from "./ipc/connectors";
 import { registerHttpToolHandlers } from "./ipc/httpTools";
@@ -124,6 +125,7 @@ app.whenReady().then(() => {
   registerChatHistoryHandlers();
   registerAgentHandlers();
   registerAgentDataHandlers();
+  registerChecklistHandlers();
   registerMcpHandlers();
   registerConnectorHandlers();
   registerHttpToolHandlers();

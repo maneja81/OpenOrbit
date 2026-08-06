@@ -12,6 +12,8 @@ import { searchHistoryTool } from "./tools/history";
 import { listGrantedFoldersTool, listFolderContentsTool, readFolderFileTool } from "./tools/folderAccessTools";
 import { findSkillTool } from "./tools/skillFinderTool";
 import { createSaveUserInfoTool } from "./tools/userInfoTools";
+import { createWriteChecklistTool } from "./tools/checklistTools";
+import { createAskUserTool, type RequestAnswerFn } from "./tools/askUserTools";
 import {
   createDeleteAgentDataTool,
   createGetAgentDataTool,
@@ -39,6 +41,7 @@ import { encryptSecret } from "../security/secretStorage";
 import { connectMcpServersForAgent } from "./mcp";
 import { buildHttpToolsForCollectionIds, buildHttpToolsPromptBlock } from "./httpTools";
 import { devLog } from "../devLog";
+import { broadcastSettingsUpdate } from "./broadcastEvents";
 import { CONNECTOR_REGISTRY, getConnectorDefinition } from "../connectors/registry";
 import { runOAuthFlow } from "../connectors/oauthFlow";
 import {
@@ -261,12 +264,14 @@ function ensureDefaultAgentsSeeded(db: Database.Database): void {
 // hand off to ConfigAgent. orchestratorEnabled is deliberately absent — the
 // orchestrator can't be disabled (see ipc/settings.ts).
 // Every user-facing toggle/field in AgentsSettings (src/lib/settings.ts) belongs here
-// except onboardingDone (internal lifecycle flag, not a user setting),
+// except onboardingDone and tourCompleted (internal lifecycle flags, not user settings),
 // orchestratorEnabled (permanently locked — see ipc/settings.ts's LOCKED_KEYS) and the
 // PROTECTED_SETTING_KEYS below — anything else missing from this list is
 // invisible/unreachable to Cipher regardless of what the user asks for, which is exactly the
 // bug this list previously had (bgMusicEnabled, soundFxEnabled, voiceOutputEnabled,
-// voiceTranscriptionModel, voiceTtsModel were all silently absent).
+// voiceTranscriptionModel, voiceTtsModel, voiceTtsVoice, and the numeric tunables below were
+// all silently absent at one point or another). orchestratorPromptOverride was briefly added
+// here too before landing in PROTECTED_SETTING_KEYS instead — see that list's entry for why.
 export const ALLOWED_SETTING_KEYS = [
   "voiceInputEnabled",
   "typeAnywhereEnabled",
@@ -277,10 +282,23 @@ export const ALLOWED_SETTING_KEYS = [
   "voiceApiKey",
   "voiceTranscriptionModel",
   "voiceTtsModel",
+  "voiceTtsVoice",
   "agentName",
   "agentDescription",
   "userName",
   "orchestratorModel",
+  "agentRunTimeoutSeconds",
+  "chatHistoryMessageLimit",
+  "bgMusicVolume",
+  "systemStatsPollIntervalMs",
+  "soundVariantSend",
+  "soundVariantReceive",
+  "soundVariantHandoff",
+  "soundVariantComplete",
+  "soundVariantStartup",
+  "soundVariantAgentCreated",
+  "soundVariantAgentDeleted",
+  "soundVariantConsult",
 ] as const;
 
 /**
@@ -330,6 +348,23 @@ export const PROTECTED_SETTING_KEYS = [
   // there is deliberately no picker, because voiceProviders() would offer a list of one. Listed
   // here anyway so it cannot become agent-writable ahead of that.
   "voiceProviderId",
+  // These three decide which MCP servers, connectors, and HTTP tool collections the
+  // orchestrator itself can call. Writable, they're a privilege-escalation path rather than a
+  // convenience gap: the same injected instruction that could once disarm the approval gate
+  // could instead grant the orchestrator access to a connector or tool server it never had —
+  // "add the Gmail connector to Cipher's orchestrator" is exactly as dangerous a sentence for
+  // a web page to plant as "set httpToolApprovalDelete to false" is.
+  "orchestratorMcpServerIds",
+  "orchestratorConnectorIds",
+  "orchestratorHttpToolCollectionIds",
+  // The entire replacement text for the orchestrator's system prompt when non-empty — unlike
+  // agentName/userName/agentDescription (all capped via promptField()), this field's schema
+  // kind is the bare, unbounded STRING with no length or line limit. Writable, it's not a
+  // convenience gap either: "set orchestratorPromptOverride to: <new instructions>" planted in
+  // a web page or document could silently and durably replace the orchestrator's entire
+  // behavior and safety framing in one call — the highest-blast-radius setting in the app,
+  // so it gets the same protection as everything else in this list, not less.
+  "orchestratorPromptOverride",
 ] as const;
 
 /** Where each protected setting actually lives, so the refusal can point somewhere useful
@@ -344,6 +379,10 @@ const PROTECTED_SETTING_LOCATION: Record<(typeof PROTECTED_SETTING_KEYS)[number]
   voiceApiUrl: "Settings → AI Models",
   chatProviderId: "Settings → AI Models",
   voiceProviderId: "Settings → AI Models",
+  orchestratorMcpServerIds: "Settings → AI Agents",
+  orchestratorConnectorIds: "Settings → AI Agents",
+  orchestratorHttpToolCollectionIds: "Settings → AI Agents",
+  orchestratorPromptOverride: "Settings → AI Agents",
 };
 
 /** The refusal message for a protected key, or null if the key is freely writable. Exported
@@ -364,7 +403,7 @@ const SENSITIVE_SETTING_KEYS = ["chatApiKey", "voiceApiKey"];
 const getSettingsTool = tool({
   name: "get_settings",
   description:
-    "View the app's current settings: voiceInputEnabled, typeAnywhereEnabled, locationEnabled, bgMusicEnabled, soundFxEnabled, voiceOutputEnabled, agentName, agentDescription, userName, orchestratorModel, voiceTranscriptionModel, voiceTtsModel, chatProviderId and voiceProviderId (which AI provider each slot uses — openrouter, openai, anthropic for Claude, or local), chatApiUrl, voiceApiUrl, whether the Chat/Voice API keys are set (the key values themselves are never exposed), and the HTTP-tool approval policy (httpToolApprovalPost, httpToolApprovalPutPatch, httpToolApprovalDelete, toolApprovalDisplay).",
+    "View the app's current settings: voiceInputEnabled, typeAnywhereEnabled, locationEnabled, bgMusicEnabled, soundFxEnabled, voiceOutputEnabled, agentName, agentDescription, userName, orchestratorModel, orchestratorPromptOverride, voiceTranscriptionModel, voiceTtsModel, voiceTtsVoice, chatProviderId and voiceProviderId (which AI provider each slot uses — openrouter, openai, anthropic for Claude, or local), chatApiUrl, voiceApiUrl, whether the Chat/Voice API keys are set (the key values themselves are never exposed), the HTTP-tool approval policy (httpToolApprovalPost, httpToolApprovalPutPatch, httpToolApprovalDelete, toolApprovalDisplay), the orchestrator's own tool grants (orchestratorMcpServerIds, orchestratorConnectorIds, orchestratorHttpToolCollectionIds), agentRunTimeoutSeconds, chatHistoryMessageLimit, bgMusicVolume, systemStatsPollIntervalMs, and the soundVariant* picks.",
   parameters: z.object({}),
   execute: async () => {
     devLog("[get_settings] called");
@@ -380,6 +419,7 @@ const getSettingsTool = tool({
     const voiceOutputEnabled = readAppSetting("voiceOutputEnabled");
     const voiceTranscriptionModel = readAppSetting("voiceTranscriptionModel");
     const voiceTtsModel = readAppSetting("voiceTtsModel");
+    const voiceTtsVoice = readAppSetting("voiceTtsVoice");
     const chatApiUrl = readAppSetting("chatApiUrl");
     const voiceApiUrl = readAppSetting("voiceApiUrl");
     // Reported but not writable — see PROTECTED_SETTING_KEYS. Being able to *say* which provider
@@ -393,6 +433,22 @@ const getSettingsTool = tool({
     const httpToolApprovalPutPatch = readAppSetting("httpToolApprovalPutPatch");
     const httpToolApprovalDelete = readAppSetting("httpToolApprovalDelete");
     const toolApprovalDisplay = readAppSetting("toolApprovalDisplay");
+    const orchestratorPromptOverride = readAppSetting("orchestratorPromptOverride");
+    const orchestratorMcpServerIds = readAppSetting("orchestratorMcpServerIds");
+    const orchestratorConnectorIds = readAppSetting("orchestratorConnectorIds");
+    const orchestratorHttpToolCollectionIds = readAppSetting("orchestratorHttpToolCollectionIds");
+    const agentRunTimeoutSeconds = readAppSetting("agentRunTimeoutSeconds");
+    const chatHistoryMessageLimit = readAppSetting("chatHistoryMessageLimit");
+    const bgMusicVolume = readAppSetting("bgMusicVolume");
+    const systemStatsPollIntervalMs = readAppSetting("systemStatsPollIntervalMs");
+    const soundVariantSend = readAppSetting("soundVariantSend");
+    const soundVariantReceive = readAppSetting("soundVariantReceive");
+    const soundVariantHandoff = readAppSetting("soundVariantHandoff");
+    const soundVariantComplete = readAppSetting("soundVariantComplete");
+    const soundVariantStartup = readAppSetting("soundVariantStartup");
+    const soundVariantAgentCreated = readAppSetting("soundVariantAgentCreated");
+    const soundVariantAgentDeleted = readAppSetting("soundVariantAgentDeleted");
+    const soundVariantConsult = readAppSetting("soundVariantConsult");
     return {
       httpToolApprovalPost,
       httpToolApprovalPutPatch,
@@ -402,6 +458,11 @@ const getSettingsTool = tool({
       agentDescription,
       userName,
       orchestratorModel,
+      orchestratorPromptOverride,
+      // Reported but not writable — same reasoning as chatProviderId/voiceProviderId above.
+      orchestratorMcpServerIds,
+      orchestratorConnectorIds,
+      orchestratorHttpToolCollectionIds,
       voiceInputEnabled,
       typeAnywhereEnabled,
       locationEnabled,
@@ -410,12 +471,25 @@ const getSettingsTool = tool({
       voiceOutputEnabled,
       voiceTranscriptionModel,
       voiceTtsModel,
+      voiceTtsVoice,
       chatApiUrl,
       voiceApiUrl,
       chatProviderId,
       voiceProviderId,
       chatApiKeySet: Boolean(chatApiKey),
       voiceApiKeySet: Boolean(voiceApiKey),
+      agentRunTimeoutSeconds,
+      chatHistoryMessageLimit,
+      bgMusicVolume,
+      systemStatsPollIntervalMs,
+      soundVariantSend,
+      soundVariantReceive,
+      soundVariantHandoff,
+      soundVariantComplete,
+      soundVariantStartup,
+      soundVariantAgentCreated,
+      soundVariantAgentDeleted,
+      soundVariantConsult,
     };
   },
 });
@@ -423,13 +497,13 @@ const getSettingsTool = tool({
 const updateSettingTool = tool({
   name: "update_setting",
   description:
-    "Update one of the app's settings: voiceInputEnabled, typeAnywhereEnabled, bgMusicEnabled, soundFxEnabled, voiceOutputEnabled, chatApiKey, voiceApiKey, voiceTranscriptionModel, voiceTtsModel, agentName, agentDescription, userName, orchestratorModel. The approval settings (httpToolApprovalPost/PutPatch/Delete, toolApprovalDisplay), locationEnabled, the provider URLs (chatApiUrl, voiceApiUrl) and the provider selectors (chatProviderId, voiceProviderId) are safety settings and cannot be changed here — they decide which host the user's API key is sent to, so only the user can change them, in Settings → AI Models.",
+    "Update one of the app's settings: voiceInputEnabled, typeAnywhereEnabled, bgMusicEnabled, soundFxEnabled, voiceOutputEnabled, chatApiKey, voiceApiKey, voiceTranscriptionModel, voiceTtsModel, voiceTtsVoice, agentName, agentDescription, userName, orchestratorModel, agentRunTimeoutSeconds, chatHistoryMessageLimit, bgMusicVolume, systemStatsPollIntervalMs, and the soundVariant* picks (Send/Receive/Handoff/Complete/Startup/AgentCreated/AgentDeleted/Consult, each 1-5). The approval settings (httpToolApprovalPost/PutPatch/Delete, toolApprovalDisplay), locationEnabled, the provider URLs (chatApiUrl, voiceApiUrl), the provider selectors (chatProviderId, voiceProviderId), the orchestrator's own tool grants (orchestratorMcpServerIds, orchestratorConnectorIds, orchestratorHttpToolCollectionIds), and orchestratorPromptOverride (the orchestrator's whole system prompt) are safety settings and cannot be changed here — they decide which host the user's API key is sent to, what the orchestrator can access, or its entire behavior, so only the user can change them, in Settings → AI Models or Settings → AI Agents.",
   parameters: z.object({
     // Protected keys stay nameable so a request to change one gets a real answer pointing at
     // Settings. Dropping them from the enum instead would surface as a schema error, which
     // reads as a broken tool rather than a deliberate refusal.
     key: z.enum([...ALLOWED_SETTING_KEYS, ...PROTECTED_SETTING_KEYS]),
-    value: z.union([z.string(), z.boolean()]),
+    value: z.union([z.string(), z.boolean(), z.number()]),
   }),
   execute: async ({ key, value }) => {
     const isSensitive = SENSITIVE_SETTING_KEYS.includes(key);
@@ -460,6 +534,10 @@ const updateSettingTool = tool({
     setSetting(`appSettings.${key}`, stored);
     // Never log the raw value for an API key — only confirm the write happened.
     devLog(`[update_setting] appSettings.${key} = ${isSensitive ? "(redacted)" : result.value}`);
+    // Broadcast at the point of the write rather than waiting for ipc/agent.ts's end-of-run
+    // broadcast — a multi-tool-call turn (e.g. update a setting, then look something up)
+    // would otherwise leave the renderer's Settings panel stale until the whole turn finishes.
+    broadcastSettingsUpdate();
     return `Updated ${key}.`;
   },
   // Without this the SDK replaces every failure with "An error occurred while running the
@@ -731,6 +809,26 @@ export function listAgents(): AgentRow[] {
 export interface AgentDisplayRow extends AgentRow {
   toolNames: string[];
   connectorToolCount: number;
+  /** The exact tool name Orbit calls this agent by right now (see agentAsTool/
+   * dedupeToolNames) — "" for a disabled agent, since those aren't wired as a tool at all.
+   * Lets the renderer match a live `agent:stream-step` event's `toolName` back to the orbit
+   * node it belongs to, without duplicating the dedup logic client-side. */
+  orchestratorToolName: string;
+}
+
+/** Same built-ins-first ordering, and the same enabled-only filter for custom agents, that
+ * buildOrchestrator uses when it calls dedupeToolNames — so a row's `orchestratorToolName`
+ * here always matches what Orbit will actually call it by at run time. A disabled custom
+ * agent is excluded (never wired as a tool), matching buildOrchestrator's own `customRows`
+ * query (`... AND enabled = 1`). */
+function assignOrchestratorToolNames(rows: AgentRow[]): Map<string, string> {
+  const BUILTIN_IDS = ["configAgent", "knowledgeAgent", "explorerAgent", "taskAgent"];
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const wired = [
+    ...BUILTIN_IDS.map((id) => byId.get(id)).filter((r): r is AgentRow => Boolean(r)),
+    ...rows.filter((r) => !BUILTIN_IDS.includes(r.id) && r.enabled),
+  ];
+  return dedupeToolNames(wired);
 }
 
 // Stored prompts keep {{agentName}}/{{userName}}/{{currentDateTime}} placeholders
@@ -740,10 +838,13 @@ export function listAgentsForDisplay(): AgentDisplayRow[] {
   const agentName = readAppSetting("agentName");
   const userName = readAppSetting("userName");
   const currentDateTime = getCurrentDateTime();
-  return listAgents().map((row) => ({
+  const rows = listAgents();
+  const toolNames = assignOrchestratorToolNames(rows);
+  return rows.map((row) => ({
     ...row,
     prompt: renderPrompt(row.prompt, { agentName, userName, currentDateTime }),
     toolNames: getBuiltinToolNamesForRole(row),
+    orchestratorToolName: toolNames.get(row.id) ?? "",
     connectorToolCount:
       parseMcpServerIds(row).length + parseConnectorIds(row).length + parseHttpToolCollectionIds(row).length,
   }));
@@ -836,6 +937,47 @@ function slugify(name: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
   return slug || "agent";
+}
+
+/** The natural tool-name slug for a display name — what agentAsTool would register if no
+ * other agent's name produced the same slug. Two agents can share a display name today by
+ * design (uniqueAgentId already disambiguates the *id* for that exact case — e.g. importing
+ * an agent config you already have under the same name), so this can't be enforced unique
+ * at write time without breaking that. dedupeToolNames (below) is what actually resolves a
+ * collision, at the one point it matters: assembling the orchestrator's tool list. */
+function agentToolNameSlug(name: string): string {
+  return slugify(name).replace(/-/g, "_");
+}
+
+/**
+ * Assigns each row a unique tool name, preferring its own natural slug and appending `_2`,
+ * `_3`, … only when that slug was already claimed earlier in `rows` — same
+ * auto-disambiguate-rather-than-reject philosophy as uniqueAgentId, applied here because
+ * nothing in the @openai/agents SDK itself detects or rejects a duplicate function-tool name
+ * (checked: it only guards against duplicate names across MCP servers). Without this, two
+ * agents sharing a display name — or a custom agent named the same as a built-in specialist
+ * — would silently register two identically-named tools, and which one the model actually
+ * reaches would be undefined SDK/provider behavior with no error surfaced anywhere.
+ *
+ * Callers must list the four built-in rows first so they always keep their plain slug
+ * ("cipher", "atlas", …) — the exact names orchestrator.md's prompt hardcodes — and only a
+ * colliding custom agent further down the list gets suffixed.
+ */
+export function dedupeToolNames(rows: { id: string; name: string }[]): Map<string, string> {
+  const used = new Set<string>();
+  const assigned = new Map<string, string>();
+  for (const row of rows) {
+    const base = agentToolNameSlug(row.name);
+    let candidate = base;
+    let suffix = 2;
+    while (used.has(candidate)) {
+      candidate = `${base}_${suffix}`;
+      suffix += 1;
+    }
+    used.add(candidate);
+    assigned.set(row.id, candidate);
+  }
+  return assigned;
 }
 
 // Custom agents are user-named, so collisions with existing ids (built-in or
@@ -1024,7 +1166,15 @@ export function attachConnectorsForRow(row: AgentRow): Tool[] {
  * drift out of sync with what an agent run actually attaches. Connector/MCP-attached
  * tools are excluded (those are only resolvable by live-connecting, see
  * attachConnectorsForRow) — callers show a separate attached-connector count instead. */
+// Throwaway — getBuiltinToolNamesForRole below only reads each tool's static `.name` for
+// display, it never executes, so a no-op is fine (same reasoning as the "" traceId already
+// used there for createWriteChecklistTool).
+const NOOP_REQUEST_ANSWER: RequestAnswerFn = async () => "";
+
 export function getBuiltinToolNamesForRole(row: AgentRow): string[] {
+  // traceId is irrelevant here — this only reads each tool's static `.name` for display,
+  // it never executes, so a throwaway value is fine (same reasoning as calling
+  // createSaveUserInfoTool purely for its `.name` below).
   if (row.id === "configAgent") {
     return [
       getSettingsTool,
@@ -1034,6 +1184,8 @@ export function getBuiltinToolNamesForRole(row: AgentRow): string[] {
       listAgentsTool,
       findSkillTool,
       createSaveUserInfoTool(row.name),
+      createWriteChecklistTool(row.name, ""),
+      createAskUserTool(row.name, NOOP_REQUEST_ANSWER),
       listConnectorsTool,
       connectConnectorTool,
       disconnectConnectorTool,
@@ -1046,13 +1198,21 @@ export function getBuiltinToolNamesForRole(row: AgentRow): string[] {
       listKnowledgebaseFilesTool,
       readKnowledgebaseFileTool,
       createSaveUserInfoTool(row.name),
+      createWriteChecklistTool(row.name, ""),
+      createAskUserTool(row.name, NOOP_REQUEST_ANSWER),
       listGrantedFoldersTool,
       listFolderContentsTool,
       readFolderFileTool,
     ].map((t) => t.name);
   }
   if (row.id === "explorerAgent") {
-    return [webSearchTool, fetchWebContentTool, createSaveUserInfoTool(row.name)].map((t) => t.name);
+    return [
+      webSearchTool,
+      fetchWebContentTool,
+      createSaveUserInfoTool(row.name),
+      createWriteChecklistTool(row.name, ""),
+      createAskUserTool(row.name, NOOP_REQUEST_ANSWER),
+    ].map((t) => t.name);
   }
   if (row.id === "taskAgent") {
     return [
@@ -1063,10 +1223,14 @@ export function getBuiltinToolNamesForRole(row: AgentRow): string[] {
       cancelTaskTool,
       deleteTaskTool,
       createSaveUserInfoTool(row.name),
+      createWriteChecklistTool(row.name, ""),
+      createAskUserTool(row.name, NOOP_REQUEST_ANSWER),
     ].map((t) => t.name);
   }
   return [
     createSaveUserInfoTool(row.name),
+    createWriteChecklistTool(row.name, ""),
+    createAskUserTool(row.name, NOOP_REQUEST_ANSWER),
     createSaveAgentDataTool(row.id),
     createGetAgentDataTool(row.id),
     createListAgentDataTool(row.id),
@@ -1079,9 +1243,62 @@ export interface BuiltOrchestrator {
   mcpServers: MCPServerStdio[];
   /** Every agent (system + custom) built this pass, orchestrator excluded — lets a
    * caller run a single agent directly (deterministic `/agentname` routing) instead of
-   * going through the orchestrator's own handoff judgment. Matched by name, case-insensitively,
-   * by the caller (see electron/main/ipc/agent.ts's agent:runStream). */
+   * going through the orchestrator. Matched by name, case-insensitively, by the caller
+   * (see electron/main/ipc/agent.ts's agent:runStream). */
   allAgents: Agent[];
+}
+
+/**
+ * Runs one specialist agent to completion for a single tool call and returns its final text
+ * output. Supplied by the caller (ipc/agent.ts for an interactive chat turn,
+ * tasks/scheduler.ts for a headless prompt-task run) because only the caller has the
+ * approval-dialog / streaming machinery a nested run still needs — buildOrchestrator only
+ * wires the specialist up as a callable tool, it doesn't execute anything itself.
+ */
+export type RunSubAgentFn = (agent: Agent, input: string, displayName: string) => Promise<string>;
+
+/**
+ * Wraps one specialist agent as a tool the orchestrator can call directly and get a text
+ * result back from — replacing the old handoff-based `handoffs: [...]` wiring, which
+ * transferred control away permanently and let the orchestrator use exactly one specialist
+ * per message (see orchestrator.md's former "Sequencing reality check"). This lets Orbit call
+ * several specialists in one turn, in sequence or based on each other's results, and
+ * synthesize the final reply itself.
+ *
+ * Deliberately not the SDK's own `Agent.asTool()`: that helper runs the nested agent
+ * internally and returns its text, but never inspects or resolves `interruptions` from that
+ * nested run — a needsApproval tool inside it (Cipher's update_agent, Chrono's create_task,
+ * any agent's approval-gated HTTP tool) would silently never execute, with no dialog and no
+ * explanation. `runSubAgent` is built by the caller from the exact same approval-resolution
+ * loop the top-level run uses (see ipc/agent.ts's runToCompletion / ai/runLoop.ts), so a
+ * nested approval gets the identical dialog it always did.
+ *
+ * A specialist run this way is a fully independent nested `run()` — unlike a handoff, it
+ * does not automatically receive the prior conversation, only the `input` string the
+ * orchestrator's tool call supplies. The tool description says so explicitly so the model
+ * doesn't assume otherwise.
+ *
+ * `toolName` is passed in rather than derived here from `row.name` — see dedupeToolNames,
+ * which is what actually resolves two agents sharing a name (or a display name colliding
+ * with a built-in) into two distinct tool names before any of these get built.
+ */
+function agentAsTool(
+  row: AgentRow,
+  agentInstance: Agent,
+  description: string,
+  toolName: string,
+  runSubAgent: RunSubAgentFn
+): Tool {
+  return tool({
+    name: toolName,
+    description:
+      `${description} This specialist does not see the rest of this conversation — write a ` +
+      `self-contained request in "input" with every fact or prior finding it needs.`,
+    parameters: z.object({
+      input: z.string().describe("The full, self-contained request to hand to this specialist."),
+    }),
+    execute: async ({ input }) => runSubAgent(agentInstance, input, row.name),
+  });
 }
 
 /** Rebuilt fresh on every agent:run/agent:runStream call (nothing is cached across runs
@@ -1089,7 +1306,11 @@ export interface BuiltOrchestrator {
  * `mcp_server_ids` must be closed by the caller after the run completes (`mcpServers`
  * collects every server connected across every agent, orchestrator included, so one
  * `closeMcpServers(result.mcpServers)` in a `finally` covers all of them). */
-export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
+export async function buildOrchestrator(
+  runSubAgent: RunSubAgentFn,
+  traceId: string,
+  requestAnswer: RequestAnswerFn
+): Promise<BuiltOrchestrator> {
   const db = getDb();
   ensureDefaultAgentsSeeded(db);
 
@@ -1121,6 +1342,26 @@ export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
   // appended here, to guarantee it without duplicating a date the built-ins already state.
   const dateContext = `\n\nThe current date and time is ${promptVars.currentDateTime} — trust this over any assumption from training data about what day it is.`;
 
+  // Appended to *every* agent — orchestrator, built-in specialists and custom agents alike.
+  //
+  // Orbit reported a balance of "340,000 INR" for a budget agent that held no records at
+  // all: it made the figure up, then repeated it a turn later over that agent's own explicit
+  // "I don't have a recorded balance yet". orchestrator.md now carries the full version of
+  // this rule, but stating it only there leaves two holes. A specialist is usually the agent
+  // that actually holds the records, so it is the one best placed to invent one — and Orbit
+  // is told to trust what a specialist reports. And the orchestrator prompt is user-
+  // replaceable (orchestratorPromptOverride), which would drop the rule entirely. Appending
+  // it here is the one place that reaches every agent no matter how its prompt was authored.
+  const groundingRule =
+    "\n\nNever state a figure, total, balance, count, date or stored record unless a tool call in this same turn " +
+    "returned it. Not from memory, not from earlier in the conversation, not by doing arithmetic on a number you " +
+    "saw before, and never invented because a plausible-sounding one would answer the question. If you have no " +
+    "record of something, say exactly that — \"I don't have that recorded\" is always a better answer than a " +
+    "number you cannot point at. A figure you or another agent stated earlier is not a source. The same rule " +
+    "covers people and quotes: never attribute a quote, comment, username, or handle to a person unless a tool " +
+    "result in this same turn actually contains it verbatim. A search that came back with no forum or social " +
+    "content does not become one by inventing a commenter — say the search found no such discussion instead.";
+
   // Unlike save_user_info (documented with an explicit line in every built-in prompt .md —
   // see orchestrator.md/configAgent.md/knowledgeAgent.md/explorer.md), the agent-data CRUD
   // tools have no .md file to add a line to since custom-agent prompts are freeform text
@@ -1132,19 +1373,24 @@ export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
     "(e.g. a saved entry, a running total, a preference specific to your job) under a short key, get_agent_data " +
     "to recall it by that key, list_agent_data to see everything you've saved, and delete_agent_data to remove " +
     "an entry. Use this whenever you need to persist your own data across turns or conversations — no other " +
-    "agent can read or change it.";
+    "agent can read or change it. Before telling the user you have nothing recorded, call list_agent_data and " +
+    "look — a get_agent_data miss only means that one key is unused, never that the store is empty, and answering " +
+    "\"nothing saved yet\" off a single missed key is how a wrong total gets stated as fact. When you keep a series " +
+    "of entries (expenses, log lines, anything that accumulates), give every key in that series the same prefix so " +
+    "you can find the whole set again.";
 
-  // handoffDescription (an @openai/agents field, distinct from `instructions`) is what
-  // the orchestrator actually sees on each generated "transfer_to_X" handoff tool — it's
-  // the SDK-native way to keep routing guidance in sync with which agents genuinely exist
-  // right now, rather than relying solely on the static prose in orchestrator.md (which
-  // only describes the three fixed built-ins and has no way to know about custom agents).
+  // This description feeds agentAsTool below — it's what the orchestrator actually sees on
+  // the generated tool for this specialist, the same job handoffDescription used to do for
+  // the generated "transfer_to_X" handoff tool, kept in sync with which agents genuinely
+  // exist right now rather than relying solely on the static prose in orchestrator.md (which
+  // only describes the four fixed built-ins and has no way to know about custom agents).
+  const CONFIG_AGENT_TOOL_DESCRIPTION =
+    "Manages app configuration: onboarding, settings (agent names, models, API keys, toggles) — including reading/checking a setting's current value, not just changing it — and creating new custom agents.";
   const configAgentRow = db.prepare("SELECT * FROM agents WHERE id = ?").get("configAgent") as AgentRow;
   const configAgent = new Agent({
     name: configAgentRow.name,
-    instructions: renderPrompt(configAgentRow.prompt, promptVars) + httpToolsPromptForRow(configAgentRow) + userInfoBlock,
-    handoffDescription:
-      "Manages app configuration: onboarding, settings (agent names, models, API keys, toggles) — including reading/checking a setting's current value, not just changing it — and creating new custom agents.",
+    instructions:
+      renderPrompt(configAgentRow.prompt, promptVars) + httpToolsPromptForRow(configAgentRow) + groundingRule + userInfoBlock,
     model: modelForAgent(configAgentRow),
     tools: [
       getSettingsTool,
@@ -1154,6 +1400,8 @@ export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
       listAgentsTool,
       findSkillTool,
       createSaveUserInfoTool(configAgentRow.name),
+      createWriteChecklistTool(configAgentRow.name, traceId),
+      createAskUserTool(configAgentRow.name, requestAnswer),
       listConnectorsTool,
       connectConnectorTool,
       disconnectConnectorTool,
@@ -1165,18 +1413,20 @@ export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
     mcpServers: await connectForRow(configAgentRow),
   });
 
+  const KNOWLEDGE_AGENT_TOOL_DESCRIPTION =
+    "Reads and searches the user's knowledge base documents (resumes, notes, reference material) for anything a personal document might answer, and browses/reads the local folders the user has granted via the Folders widget.";
   const knowledgeAgentRow = db.prepare("SELECT * FROM agents WHERE id = ?").get("knowledgeAgent") as AgentRow;
   const knowledgeAgent = new Agent({
     name: knowledgeAgentRow.name,
     instructions:
-      renderPrompt(knowledgeAgentRow.prompt, promptVars) + httpToolsPromptForRow(knowledgeAgentRow) + userInfoBlock,
-    handoffDescription:
-      "Reads and searches the user's knowledge base documents (resumes, notes, reference material) for anything a personal document might answer, and browses/reads the local folders the user has granted via the Folders widget.",
+      renderPrompt(knowledgeAgentRow.prompt, promptVars) + httpToolsPromptForRow(knowledgeAgentRow) + groundingRule + userInfoBlock,
     model: modelForAgent(knowledgeAgentRow),
     tools: [
       listKnowledgebaseFilesTool,
       readKnowledgebaseFileTool,
       createSaveUserInfoTool(knowledgeAgentRow.name),
+      createWriteChecklistTool(knowledgeAgentRow.name, traceId),
+      createAskUserTool(knowledgeAgentRow.name, requestAnswer),
       listGrantedFoldersTool,
       listFolderContentsTool,
       readFolderFileTool,
@@ -1186,18 +1436,20 @@ export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
     mcpServers: await connectForRow(knowledgeAgentRow),
   });
 
+  const EXPLORER_AGENT_TOOL_DESCRIPTION =
+    "Searches the live web for current information: news, comparisons, products, or anything about the outside world that needs up-to-date data rather than the user's own documents.";
   const explorerAgentRow = db.prepare("SELECT * FROM agents WHERE id = ?").get("explorerAgent") as AgentRow;
   const explorerAgent = new Agent({
     name: explorerAgentRow.name,
     instructions:
-      renderPrompt(explorerAgentRow.prompt, promptVars) + httpToolsPromptForRow(explorerAgentRow) + userInfoBlock,
-    handoffDescription:
-      "Searches the live web for current information: news, comparisons, products, or anything about the outside world that needs up-to-date data rather than the user's own documents.",
+      renderPrompt(explorerAgentRow.prompt, promptVars) + httpToolsPromptForRow(explorerAgentRow) + groundingRule + userInfoBlock,
     model: modelForAgent(explorerAgentRow),
     tools: [
       webSearchTool,
       fetchWebContentTool,
       createSaveUserInfoTool(explorerAgentRow.name),
+      createWriteChecklistTool(explorerAgentRow.name, traceId),
+      createAskUserTool(explorerAgentRow.name, requestAnswer),
       ...attachConnectorsForRow(explorerAgentRow),
       ...attachHttpToolsForRow(explorerAgentRow),
     ],
@@ -1213,15 +1465,16 @@ export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
   // once, for itself and every other agent, while the agent-data tools (save/get/list/delete,
   // bound to row.id) give it a private per-agent store for its own structured data (e.g. a
   // budget agent's saved entries) that other agents can't read.
-  // Its handoffDescription comes straight from whatever the user (via Cipher) set as its
-  // tagline/description, so routing guidance appears/disappears with the agent itself —
-  // no orchestrator.md edits needed as custom agents are added, edited, or removed.
+  // A custom agent's tool description comes straight from whatever the user (via Cipher) set
+  // as its tagline/description, so routing guidance appears/disappears with the agent itself
+  // — no orchestrator.md edits needed as custom agents are added, edited, or removed.
+  const TASK_AGENT_TOOL_DESCRIPTION =
+    "Manages reminders and prompt tasks — one-shot or recurring, with dynamic parameters substituted at run time — and notifies the user when they're due.";
   const taskAgentRow = db.prepare("SELECT * FROM agents WHERE id = ?").get("taskAgent") as AgentRow;
   const taskAgent = new Agent({
     name: taskAgentRow.name,
-    instructions: renderPrompt(taskAgentRow.prompt, promptVars) + httpToolsPromptForRow(taskAgentRow) + userInfoBlock,
-    handoffDescription:
-      "Manages reminders and prompt tasks — one-shot or recurring, with dynamic parameters substituted at run time — and notifies the user when they're due.",
+    instructions:
+      renderPrompt(taskAgentRow.prompt, promptVars) + httpToolsPromptForRow(taskAgentRow) + groundingRule + userInfoBlock,
     model: modelForAgent(taskAgentRow),
     tools: [
       createTaskTool,
@@ -1231,6 +1484,8 @@ export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
       cancelTaskTool,
       deleteTaskTool,
       createSaveUserInfoTool(taskAgentRow.name),
+      createWriteChecklistTool(taskAgentRow.name, traceId),
+      createAskUserTool(taskAgentRow.name, requestAnswer),
       ...attachConnectorsForRow(taskAgentRow),
       ...attachHttpToolsForRow(taskAgentRow),
     ],
@@ -1251,12 +1506,14 @@ export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
           renderPrompt(row.prompt, promptVars) +
           dateContext +
           agentDataContext +
+          groundingRule +
           httpToolsPromptForRow(row) +
           userInfoBlock,
-        handoffDescription: row.description || row.tagline || `Handles requests related to ${row.name}.`,
         model: modelForAgent(row),
         tools: [
           createSaveUserInfoTool(row.name),
+          createWriteChecklistTool(row.name, traceId),
+          createAskUserTool(row.name, requestAnswer),
           createSaveAgentDataTool(row.id),
           createGetAgentDataTool(row.id),
           createListAgentDataTool(row.id),
@@ -1272,22 +1529,64 @@ export async function buildOrchestrator(): Promise<BuiltOrchestrator> {
   const orchestratorMcpServers = await connectMcpServersForAgent(orchestratorMcpServerIds);
   allConnected.push(...orchestratorMcpServers);
 
+  // Every specialist is wired in as a callable tool, not a handoff target — Orbit can call
+  // several of these in one turn, in sequence or based on each other's results, and
+  // synthesize the final reply itself instead of transferring control away permanently. See
+  // agentAsTool's own comment for why this isn't the SDK's built-in Agent.asTool().
+  //
+  // Built-ins listed first so dedupeToolNames always leaves their plain slug ("cipher",
+  // "atlas", …) alone — the exact names orchestrator.md's prompt hardcodes — and only a
+  // custom agent colliding with one of those (or with another custom agent's name) gets
+  // suffixed.
+  const specialistRows = [configAgentRow, knowledgeAgentRow, explorerAgentRow, taskAgentRow, ...customRows];
+  const toolNames = dedupeToolNames(specialistRows);
+  const specialistTools = [
+    agentAsTool(configAgentRow, configAgent, CONFIG_AGENT_TOOL_DESCRIPTION, toolNames.get(configAgentRow.id)!, runSubAgent),
+    agentAsTool(
+      knowledgeAgentRow,
+      knowledgeAgent,
+      KNOWLEDGE_AGENT_TOOL_DESCRIPTION,
+      toolNames.get(knowledgeAgentRow.id)!,
+      runSubAgent
+    ),
+    agentAsTool(
+      explorerAgentRow,
+      explorerAgent,
+      EXPLORER_AGENT_TOOL_DESCRIPTION,
+      toolNames.get(explorerAgentRow.id)!,
+      runSubAgent
+    ),
+    agentAsTool(taskAgentRow, taskAgent, TASK_AGENT_TOOL_DESCRIPTION, toolNames.get(taskAgentRow.id)!, runSubAgent),
+    ...customRows.map((row, i) =>
+      agentAsTool(
+        row,
+        customAgents[i],
+        row.description || row.tagline || `Handles requests related to ${row.name}.`,
+        toolNames.get(row.id)!,
+        runSubAgent
+      )
+    ),
+  ];
+
   const orchestrator = new Agent({
     name: agentName,
     instructions:
       renderPrompt(getOrchestratorPromptTemplate(), promptVars) +
       buildHttpToolsPromptBlock(orchestratorHttpToolCollectionIds) +
+      groundingRule +
       userInfoBlock,
     model: modelForAgent({ model: orchestratorModel, provider_id: "" }),
     tools: [
       searchHistoryTool,
       getCurrentLocationTool,
       createSaveUserInfoTool(agentName),
+      createWriteChecklistTool(agentName, traceId),
+      createAskUserTool(agentName, requestAnswer),
+      ...specialistTools,
       ...attachConnectorsForIds(orchestratorConnectorIds),
       ...buildHttpToolsForCollectionIds(orchestratorHttpToolCollectionIds),
     ],
     mcpServers: orchestratorMcpServers,
-    handoffs: [configAgent, knowledgeAgent, explorerAgent, taskAgent, ...customAgents],
   });
 
   return {

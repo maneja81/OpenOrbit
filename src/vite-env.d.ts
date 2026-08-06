@@ -113,7 +113,33 @@ interface AgentRow {
 interface AgentDisplayRow extends AgentRow {
   toolNames: string[];
   connectorToolCount: number;
+  /** The exact tool name Orbit calls this agent by right now — "" for a disabled agent.
+   * See electron/main/ai/agents.ts's AgentDisplayRow for the full explanation. */
+  orchestratorToolName: string;
 }
+
+/** One item of one agent's plan for the current turn, as reported via the write_checklist
+ * tool. See electron/main/db/checklistStore.ts's ChecklistItemRow for the full explanation —
+ * self-reported (what the model says its plan is), not ground truth of what executed. */
+interface ChecklistItemRow {
+  id: number;
+  trace_id: string;
+  agent_name: string;
+  position: number;
+  text: string;
+  status: "pending" | "in_progress" | "completed" | "cancelled";
+  created_at: string;
+  updated_at: string;
+}
+
+/** The schema for one ask_user question — see electron/main/ai/tools/askUserTools.ts's
+ * askUserFieldSchema for the source of truth. The renderer builds its UI directly from
+ * this: "text" is a single input (+ Skip, pre-filled from placeholder, only when not
+ * required); "single_select" is numbered option buttons plus an always-present free-text
+ * "something else" fallback the UI adds itself, never authored by the model. */
+type AskUserField =
+  | { type: "text"; placeholder?: string; required: boolean }
+  | { type: "single_select"; options: { label: string; value: string }[]; placeholder?: string; required: boolean };
 
 interface McpServerRow {
   id: string;
@@ -448,7 +474,7 @@ interface Window {
       setFact: (question: string, answer: string) => Promise<void>;
     };
     agent: {
-      runStream: (input: string, requestId: string, targetAgentName?: string) => Promise<string>;
+      runStream: (input: string, requestId: string, targetAgentName?: string, persistInput?: boolean) => Promise<string>;
       onStreamChunk: (callback: (payload: { requestId: string; chunk: string }) => void) => () => void;
       onStreamAgent: (callback: (payload: { requestId: string; agentName: string }) => void) => () => void;
       onStreamStep: (
@@ -478,6 +504,20 @@ interface Window {
         callback: (payload: { approvalId: string; reason: "timeout" | "abandoned" }) => void
       ) => () => void;
       respondToApproval: (approvalId: string, approved: boolean) => Promise<void>;
+      onQuestion: (
+        callback: (payload: {
+          requestId: string;
+          questionId: string;
+          agentName: string;
+          question: string;
+          field: AskUserField;
+          expiresAt: number;
+        }) => void
+      ) => () => void;
+      onQuestionSettled: (
+        callback: (payload: { questionId: string; reason: "timeout" | "abandoned" }) => void
+      ) => () => void;
+      respondToQuestion: (questionId: string, answer: string) => Promise<void>;
       list: () => Promise<AgentDisplayRow[]>;
       update: (
         id: string,
@@ -503,10 +543,14 @@ interface Window {
         providerId?: string;
         prompt?: string;
       }) => Promise<AgentRow>;
+      suggestIdentity: (context: string) => Promise<{ name: string; tagline: string }>;
       orchestratorPrompt: () => Promise<string>;
       delete: (id: string) => Promise<void>;
       exportToFile: (ids?: string[]) => Promise<{ canceled: boolean }>;
       importFromFile: () => Promise<AgentRow[]>;
+    };
+    checklist: {
+      get: (traceId: string) => Promise<ChecklistItemRow[]>;
     };
     knowledgebase: {
       list: () => Promise<KnowledgebaseFileRecord[]>;

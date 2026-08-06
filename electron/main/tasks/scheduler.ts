@@ -7,14 +7,54 @@
  * alongside the explorer daemon.
  */
 
+import { randomUUID } from "node:crypto";
 import { Notification, BrowserWindow } from "electron";
-import { run } from "@openai/agents";
-import { buildOrchestrator, listAgents } from "../ai/agents";
+import { run, Agent } from "@openai/agents";
+import { buildOrchestrator, listAgents, RunSubAgentFn } from "../ai/agents";
 import { closeMcpServers } from "../ai/mcp";
+import { resolveApprovalsAndRun, MAX_TURNS_PER_RUN } from "../ai/runLoop";
 import { getDueTasks, recordTaskRun, TaskRow } from "../db/tasksStore";
+import { cancelPendingForTrace } from "../db/checklistStore";
+import { guardLeakedChecklistReply, toolNamesOf } from "../ai/replyGuard";
+import { guardFalseAgentMutationClaim, guardFalseAgentMutationClaimAtTopLevel } from "../ai/agentMutationGuard";
+import { NO_ANSWER_TIMEOUT_SENTINEL, type RequestAnswerFn } from "../ai/tools/askUserTools";
 import { devLog } from "../devLog";
 import { parseStringMap } from "../db/jsonColumn";
 import { extractApprovalMeta } from "../ai/runItemMeta";
+
+// A scheduled task runs unattended — there is no user to show an approval dialog to. A
+// specialist called as a tool during a headless run (e.g. Chrono's Explorer call) gets the
+// same auto-reject the top-level run has always applied to its own approval-gated tools
+// (see the KI-5 comment in runPromptTask below), then resumes so the specialist can report
+// back that it was blocked, rather than leaving buildOrchestrator with no runSubAgent to
+// give its wrapped specialist tools at all.
+const runSubAgentHeadless: RunSubAgentFn = async (agent: Agent, input: string, displayName: string) => {
+  const runOnce = (segmentInput: unknown) =>
+    run(agent, segmentInput as Parameters<typeof run>[1], { maxTurns: MAX_TURNS_PER_RUN });
+  devLog(`[taskScheduler] running specialist=${displayName} headlessly`);
+  const result = await resolveApprovalsAndRun(runOnce, input, async () => false);
+  const output = result?.finalOutput ?? "";
+  const label = `specialist=${displayName}`;
+  // KI-23: same guard as ipc/agent.ts's runSubAgent — a headless specialist run can claim
+  // an agent was created/updated without having actually called create_agent/update_agent.
+  const checkedOutput = guardFalseAgentMutationClaim(output, result?.newItems ?? [], label);
+  // KI-6: same guard as ipc/agent.ts's runSubAgent — a specialist leaking its own
+  // write_checklist call (as JSON, or narrated as prose) would poison the orchestrator's
+  // context with it too.
+  return guardLeakedChecklistReply(checkedOutput, input, agent.model, label, toolNamesOf(agent));
+};
+
+// Same "no one to ask, resolve immediately" posture as runSubAgentHeadless above, applied
+// to ask_user instead of approvals — a scheduled task can't wait on a human to answer a
+// question either. Resolves with the field's own placeholder when there is one (identical
+// to what an interactive run does when the user skips an optional question), or the fixed
+// timeout sentinel when there isn't — never actually waits, since there's no timeout to
+// wait out unattended.
+const requestAnswerHeadless: RequestAnswerFn = async (agentName, question, field) => {
+  const answer = field.placeholder ?? NO_ANSWER_TIMEOUT_SENTINEL;
+  devLog(`[taskScheduler] ${agentName} asked "${question}" headlessly — answered with: ${answer}`);
+  return answer;
+};
 
 const POLL_INTERVAL_MS = 30_000;
 // Truncated in the OS notification body so a long agent reply doesn't overflow the
@@ -78,7 +118,17 @@ export function notify(title: string, body: string): void {
 /** Exported for testing — the interruption/auto-reject handling below is the KI-5 fix and is
  * otherwise only reachable through the poll loop's setInterval callback. */
 export async function runPromptTask(task: TaskRow): Promise<string> {
-  const { agent: orchestrator, mcpServers, allAgents } = await buildOrchestrator();
+  // Scopes this task run's checklist_items rows (see ai/tools/checklistTools.ts) the same
+  // way ipc/agent.ts's interactive traceId does — scheduled runs had no equivalent id
+  // before the checklist feature needed one; nested specialist calls automatically share
+  // this same value since buildOrchestrator bakes it into every agent's write_checklist
+  // tool at construction time, not per call.
+  const traceId = randomUUID();
+  const { agent: orchestrator, mcpServers, allAgents } = await buildOrchestrator(
+    runSubAgentHeadless,
+    traceId,
+    requestAnswerHeadless
+  );
   try {
     let runTarget = orchestrator;
     if (task.prompt_target_agent_id) {
@@ -95,7 +145,7 @@ export async function runPromptTask(task: TaskRow): Promise<string> {
       currentDateTime: now.toLocaleString(),
     });
     devLog(`[taskScheduler] running task id=${task.id} target=${runTarget.name}`);
-    const result = await run(runTarget, prompt);
+    const result = await run(runTarget, prompt, { maxTurns: MAX_TURNS_PER_RUN });
 
     // A headless run has no renderer to show the approval UI ipc/agent.ts's interactive path
     // uses — result.interruptions was previously never inspected here, so a call to an
@@ -112,10 +162,26 @@ export async function runPromptTask(task: TaskRow): Promise<string> {
         });
       }
       devLog(`[taskScheduler] task id=${task.id} blocked on approval-gated tool(s): ${toolNames.join(", ")}`);
+      // The run stops here, unattended and unresolved — any checklist item still pending
+      // for this trace never will resolve, same reasoning as ipc/agent.ts's abandon path.
+      cancelPendingForTrace(traceId);
       return `Blocked — needs your approval for: ${toolNames.join(", ")}. Run this task interactively in chat instead.`;
     }
 
-    return result.finalOutput ?? "";
+    const output = result.finalOutput ?? "";
+    const taskLabel = `task id=${task.id}`;
+    const taskRunTargetToolNames = toolNamesOf(runTarget);
+    // KI-23: same dispatch as ipc/agent.ts's top-level path — a task can target Cipher
+    // directly, whose own newItems are where create_agent/update_agent would appear.
+    const mutationChecked = taskRunTargetToolNames.some((n) => n === "create_agent" || n === "update_agent")
+      ? guardFalseAgentMutationClaim(output, result.newItems, taskLabel)
+      : guardFalseAgentMutationClaimAtTopLevel(output, result.newItems, taskLabel);
+    // KI-6: same guard as ipc/agent.ts — never let a leaked write_checklist reply
+    // become the notification body or last_result text a task run is recorded with.
+    return await guardLeakedChecklistReply(mutationChecked, prompt, runTarget.model, taskLabel, taskRunTargetToolNames);
+  } catch (e) {
+    cancelPendingForTrace(traceId);
+    throw e;
   } finally {
     await closeMcpServers(mcpServers);
   }

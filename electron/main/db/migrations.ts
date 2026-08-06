@@ -902,6 +902,37 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    id: "20260805120000",
+    up: (db) => {
+      // One turn's plan-in-progress, as the orchestrator (and, for its own multi-step
+      // flows, a specialist like Cipher) reports it via the write_checklist tool — see
+      // ai/tools/checklistTools.ts. Scoped by trace_id, the one id that already ties a
+      // top-level run and every nested specialist call together (see logTokenUsage in
+      // ipc/agent.ts, which logs a row per model call under the same trace_id throughout
+      // a turn, handoffs/tool calls included). agent_name records which agent owns a row —
+      // Orbit's own plan and a specialist's plan for the same turn coexist as separate rows
+      // rather than one shared list, so a specialist's write_checklist call can never
+      // clobber the orchestrator's.
+      //
+      // No foreign key to a trace/run table: traceId is a randomUUID() generated fresh per
+      // run (ipc/agent.ts) or per scheduled task (tasks/scheduler.ts), not a row in any
+      // table of its own — there is nothing to reference.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS checklist_items (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          trace_id TEXT NOT NULL,
+          agent_name TEXT NOT NULL,
+          position INTEGER NOT NULL,
+          text TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+      `);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_checklist_items_trace ON checklist_items(trace_id);`);
+    },
+  },
 ];
 
 /** Fails at import rather than at some user's next launch. A duplicate key would mean one of the two

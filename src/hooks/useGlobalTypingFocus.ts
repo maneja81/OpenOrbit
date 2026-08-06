@@ -12,6 +12,13 @@ export function useGlobalTypingFocus(inputRef: RefObject<HTMLTextAreaElement | n
     const onKeyDown = (e: KeyboardEvent) => {
       const inp = inputRef.current;
       if (!inp || document.activeElement === inp) return;
+      // A disabled textarea (ChatInputBar sets this while sendDisabled — an approval/question
+      // is pending, or a run is already in flight) can't accept real user input, but nothing
+      // stops a script from writing `.value` and dispatching a synthetic event on one anyway —
+      // which is exactly what the two branches below do. Reading `.disabled` straight off the
+      // DOM node (rather than threading a second prop through) means this can never drift out
+      // of sync with whatever ChatInputBar actually rendered.
+      if (inp.disabled) return;
       // Don't steal keystrokes from another focused field (Settings, onboarding, Danger
       // Zone confirm, etc.) — only redirect into chat when focus is on nothing typeable.
       if (isEditableElement(document.activeElement)) return;
