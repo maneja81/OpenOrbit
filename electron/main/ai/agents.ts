@@ -41,6 +41,7 @@ import { encryptSecret } from "../security/secretStorage";
 import { connectMcpServersForAgent } from "./mcp";
 import { buildHttpToolsForCollectionIds, buildHttpToolsPromptBlock } from "./httpTools";
 import { devLog } from "../devLog";
+import { broadcastSettingsUpdate } from "./broadcastEvents";
 import { CONNECTOR_REGISTRY, getConnectorDefinition } from "../connectors/registry";
 import { runOAuthFlow } from "../connectors/oauthFlow";
 import {
@@ -263,12 +264,14 @@ function ensureDefaultAgentsSeeded(db: Database.Database): void {
 // hand off to ConfigAgent. orchestratorEnabled is deliberately absent — the
 // orchestrator can't be disabled (see ipc/settings.ts).
 // Every user-facing toggle/field in AgentsSettings (src/lib/settings.ts) belongs here
-// except onboardingDone (internal lifecycle flag, not a user setting),
+// except onboardingDone and tourCompleted (internal lifecycle flags, not user settings),
 // orchestratorEnabled (permanently locked — see ipc/settings.ts's LOCKED_KEYS) and the
 // PROTECTED_SETTING_KEYS below — anything else missing from this list is
 // invisible/unreachable to Cipher regardless of what the user asks for, which is exactly the
 // bug this list previously had (bgMusicEnabled, soundFxEnabled, voiceOutputEnabled,
-// voiceTranscriptionModel, voiceTtsModel were all silently absent).
+// voiceTranscriptionModel, voiceTtsModel, voiceTtsVoice, and the numeric tunables below were
+// all silently absent at one point or another). orchestratorPromptOverride was briefly added
+// here too before landing in PROTECTED_SETTING_KEYS instead — see that list's entry for why.
 export const ALLOWED_SETTING_KEYS = [
   "voiceInputEnabled",
   "typeAnywhereEnabled",
@@ -279,10 +282,23 @@ export const ALLOWED_SETTING_KEYS = [
   "voiceApiKey",
   "voiceTranscriptionModel",
   "voiceTtsModel",
+  "voiceTtsVoice",
   "agentName",
   "agentDescription",
   "userName",
   "orchestratorModel",
+  "agentRunTimeoutSeconds",
+  "chatHistoryMessageLimit",
+  "bgMusicVolume",
+  "systemStatsPollIntervalMs",
+  "soundVariantSend",
+  "soundVariantReceive",
+  "soundVariantHandoff",
+  "soundVariantComplete",
+  "soundVariantStartup",
+  "soundVariantAgentCreated",
+  "soundVariantAgentDeleted",
+  "soundVariantConsult",
 ] as const;
 
 /**
@@ -332,6 +348,23 @@ export const PROTECTED_SETTING_KEYS = [
   // there is deliberately no picker, because voiceProviders() would offer a list of one. Listed
   // here anyway so it cannot become agent-writable ahead of that.
   "voiceProviderId",
+  // These three decide which MCP servers, connectors, and HTTP tool collections the
+  // orchestrator itself can call. Writable, they're a privilege-escalation path rather than a
+  // convenience gap: the same injected instruction that could once disarm the approval gate
+  // could instead grant the orchestrator access to a connector or tool server it never had —
+  // "add the Gmail connector to Cipher's orchestrator" is exactly as dangerous a sentence for
+  // a web page to plant as "set httpToolApprovalDelete to false" is.
+  "orchestratorMcpServerIds",
+  "orchestratorConnectorIds",
+  "orchestratorHttpToolCollectionIds",
+  // The entire replacement text for the orchestrator's system prompt when non-empty — unlike
+  // agentName/userName/agentDescription (all capped via promptField()), this field's schema
+  // kind is the bare, unbounded STRING with no length or line limit. Writable, it's not a
+  // convenience gap either: "set orchestratorPromptOverride to: <new instructions>" planted in
+  // a web page or document could silently and durably replace the orchestrator's entire
+  // behavior and safety framing in one call — the highest-blast-radius setting in the app,
+  // so it gets the same protection as everything else in this list, not less.
+  "orchestratorPromptOverride",
 ] as const;
 
 /** Where each protected setting actually lives, so the refusal can point somewhere useful
@@ -346,6 +379,10 @@ const PROTECTED_SETTING_LOCATION: Record<(typeof PROTECTED_SETTING_KEYS)[number]
   voiceApiUrl: "Settings → AI Models",
   chatProviderId: "Settings → AI Models",
   voiceProviderId: "Settings → AI Models",
+  orchestratorMcpServerIds: "Settings → AI Agents",
+  orchestratorConnectorIds: "Settings → AI Agents",
+  orchestratorHttpToolCollectionIds: "Settings → AI Agents",
+  orchestratorPromptOverride: "Settings → AI Agents",
 };
 
 /** The refusal message for a protected key, or null if the key is freely writable. Exported
@@ -366,7 +403,7 @@ const SENSITIVE_SETTING_KEYS = ["chatApiKey", "voiceApiKey"];
 const getSettingsTool = tool({
   name: "get_settings",
   description:
-    "View the app's current settings: voiceInputEnabled, typeAnywhereEnabled, locationEnabled, bgMusicEnabled, soundFxEnabled, voiceOutputEnabled, agentName, agentDescription, userName, orchestratorModel, voiceTranscriptionModel, voiceTtsModel, chatProviderId and voiceProviderId (which AI provider each slot uses — openrouter, openai, anthropic for Claude, or local), chatApiUrl, voiceApiUrl, whether the Chat/Voice API keys are set (the key values themselves are never exposed), and the HTTP-tool approval policy (httpToolApprovalPost, httpToolApprovalPutPatch, httpToolApprovalDelete, toolApprovalDisplay).",
+    "View the app's current settings: voiceInputEnabled, typeAnywhereEnabled, locationEnabled, bgMusicEnabled, soundFxEnabled, voiceOutputEnabled, agentName, agentDescription, userName, orchestratorModel, orchestratorPromptOverride, voiceTranscriptionModel, voiceTtsModel, voiceTtsVoice, chatProviderId and voiceProviderId (which AI provider each slot uses — openrouter, openai, anthropic for Claude, or local), chatApiUrl, voiceApiUrl, whether the Chat/Voice API keys are set (the key values themselves are never exposed), the HTTP-tool approval policy (httpToolApprovalPost, httpToolApprovalPutPatch, httpToolApprovalDelete, toolApprovalDisplay), the orchestrator's own tool grants (orchestratorMcpServerIds, orchestratorConnectorIds, orchestratorHttpToolCollectionIds), agentRunTimeoutSeconds, chatHistoryMessageLimit, bgMusicVolume, systemStatsPollIntervalMs, and the soundVariant* picks.",
   parameters: z.object({}),
   execute: async () => {
     devLog("[get_settings] called");
@@ -382,6 +419,7 @@ const getSettingsTool = tool({
     const voiceOutputEnabled = readAppSetting("voiceOutputEnabled");
     const voiceTranscriptionModel = readAppSetting("voiceTranscriptionModel");
     const voiceTtsModel = readAppSetting("voiceTtsModel");
+    const voiceTtsVoice = readAppSetting("voiceTtsVoice");
     const chatApiUrl = readAppSetting("chatApiUrl");
     const voiceApiUrl = readAppSetting("voiceApiUrl");
     // Reported but not writable — see PROTECTED_SETTING_KEYS. Being able to *say* which provider
@@ -395,6 +433,22 @@ const getSettingsTool = tool({
     const httpToolApprovalPutPatch = readAppSetting("httpToolApprovalPutPatch");
     const httpToolApprovalDelete = readAppSetting("httpToolApprovalDelete");
     const toolApprovalDisplay = readAppSetting("toolApprovalDisplay");
+    const orchestratorPromptOverride = readAppSetting("orchestratorPromptOverride");
+    const orchestratorMcpServerIds = readAppSetting("orchestratorMcpServerIds");
+    const orchestratorConnectorIds = readAppSetting("orchestratorConnectorIds");
+    const orchestratorHttpToolCollectionIds = readAppSetting("orchestratorHttpToolCollectionIds");
+    const agentRunTimeoutSeconds = readAppSetting("agentRunTimeoutSeconds");
+    const chatHistoryMessageLimit = readAppSetting("chatHistoryMessageLimit");
+    const bgMusicVolume = readAppSetting("bgMusicVolume");
+    const systemStatsPollIntervalMs = readAppSetting("systemStatsPollIntervalMs");
+    const soundVariantSend = readAppSetting("soundVariantSend");
+    const soundVariantReceive = readAppSetting("soundVariantReceive");
+    const soundVariantHandoff = readAppSetting("soundVariantHandoff");
+    const soundVariantComplete = readAppSetting("soundVariantComplete");
+    const soundVariantStartup = readAppSetting("soundVariantStartup");
+    const soundVariantAgentCreated = readAppSetting("soundVariantAgentCreated");
+    const soundVariantAgentDeleted = readAppSetting("soundVariantAgentDeleted");
+    const soundVariantConsult = readAppSetting("soundVariantConsult");
     return {
       httpToolApprovalPost,
       httpToolApprovalPutPatch,
@@ -404,6 +458,11 @@ const getSettingsTool = tool({
       agentDescription,
       userName,
       orchestratorModel,
+      orchestratorPromptOverride,
+      // Reported but not writable — same reasoning as chatProviderId/voiceProviderId above.
+      orchestratorMcpServerIds,
+      orchestratorConnectorIds,
+      orchestratorHttpToolCollectionIds,
       voiceInputEnabled,
       typeAnywhereEnabled,
       locationEnabled,
@@ -412,12 +471,25 @@ const getSettingsTool = tool({
       voiceOutputEnabled,
       voiceTranscriptionModel,
       voiceTtsModel,
+      voiceTtsVoice,
       chatApiUrl,
       voiceApiUrl,
       chatProviderId,
       voiceProviderId,
       chatApiKeySet: Boolean(chatApiKey),
       voiceApiKeySet: Boolean(voiceApiKey),
+      agentRunTimeoutSeconds,
+      chatHistoryMessageLimit,
+      bgMusicVolume,
+      systemStatsPollIntervalMs,
+      soundVariantSend,
+      soundVariantReceive,
+      soundVariantHandoff,
+      soundVariantComplete,
+      soundVariantStartup,
+      soundVariantAgentCreated,
+      soundVariantAgentDeleted,
+      soundVariantConsult,
     };
   },
 });
@@ -425,13 +497,13 @@ const getSettingsTool = tool({
 const updateSettingTool = tool({
   name: "update_setting",
   description:
-    "Update one of the app's settings: voiceInputEnabled, typeAnywhereEnabled, bgMusicEnabled, soundFxEnabled, voiceOutputEnabled, chatApiKey, voiceApiKey, voiceTranscriptionModel, voiceTtsModel, agentName, agentDescription, userName, orchestratorModel. The approval settings (httpToolApprovalPost/PutPatch/Delete, toolApprovalDisplay), locationEnabled, the provider URLs (chatApiUrl, voiceApiUrl) and the provider selectors (chatProviderId, voiceProviderId) are safety settings and cannot be changed here — they decide which host the user's API key is sent to, so only the user can change them, in Settings → AI Models.",
+    "Update one of the app's settings: voiceInputEnabled, typeAnywhereEnabled, bgMusicEnabled, soundFxEnabled, voiceOutputEnabled, chatApiKey, voiceApiKey, voiceTranscriptionModel, voiceTtsModel, voiceTtsVoice, agentName, agentDescription, userName, orchestratorModel, agentRunTimeoutSeconds, chatHistoryMessageLimit, bgMusicVolume, systemStatsPollIntervalMs, and the soundVariant* picks (Send/Receive/Handoff/Complete/Startup/AgentCreated/AgentDeleted/Consult, each 1-5). The approval settings (httpToolApprovalPost/PutPatch/Delete, toolApprovalDisplay), locationEnabled, the provider URLs (chatApiUrl, voiceApiUrl), the provider selectors (chatProviderId, voiceProviderId), the orchestrator's own tool grants (orchestratorMcpServerIds, orchestratorConnectorIds, orchestratorHttpToolCollectionIds), and orchestratorPromptOverride (the orchestrator's whole system prompt) are safety settings and cannot be changed here — they decide which host the user's API key is sent to, what the orchestrator can access, or its entire behavior, so only the user can change them, in Settings → AI Models or Settings → AI Agents.",
   parameters: z.object({
     // Protected keys stay nameable so a request to change one gets a real answer pointing at
     // Settings. Dropping them from the enum instead would surface as a schema error, which
     // reads as a broken tool rather than a deliberate refusal.
     key: z.enum([...ALLOWED_SETTING_KEYS, ...PROTECTED_SETTING_KEYS]),
-    value: z.union([z.string(), z.boolean()]),
+    value: z.union([z.string(), z.boolean(), z.number()]),
   }),
   execute: async ({ key, value }) => {
     const isSensitive = SENSITIVE_SETTING_KEYS.includes(key);
@@ -462,6 +534,10 @@ const updateSettingTool = tool({
     setSetting(`appSettings.${key}`, stored);
     // Never log the raw value for an API key — only confirm the write happened.
     devLog(`[update_setting] appSettings.${key} = ${isSensitive ? "(redacted)" : result.value}`);
+    // Broadcast at the point of the write rather than waiting for ipc/agent.ts's end-of-run
+    // broadcast — a multi-tool-call turn (e.g. update a setting, then look something up)
+    // would otherwise leave the renderer's Settings panel stale until the whole turn finishes.
+    broadcastSettingsUpdate();
     return `Updated ${key}.`;
   },
   // Without this the SDK replaces every failure with "An error occurred while running the
@@ -1266,6 +1342,26 @@ export async function buildOrchestrator(
   // appended here, to guarantee it without duplicating a date the built-ins already state.
   const dateContext = `\n\nThe current date and time is ${promptVars.currentDateTime} — trust this over any assumption from training data about what day it is.`;
 
+  // Appended to *every* agent — orchestrator, built-in specialists and custom agents alike.
+  //
+  // Orbit reported a balance of "340,000 INR" for a budget agent that held no records at
+  // all: it made the figure up, then repeated it a turn later over that agent's own explicit
+  // "I don't have a recorded balance yet". orchestrator.md now carries the full version of
+  // this rule, but stating it only there leaves two holes. A specialist is usually the agent
+  // that actually holds the records, so it is the one best placed to invent one — and Orbit
+  // is told to trust what a specialist reports. And the orchestrator prompt is user-
+  // replaceable (orchestratorPromptOverride), which would drop the rule entirely. Appending
+  // it here is the one place that reaches every agent no matter how its prompt was authored.
+  const groundingRule =
+    "\n\nNever state a figure, total, balance, count, date or stored record unless a tool call in this same turn " +
+    "returned it. Not from memory, not from earlier in the conversation, not by doing arithmetic on a number you " +
+    "saw before, and never invented because a plausible-sounding one would answer the question. If you have no " +
+    "record of something, say exactly that — \"I don't have that recorded\" is always a better answer than a " +
+    "number you cannot point at. A figure you or another agent stated earlier is not a source. The same rule " +
+    "covers people and quotes: never attribute a quote, comment, username, or handle to a person unless a tool " +
+    "result in this same turn actually contains it verbatim. A search that came back with no forum or social " +
+    "content does not become one by inventing a commenter — say the search found no such discussion instead.";
+
   // Unlike save_user_info (documented with an explicit line in every built-in prompt .md —
   // see orchestrator.md/configAgent.md/knowledgeAgent.md/explorer.md), the agent-data CRUD
   // tools have no .md file to add a line to since custom-agent prompts are freeform text
@@ -1277,7 +1373,11 @@ export async function buildOrchestrator(
     "(e.g. a saved entry, a running total, a preference specific to your job) under a short key, get_agent_data " +
     "to recall it by that key, list_agent_data to see everything you've saved, and delete_agent_data to remove " +
     "an entry. Use this whenever you need to persist your own data across turns or conversations — no other " +
-    "agent can read or change it.";
+    "agent can read or change it. Before telling the user you have nothing recorded, call list_agent_data and " +
+    "look — a get_agent_data miss only means that one key is unused, never that the store is empty, and answering " +
+    "\"nothing saved yet\" off a single missed key is how a wrong total gets stated as fact. When you keep a series " +
+    "of entries (expenses, log lines, anything that accumulates), give every key in that series the same prefix so " +
+    "you can find the whole set again.";
 
   // This description feeds agentAsTool below — it's what the orchestrator actually sees on
   // the generated tool for this specialist, the same job handoffDescription used to do for
@@ -1289,7 +1389,8 @@ export async function buildOrchestrator(
   const configAgentRow = db.prepare("SELECT * FROM agents WHERE id = ?").get("configAgent") as AgentRow;
   const configAgent = new Agent({
     name: configAgentRow.name,
-    instructions: renderPrompt(configAgentRow.prompt, promptVars) + httpToolsPromptForRow(configAgentRow) + userInfoBlock,
+    instructions:
+      renderPrompt(configAgentRow.prompt, promptVars) + httpToolsPromptForRow(configAgentRow) + groundingRule + userInfoBlock,
     model: modelForAgent(configAgentRow),
     tools: [
       getSettingsTool,
@@ -1318,7 +1419,7 @@ export async function buildOrchestrator(
   const knowledgeAgent = new Agent({
     name: knowledgeAgentRow.name,
     instructions:
-      renderPrompt(knowledgeAgentRow.prompt, promptVars) + httpToolsPromptForRow(knowledgeAgentRow) + userInfoBlock,
+      renderPrompt(knowledgeAgentRow.prompt, promptVars) + httpToolsPromptForRow(knowledgeAgentRow) + groundingRule + userInfoBlock,
     model: modelForAgent(knowledgeAgentRow),
     tools: [
       listKnowledgebaseFilesTool,
@@ -1341,7 +1442,7 @@ export async function buildOrchestrator(
   const explorerAgent = new Agent({
     name: explorerAgentRow.name,
     instructions:
-      renderPrompt(explorerAgentRow.prompt, promptVars) + httpToolsPromptForRow(explorerAgentRow) + userInfoBlock,
+      renderPrompt(explorerAgentRow.prompt, promptVars) + httpToolsPromptForRow(explorerAgentRow) + groundingRule + userInfoBlock,
     model: modelForAgent(explorerAgentRow),
     tools: [
       webSearchTool,
@@ -1372,7 +1473,8 @@ export async function buildOrchestrator(
   const taskAgentRow = db.prepare("SELECT * FROM agents WHERE id = ?").get("taskAgent") as AgentRow;
   const taskAgent = new Agent({
     name: taskAgentRow.name,
-    instructions: renderPrompt(taskAgentRow.prompt, promptVars) + httpToolsPromptForRow(taskAgentRow) + userInfoBlock,
+    instructions:
+      renderPrompt(taskAgentRow.prompt, promptVars) + httpToolsPromptForRow(taskAgentRow) + groundingRule + userInfoBlock,
     model: modelForAgent(taskAgentRow),
     tools: [
       createTaskTool,
@@ -1404,6 +1506,7 @@ export async function buildOrchestrator(
           renderPrompt(row.prompt, promptVars) +
           dateContext +
           agentDataContext +
+          groundingRule +
           httpToolsPromptForRow(row) +
           userInfoBlock,
         model: modelForAgent(row),
@@ -1470,6 +1573,7 @@ export async function buildOrchestrator(
     instructions:
       renderPrompt(getOrchestratorPromptTemplate(), promptVars) +
       buildHttpToolsPromptBlock(orchestratorHttpToolCollectionIds) +
+      groundingRule +
       userInfoBlock,
     model: modelForAgent({ model: orchestratorModel, provider_id: "" }),
     tools: [

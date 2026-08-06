@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Database from "better-sqlite3";
 import { runMigrations } from "../db/migrations";
@@ -56,6 +58,18 @@ describe("settings ConfigAgent may write (backs Cipher's update_setting tool)", 
     // the URL, so writing one of these redirects the key just as effectively as writing the URL.
     "chatProviderId",
     "voiceProviderId",
+    // These decide which MCP servers/connectors/HTTP tool collections the orchestrator itself
+    // can call — writable, they're a privilege-escalation path: "add the Gmail connector to
+    // Cipher's orchestrator" is exactly as dangerous a sentence for a web page to plant as
+    // disarming the approval gate.
+    "orchestratorMcpServerIds",
+    "orchestratorConnectorIds",
+    "orchestratorHttpToolCollectionIds",
+    // The orchestrator's entire replacement system prompt, unbounded length — "set
+    // orchestratorPromptOverride to: <new instructions>" is exactly as dangerous a sentence
+    // as disarming the approval gate, and unlike agentName/userName this field has no
+    // length or single-line cap in its schema.
+    "orchestratorPromptOverride",
   ];
 
   it.each(SAFETY_KEYS)("does not let an agent write %s", (key) => {
@@ -99,15 +113,40 @@ describe("settings ConfigAgent may write (backs Cipher's update_setting tool)", 
   it("still lets an agent write the ordinary preferences", () => {
     // The API *keys* stay writable — entering one by voice or chat during setup is a real
     // flow, and unlike the URLs a key cannot redirect where data goes.
-    for (const key of ["agentName", "userName", "voiceInputEnabled", "orchestratorModel", "chatApiKey"]) {
+    for (const key of [
+      "agentName",
+      "userName",
+      "voiceInputEnabled",
+      "orchestratorModel",
+      "chatApiKey",
+      // voiceTtsVoice (which TTS voice plays, e.g. "nova") used to be missing from both
+      // lists entirely — not a safety setting like the ones above, just an audio
+      // preference, so it belongs here rather than protected.
+      "voiceTtsVoice",
+      // These were the same silent-miss bug: real numeric preferences that were simply
+      // absent from both lists.
+      "agentRunTimeoutSeconds",
+      "chatHistoryMessageLimit",
+      "bgMusicVolume",
+      "systemStatsPollIntervalMs",
+      "soundVariantSend",
+      "soundVariantReceive",
+      "soundVariantHandoff",
+      "soundVariantComplete",
+      "soundVariantStartup",
+      "soundVariantAgentCreated",
+      "soundVariantAgentDeleted",
+      "soundVariantConsult",
+    ]) {
       expect(ALLOWED_SETTING_KEYS as readonly string[]).toContain(key);
       expect(protectedSettingRefusal(key)).toBeNull();
     }
   });
 
   it("never exposes the permanently locked or internal keys either", () => {
-    for (const key of ["orchestratorEnabled", "onboardingDone", "remoteImagesAutoLoad"]) {
+    for (const key of ["orchestratorEnabled", "onboardingDone", "tourCompleted", "remoteImagesAutoLoad"]) {
       expect(ALLOWED_SETTING_KEYS as readonly string[]).not.toContain(key);
+      expect(PROTECTED_SETTING_KEYS as readonly string[]).not.toContain(key);
     }
   });
 
@@ -117,6 +156,8 @@ describe("settings ConfigAgent may write (backs Cipher's update_setting tool)", 
       expect(protectedSettingRefusal("httpToolApprovalDelete")).toContain("Settings → HTTP Tools");
       expect(protectedSettingRefusal("locationEnabled")).toContain("Settings → General");
       expect(protectedSettingRefusal("chatApiUrl")).toContain("Settings → AI Models");
+      expect(protectedSettingRefusal("orchestratorMcpServerIds")).toContain("Settings → AI Agents");
+      expect(protectedSettingRefusal("orchestratorPromptOverride")).toContain("Settings → AI Agents");
     });
 
     it("tells the model not to retry", () => {
@@ -696,5 +737,35 @@ describe("connector attachment (agents.connector_ids)", () => {
 
   it("attachConnectorsForIds returns no tools for an empty id list", () => {
     expect(attachConnectorsForIds([])).toEqual([]);
+  });
+});
+
+// A source-consistency check, in the same spirit as providersParity.test.ts: buildOrchestrator
+// needs a real database and provider to run, so the only cheap way to guarantee a shared
+// prompt block reaches *every* agent is to assert it against the wiring itself. Orbit invented
+// a "340,000 INR" balance for an agent holding no records, so the rule that forbids that has
+// to be on the specialists that own the records and on custom agents Cipher writes freehand —
+// not only in orchestrator.md, which a user can also replace wholesale via
+// orchestratorPromptOverride.
+describe("groundingRule reaches every agent buildOrchestrator constructs", () => {
+  // Resolved from the repo root rather than import.meta.url: vitest does not hand this
+  // file a file:// URL.
+  const source = readFileSync(resolve(process.cwd(), "electron/main/ai/agents.ts"), "utf8");
+  const instructionBlocks = [...source.matchAll(/instructions:\s*([\s\S]*?),\n\s*model:/g)].map((m) => m[1]);
+
+  it("finds every agent's instructions in the source", () => {
+    // 4 built-in specialists + custom agents + the orchestrator.
+    expect(instructionBlocks).toHaveLength(6);
+  });
+
+  it("appends the rule to all of them", () => {
+    const missing = instructionBlocks.filter((block) => !block.includes("groundingRule"));
+    expect(missing).toEqual([]);
+  });
+
+  it("states the rule in terms of this turn's tool calls, not of any one agent's job", () => {
+    const rule = source.slice(source.indexOf("const groundingRule ="), source.indexOf("// Unlike save_user_info"));
+    expect(rule).toContain("in this same turn");
+    expect(rule).toContain("I don't have that recorded");
   });
 });

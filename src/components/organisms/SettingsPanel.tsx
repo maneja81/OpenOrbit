@@ -37,6 +37,10 @@ interface SettingsPanelProps {
   /** Section to show when the panel opens; defaults to "models" if omitted. */
   initialSection?: SettingsSection;
   settings: SettingsView;
+  /** Bumped by useSettings once per confirmed save (this window's own edit landing, or an
+   * external settings:update push — e.g. Cipher changing a setting mid-conversation). Drives
+   * a transient "Saved" indicator in the header; the count itself has no other meaning. */
+  savedVersion: number;
   /** Session age from AgentsApp's existing once-a-minute interval, forwarded to the About
    * section. Timed there rather than here so no component reads the clock during render. */
   sessionElapsedMs: number;
@@ -232,6 +236,7 @@ export default function SettingsPanel({
   onClose,
   initialSection,
   settings,
+  savedVersion,
   sessionElapsedMs,
   onUpdate,
   agentsError,
@@ -267,6 +272,30 @@ export default function SettingsPanel({
     setAppliedSection(initialSection);
     if (next) setActiveSection(next);
   }
+  // "Saved" header pill — shown for 3s after each confirmed save. mountSavedVersion is
+  // captured once (SettingsPanel stays mounted for the app's whole lifetime, hidden by
+  // Modal's own open flag) so the very first render — savedVersion already having a value —
+  // doesn't itself read as a save. The "turn on" half is a render-time state adjustment
+  // (same pattern as wasOpen/appliedSection above) rather than an effect reacting to
+  // savedVersion, since an effect that both reads a changed prop and calls setState
+  // synchronously is exactly the cascading-render pattern React's own effect guidance warns
+  // against; only the timeout — a real subscription to an external clock — belongs in an effect.
+  const [mountSavedVersion] = useState(savedVersion);
+  const [seenSavedVersion, setSeenSavedVersion] = useState(savedVersion);
+  const [showSaved, setShowSaved] = useState(false);
+  if (savedVersion !== seenSavedVersion) {
+    setSeenSavedVersion(savedVersion);
+    if (savedVersion !== mountSavedVersion) setShowSaved(true);
+  }
+  // Doesn't reset the 3s clock if a second save lands while the pill is still showing (the
+  // effect's dependency stays `true` -> `true`) — acceptable for a low-frequency indicator
+  // like this; the pill just keeps its original timer rather than extending it.
+  useEffect(() => {
+    if (!showSaved) return;
+    const timer = setTimeout(() => setShowSaved(false), 3000);
+    return () => clearTimeout(timer);
+  }, [showSaved]);
+
   const [testingChat, setTestingChat] = useState(false);
   const [testingVoice, setTestingVoice] = useState(false);
   const [chatTestResult, setChatTestResult] = useState<{ ok: boolean; detail: string } | null>(null);
@@ -481,9 +510,17 @@ export default function SettingsPanel({
                 <p>{meta.subtitle}</p>
               </div>
             </div>
-            <button className="window-close" aria-label="Close settings" onClick={onClose}>
-              <TablerIcon name="ti-x" />
-            </button>
+            <div className="detail-header-actions">
+              {showSaved && (
+                <span className="settings-saved-pill" role="status">
+                  <TablerIcon name="ti-check" />
+                  Saved
+                </span>
+              )}
+              <button className="window-close" aria-label="Close settings" onClick={onClose}>
+                <TablerIcon name="ti-x" />
+              </button>
+            </div>
           </header>
 
           <div className="detail-body">
@@ -976,6 +1013,13 @@ export default function SettingsPanel({
                     value={settings.chatHistoryMessageLimit}
                     bound={SETTING_BOUNDS.chatHistoryMessageLimit}
                     onCommit={(chatHistoryMessageLimit) => onUpdate({ chatHistoryMessageLimit })}
+                  />
+                  <NumberField
+                    label="Conversations shown in chat"
+                    hint="Older conversations stay one click away in Chat History — this only controls what's visible on screen"
+                    value={settings.chatVisibleConversations}
+                    bound={SETTING_BOUNDS.chatVisibleConversations}
+                    onCommit={(chatVisibleConversations) => onUpdate({ chatVisibleConversations })}
                   />
                   <NumberField
                     label="System Status refresh interval (ms)"

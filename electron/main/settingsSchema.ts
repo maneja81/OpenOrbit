@@ -143,6 +143,7 @@ export const SETTINGS_SCHEMA = {
   soundVariantAgentCreated: { type: "number", min: 1, max: 5, integer: true },
   soundVariantAgentDeleted: { type: "number", min: 1, max: 5, integer: true },
   soundVariantConsult: { type: "number", min: 1, max: 5, integer: true },
+  chatVisibleConversations: { type: "number", min: 1, max: 50, integer: true },
 } as const satisfies Record<string, SettingKind>;
 
 export type SettingKey = keyof typeof SETTINGS_SCHEMA;
@@ -206,7 +207,7 @@ export const SETTING_DEFAULTS: { [K in SettingKey]: SettingValue<K> } = {
   remoteImagesAutoLoad: false,
   bgMusicEnabled: false,
   voiceTtsVoice: "alloy",
-  agentRunTimeoutSeconds: 60,
+  agentRunTimeoutSeconds: 3600,
   chatHistoryMessageLimit: 20,
   bgMusicVolume: 0.1,
   systemStatsPollIntervalMs: 3000,
@@ -218,6 +219,7 @@ export const SETTING_DEFAULTS: { [K in SettingKey]: SettingValue<K> } = {
   soundVariantAgentCreated: 1,
   soundVariantAgentDeleted: 1,
   soundVariantConsult: 1,
+  chatVisibleConversations: 1,
 };
 
 export function isSettingKey(key: string): key is SettingKey {

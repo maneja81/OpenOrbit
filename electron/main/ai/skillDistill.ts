@@ -17,7 +17,7 @@ import { SETTING_DEFAULTS } from "../settingsSchema";
 // distillation on whatever model the user actually has configured instead of a separately
 // hardcoded literal that can silently drift out of sync — which is exactly what happened
 // when DEFAULT_MODEL switched formats and this file's old hardcoded copy didn't.
-function getOrchestratorModel(): string {
+export function getOrchestratorModel(): string {
   // The local FALLBACK_MODEL this used to declare was the fourth hardcoded copy of the same
   // string — and the comment above it already described that exact failure happening once
   // before. readAppSetting resolves the default from settingsSchema, so there is nothing left

@@ -16,6 +16,9 @@ import ErrorBoundary from "@/components/atoms/ErrorBoundary";
  * onboarding-failure notice below has to queue behind it — a warning that arrives before
  * "Hi, I'm Orbit" reads as though something broke on launch. */
 const GREETING_DELAY_MS = 1400;
+/** Client-side bound on the LLM-generated greeting's runStream call — see its own comment for
+ * why this exists instead of relying on the backend's much longer agentRunTimeoutSeconds. */
+const GREETING_TIMEOUT_MS = 20_000;
 // A specialist tool call held on the orbit view for at least this long once activated —
 // some calls (e.g. a plain settings read) resolve in a couple of milliseconds, which would
 // otherwise read as a flash rather than something that visibly "communicated".
@@ -42,6 +45,7 @@ import { isUpdateAvailable } from "@/lib/semver";
 import { USER_CONTEXT_FIELDS } from "@/lib/userContext";
 import { formatHumanizedError, humanizeError } from "@/lib/humanizeError";
 import { AgentId, StepEvent, matchAgentSlashCommand } from "@/lib/agents";
+import { THINKING_STEP_TYPES } from "@/lib/activityFeed";
 import { buildGreeting } from "@/lib/greeting";
 import { formatSessionStats, getCognitiveState } from "@/lib/orbStatus";
 import { KnowledgeWidgetAnchorContext } from "@/lib/knowledgeWidgetAnchor";
@@ -50,13 +54,6 @@ import { useKnowledgeFiles } from "@/hooks/useKnowledgeFiles";
 import { useAppWideFileDrop, FileDropGhost } from "@/hooks/useAppWideFileDrop";
 import { useTour } from "@/hooks/useTour";
 
-// Step types worth persisting in a chat-log "thinking" card — the substantive record of
-// what the run actually did: hand-offs and tool calls. Generic run bookkeeping
-// (message_received/interpreting/responding/responded) stays out, since it carries no
-// information about the work itself. Tool calls used to be excluded as "internal", but the
-// live orbit-scene feed is wiped 10s after a turn (see resetStepsTimerRef below), so this
-// card is the only durable answer to "which tools did it actually use?".
-const THINKING_STEP_TYPES = new Set(["handoff_requested", "handoff_occurred", "tool_called", "tool_output"]);
 
 function FileDropGhostEl({ ghost }: { ghost: FileDropGhost }) {
   const [flying, setFlying] = useState(false);
@@ -83,6 +80,11 @@ export default function AgentsApp() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const agentRefs = useRef<Record<AgentId, HTMLDivElement | null>>({});
   const resetStepsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Wall-clock start of the turn currently in flight, read by the live "thinking" indicator
+   * (via ChatPanel's liveStartedAt prop) to tick its own elapsed timer. handleSend's own
+   * closure keeps its own `startedAt` local for computing elapsedMs — this state exists only
+   * so ChatPanel can read the value during render, which a ref can't do. */
+  const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
 
   const [thinking, setThinking] = useState(false);
   // callId -> agentId for a specialist tool call Orbit itself made this turn — a Map, not a
@@ -134,12 +136,12 @@ export default function AgentsApp() {
     setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, traceId } : m)));
   }, []);
 
-  const setMessageSteps = useCallback((id: string, stepsForTurn: StepEvent[]) => {
-    setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, steps: stepsForTurn } : m)));
+  const setMessageSteps = useCallback((id: string, stepsForTurn: StepEvent[], elapsedMs?: number) => {
+    setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, steps: stepsForTurn, elapsedMs } : m)));
   }, []);
   const [entering, setEntering] = useState(false);
 
-  const { settings, updateSettings, resetSettings, loaded } = useSettings();
+  const { settings, updateSettings, resetSettings, loaded, savedVersion } = useSettings();
   const closeSettingsPanel = useCallback(() => {
     setSettingsOpen(false);
     setSettingsInitialSection(undefined);
@@ -515,6 +517,8 @@ export default function AgentsApp() {
         input.dispatchEvent(new Event("input", { bubbles: true }));
       }
       const agentLabel = settings.agentName[0]?.toUpperCase() || "A";
+      const startedAt = Date.now();
+      setRunStartedAt(startedAt);
       setThinking(true);
       setOrchestratorResponding(true);
 
@@ -528,6 +532,7 @@ export default function AgentsApp() {
         setTimeout(() => {
           setOrchestratorResponding(false);
           setThinking(false);
+          setRunStartedAt(null);
           appendMessage({ role: "assistant", text: "Agent bridge unavailable in this preview.", avatarLabel: agentLabel });
         }, 450);
         return;
@@ -674,6 +679,9 @@ export default function AgentsApp() {
           // card in the chat log keeps only the substantive parts: tool calls and handoffs,
           // so it doesn't just duplicate what's already visible elsewhere.
           const thinkingSteps = turnSteps.filter((s) => THINKING_STEP_TYPES.has(s.type));
+          // Real wall-clock elapsed time for the turn, stamped onto the finished message so
+          // its collapsed toggle can say "Thought for Ns".
+          const elapsedMs = Date.now() - startedAt;
 
           const revealMessage = () => {
             if (assistantMessageId === null) {
@@ -688,7 +696,7 @@ export default function AgentsApp() {
             } else {
               updateMessageText(assistantMessageId, finalText);
             }
-            if (thinkingSteps.length > 0) setMessageSteps(assistantMessageId, thinkingSteps);
+            setMessageSteps(assistantMessageId, thinkingSteps, elapsedMs);
           };
 
           if (source === "voice") {
@@ -726,6 +734,7 @@ export default function AgentsApp() {
           setCommunicatingAgents(new Map());
           setOrchestratorResponding(false);
           setThinking(false);
+          setRunStartedAt(null);
           playSfx("complete");
         });
     },
@@ -760,6 +769,15 @@ export default function AgentsApp() {
   /** Set when the onboarding answers failed to persist, so the notice can be queued behind the
    * greeting rather than racing it. */
   const [onboardingFactsFailed, setOnboardingFactsFailed] = useState(false);
+  /** The context answers from onboarding, read once by the entrance greeting to prompt Orbit
+   * with what it already knows about the user. A ref rather than state: written once at
+   * handoff and never needs to trigger a re-render itself. */
+  const onboardingContextRef = useRef<Pick<OnboardingAnswers, "profession" | "responseStyle" | "technicalLevel" | "stuckStyle">>({
+    profession: "",
+    responseStyle: "",
+    technicalLevel: "",
+    stuckStyle: "",
+  });
   const [approvalQueue, setApprovalQueue] = useState<PendingToolApproval[]>([]);
   useEffect(() => {
     if (!hasAgentsAPI()) return;
@@ -878,6 +896,12 @@ export default function AgentsApp() {
 
   const handleOnboardingComplete = useCallback(
     (answers: OnboardingAnswers) => {
+      onboardingContextRef.current = {
+        profession: answers.profession.trim(),
+        responseStyle: answers.responseStyle,
+        technicalLevel: answers.technicalLevel,
+        stuckStyle: answers.stuckStyle,
+      };
       updateSettings({
         agentName: answers.agentName,
         userName: answers.userName,
@@ -948,10 +972,78 @@ export default function AgentsApp() {
 
   useEffect(() => {
     if (!entering) return;
-    const greeting = `Hi ${settings.userName || "there"}, I'm ${settings.agentName}. You can talk to me using the mic, or type in the chat below.`;
+    const agentLabel = settings.agentName[0]?.toUpperCase() || "A";
+    // Used verbatim if the LLM call below never happens (no agent bridge) or fails/times out —
+    // same wording the greeting always used, so a broken run degrades to what already shipped.
+    const staticGreeting = `Hi ${settings.userName || "there"}, I'm ${settings.agentName}. You can talk to me using the mic, or type in the chat below. What would you like to start with?`;
+
     const timer = setTimeout(() => {
-      appendMessage({ role: "assistant", text: greeting, avatarLabel: settings.agentName[0]?.toUpperCase() || "A" });
-      speak(greeting);
+      if (!hasAgentsAPI()) {
+        appendMessage({ role: "assistant", text: staticGreeting, avatarLabel: agentLabel });
+        return;
+      }
+
+      const { profession, responseStyle, technicalLevel, stuckStyle } = onboardingContextRef.current;
+      const knownDetails = [
+        profession && `their profession: ${profession}`,
+        responseStyle && `they prefer ${responseStyle.toLowerCase()} answers`,
+        technicalLevel && `their technical level: ${technicalLevel.toLowerCase()}`,
+        stuckStyle && `when stuck they want: ${stuckStyle.toLowerCase()}`,
+      ]
+        .filter(Boolean)
+        .join("; ");
+      const prompt = `This is the very first message of a brand new conversation, right after onboarding — the user has not said anything yet. Greet ${
+        settings.userName || "the user"
+      } warmly and briefly, as yourself.${
+        knownDetails ? ` Weave in what you already know about them from onboarding: ${knownDetails}.` : ""
+      } Mention they can talk to you using the mic or type in the chat below. End by asking what they'd like to start with. Keep it to 2-3 short sentences, plain text, no markdown.`;
+
+      // requestId/traceId plumbing mirrors handleSend's runStream call above, trimmed to just
+      // what a one-shot, non-streamed-to-UI greeting needs: the trace id (so the bubble still
+      // links to its token-usage row) and the final text.
+      const requestId = crypto.randomUUID();
+      let traceId: string | null = null;
+      const unsubTrace = window.agentsAPI.agent.onStreamTrace(({ requestId: rid, traceId: tid }) => {
+        if (rid === requestId) traceId = tid;
+      });
+
+      // No AbortSignal on runStream's IPC round trip, and the backend's own run timeout is
+      // agentRunTimeoutSeconds (an hour by default) — without this, a slow/hung provider
+      // leaves a brand new user staring at a silent chat log for up to that long. `settled`
+      // guards against the fallback firing and then the real result landing afterwards and
+      // appending a second, redundant greeting.
+      let settled = false;
+      const timeoutId = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        appendMessage({ role: "assistant", text: staticGreeting, avatarLabel: agentLabel });
+      }, GREETING_TIMEOUT_MS);
+
+      window.agentsAPI.agent
+        .runStream(prompt, requestId, undefined, false)
+        .then((result) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeoutId);
+          const text = result?.trim();
+          appendMessage({
+            role: "assistant",
+            text: text || staticGreeting,
+            avatarLabel: agentLabel,
+            ...(traceId ? { traceId } : {}),
+          });
+        })
+        .catch(() => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeoutId);
+          // Same fallback as no-agent-bridge above — a failed/timed-out first run must not
+          // leave a brand new user staring at an empty chat.
+          appendMessage({ role: "assistant", text: staticGreeting, avatarLabel: agentLabel });
+        })
+        .finally(() => {
+          unsubTrace();
+        });
     }, GREETING_DELAY_MS);
     return () => clearTimeout(timer);
     // Fires once when onboarding hands off into the main UI.
@@ -1048,16 +1140,31 @@ export default function AgentsApp() {
             ) : null
           }
           questionCard={pendingQuestion ? <AskUserCard pending={pendingQuestion} onAnswer={respondToQuestion} /> : null}
+          liveStartedAt={orchestratorResponding ? runStartedAt : null}
+          liveSteps={orchestratorResponding ? steps : undefined}
           // Locked in both display modes: the modal already blocks interaction, and the
           // inline card would otherwise leave the input live while a run is paused. Same
           // reasoning extends to a pending question — always an in-chat card, never a modal.
-          sendDisabled={pendingApproval !== null || pendingQuestion !== null}
+          // Also locked for the plain in-flight case (no approval/question, just Orbit still
+          // replying) — sending mid-run doesn't queue, it starts a second concurrent run and
+          // its step feed resets the one already in progress out from under the user.
+          sendDisabled={pendingApproval !== null || pendingQuestion !== null || orchestratorResponding}
           // KI-3: question takes priority in the (impossible in practice, but not
           // type-impossible) case both are somehow pending at once — either way the
           // placeholder must never claim "approve or decline" when a question is why send
-          // is blocked, since it isn't an approval gate.
-          sendDisabledReason={pendingQuestion !== null ? "question" : pendingApproval !== null ? "approval" : undefined}
+          // is blocked, since it isn't an approval gate. "responding" is lowest priority —
+          // an approval/question mid-run still means that, not "still responding".
+          sendDisabledReason={
+            pendingQuestion !== null
+              ? "question"
+              : pendingApproval !== null
+                ? "approval"
+                : orchestratorResponding
+                  ? "responding"
+                  : undefined
+          }
           onShowFullHistory={() => setChatHistoryOpen(true)}
+          visibleConversationCount={settings.chatVisibleConversations}
           autoLoadRemoteImages={settings.remoteImagesAutoLoad}
           onSend={() => handleSend()}
           onStartVoice={startVoice}
@@ -1071,6 +1178,7 @@ export default function AgentsApp() {
         onClose={closeSettingsPanel}
         initialSection={settingsInitialSection}
         settings={settings}
+        savedVersion={savedVersion}
         sessionElapsedMs={sessionElapsedMs}
         onUpdate={updateSettings}
         agentsError={agentsError}

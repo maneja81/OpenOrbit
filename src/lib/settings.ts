@@ -3,10 +3,14 @@ export const DEFAULT_VOICE_TRANSCRIPTION_MODEL = "whisper-1";
 export const DEFAULT_VOICE_TTS_MODEL = "gpt-4o-mini-tts";
 export const DEFAULT_VOICE_TTS_VOICE = "alloy";
 export const VOICE_TTS_VOICE_OPTIONS = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"] as const;
-export const DEFAULT_AGENT_RUN_TIMEOUT_SECONDS = 60;
+export const DEFAULT_AGENT_RUN_TIMEOUT_SECONDS = 3600;
 export const DEFAULT_CHAT_HISTORY_MESSAGE_LIMIT = 20;
 export const DEFAULT_BG_MUSIC_VOLUME = 0.1;
 export const DEFAULT_SYSTEM_STATS_POLL_INTERVAL_MS = 3000;
+/** How many recent conversations (a user message and everything up to the next one) stay
+ * visible in the live chat log — see lib/chatVisibility.ts. Defaults to showing just the
+ * conversation in progress; older ones are always one click away in Chat History. */
+export const DEFAULT_CHAT_VISIBLE_CONVERSATIONS = 1;
 /** Number of pre-rendered variations available per SFX event (public/audio/sfx/<event>/v1..v5.wav). */
 export const SOUND_FX_VARIANT_COUNT = 5;
 
@@ -31,6 +35,7 @@ export const SETTING_BOUNDS = {
   chatHistoryMessageLimit: { min: 1, max: 200, integer: true },
   bgMusicVolume: { min: 0, max: 1 },
   systemStatsPollIntervalMs: { min: 500, max: 600_000, integer: true },
+  chatVisibleConversations: { min: 1, max: 50, integer: true },
 } as const satisfies Record<string, NumericBound>;
 
 export const TOOL_APPROVAL_DISPLAY_OPTIONS = ["modal", "inline"] as const;
@@ -100,6 +105,7 @@ export interface AgentsSettings {
   soundVariantAgentCreated: number;
   soundVariantAgentDeleted: number;
   soundVariantConsult: number;
+  chatVisibleConversations: number;
 }
 
 export const DEFAULT_SETTINGS: AgentsSettings = {
@@ -150,6 +156,7 @@ export const DEFAULT_SETTINGS: AgentsSettings = {
   soundVariantAgentCreated: 1,
   soundVariantAgentDeleted: 1,
   soundVariantConsult: 1,
+  chatVisibleConversations: DEFAULT_CHAT_VISIBLE_CONVERSATIONS,
 };
 
 /**

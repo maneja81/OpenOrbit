@@ -25,14 +25,15 @@ interface ChatInputBarProps {
   /** Every enabled agent (system + custom) the message could be directed at — rendered
    * as extra slash commands (e.g. typing "/cipher") that address that agent by name. */
   agents: DirectableAgent[];
-  /** Blocks sending while a tool approval or an ask_user question is outstanding — the run
-   * is paused waiting on that answer, and a second turn would start a concurrent run
-   * against the same chat. */
+  /** Blocks sending — and the rest of the bar's controls — while a tool approval or an
+   * ask_user question is outstanding, or while a run is already in flight. A second turn
+   * sent mid-run doesn't queue, it starts a concurrent run against the same chat and its
+   * step feed clobbers the one already in progress. */
   sendDisabled?: boolean;
   /** KI-3: which kind of pause is blocking send, so the placeholder can say the right
    * thing — "approve or decline" is wrong (and was shown, misleadingly) while an ask_user
    * card is actually what's waiting for input. Ignored when sendDisabled is false. */
-  sendDisabledReason?: "approval" | "question";
+  sendDisabledReason?: "approval" | "question" | "responding";
   onSend: () => void;
   onStartVoice: () => void;
   onStopVoice: () => void;
@@ -156,6 +157,14 @@ export default function ChatInputBar({
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, MAX_INPUT_HEIGHT_PX)}px`;
+    // KI-20: .input-top centers the field against the mic/send buttons by default — the
+    // state the bar sits in almost all the time — and only bottom-aligns (.multi-line) once
+    // the field has actually grown past one line, so the buttons stay pinned to the bottom
+    // row as it grows rather than floating to a moving vertical center. Toggled here (not
+    // React state) to match resize()'s own imperative, no-extra-render style; el.scrollHeight
+    // right after the resize above is exactly one line's worth (LINE_HEIGHT_PX + the field's
+    // own vertical padding) whenever the value hasn't wrapped, regardless of character count.
+    el.closest(".input-top")?.classList.toggle("multi-line", el.scrollHeight > LINE_HEIGHT_PX + INPUT_VERTICAL_PADDING_PX);
   };
 
   const closeSlashMenu = () => {
@@ -318,10 +327,13 @@ export default function ChatInputBar({
                 sendDisabled
                   ? sendDisabledReason === "question"
                     ? "Answer or cancel the question above to continue…"
-                    : "Approve or decline the request above to continue…"
+                    : sendDisabledReason === "responding"
+                      ? `Waiting for ${agentName} to finish…`
+                      : "Approve or decline the request above to continue…"
                   : `Message ${agentName}… or / for commands`
               }
               autoComplete="off"
+              disabled={sendDisabled}
               onInput={onInput}
               onKeyDown={onKeyDown}
             />
@@ -340,7 +352,7 @@ export default function ChatInputBar({
                   id="vbtn"
                   className={listening ? "listening" : transcribing ? "transcribing" : ""}
                   aria-label={transcribing ? "Transcribing…" : listening ? "Stop recording" : "Start recording"}
-                  disabled={transcribing}
+                  disabled={transcribing || sendDisabled}
                   onClick={listening ? onStopVoice : onStartVoice}
                 >
                   <TablerIcon name={transcribing ? "ti-loader-2" : "ti-microphone"} />
@@ -349,7 +361,13 @@ export default function ChatInputBar({
               {hasText && (
                 <IconButton
                   id="sbtn"
-                  aria-label={sendDisabled ? "Waiting for your approval" : "Send"}
+                  aria-label={
+                    sendDisabled
+                      ? sendDisabledReason === "responding"
+                        ? `Waiting for ${agentName} to finish`
+                        : "Waiting for your approval"
+                      : "Send"
+                  }
                   disabled={sendDisabled}
                   onClick={handleSendClick}
                 >
@@ -362,7 +380,7 @@ export default function ChatInputBar({
             <IconButton
               className="tb-chip"
               aria-label="Show slash commands"
-              disabled={!canOpenCommands}
+              disabled={!canOpenCommands || sendDisabled}
               onClick={openCommandMenu}
             >
               <TablerIcon name="ti-terminal-2" />
@@ -371,7 +389,7 @@ export default function ChatInputBar({
             <IconButton
               className="tb-chip"
               aria-label="Show agent mentions"
-              disabled={!canOpenAgents}
+              disabled={!canOpenAgents || sendDisabled}
               onClick={openAgentMenu}
             >
               <TablerIcon name="ti-at" />

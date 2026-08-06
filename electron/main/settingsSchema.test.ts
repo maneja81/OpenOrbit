@@ -20,7 +20,7 @@ describe("the schema itself", () => {
     // main has no path into the renderer's tree. This count is the tripwire: add a setting
     // there without adding it here and it becomes silently unwritable, because an unlisted
     // key is now refused rather than persisted.
-    expect(Object.keys(SETTINGS_SCHEMA)).toHaveLength(43);
+    expect(Object.keys(SETTINGS_SCHEMA)).toHaveLength(44);
   });
 
   it("recognises a real key and refuses anything else", () => {

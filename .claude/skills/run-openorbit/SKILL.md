@@ -68,6 +68,44 @@ Then **open the screenshot**. A blank frame is a failed launch, however clean th
 
 Screenshots land in `/tmp/orbit-run/shots` (override: `SCREENSHOT_DIR`).
 
+### No tmux available
+
+If `tmux` isn't installed, pipe a whole script into the driver via stdin instead — it detects a
+non-TTY and switches to **batch mode**: reads the full script up front, then awaits each command
+in order before running the next (a plain `printf ... | node driver.mjs` would otherwise let
+readline emit every line before the first async command resolves, racing `set`/`type` ahead of a
+`launch` still in flight).
+
+```bash
+cat > /tmp/orbit-script.txt <<'EOF'
+launch
+ss landing
+EOF
+node .claude/skills/run-openorbit/driver.mjs < /tmp/orbit-script.txt
+```
+
+**The app closes at the end of every batch script** — `quit` runs automatically after the last
+line. This means **one script = one continuous session**: everything for a single interaction
+sequence (onboard, send a message, inspect the result, click something, inspect again) has to be
+*one* piped script, not several. Splitting it across multiple `node driver.mjs < script` calls
+silently starts over from a fresh app launch each time — see the next gotcha for why that's easy
+to miss.
+
+`eval` runs in the page's `Function` constructor, which does **not** allow top-level `await`
+(`SyntaxError: await is only valid in async functions`). For anything that needs to wait —
+polling for a reply, pausing between steps — wrap it: `eval (async()=>{ await new
+Promise(r=>setTimeout(r,500)); return document.querySelector('...')?.textContent; })()`. A
+polling loop in one `eval` call (rather than many separate `eval`/`ss` round trips) is both more
+reliable and cheaper than guessing a fixed delay:
+
+```
+eval (async()=>{const log=[];for(let i=0;i<40;i++){await new Promise(r=>setTimeout(r,1200));
+  const done = !document.querySelector('#inp')?.disabled;
+  log.push({t:i*1.2, done});
+  if (done) break;
+} return log;})()
+```
+
 ### Commands
 
 | command | what it does |
@@ -128,8 +166,84 @@ log skipping                 # [db] skipping appSettings.agentName: value is not
 settings                     # agentName absent; everything else intact
 ```
 
+## Onboarding through to a real chat message
+
+Everything below is **one continuous batch script** (see "No tmux available" above) — required
+if you need to inspect the resulting conversation, since a second `launch` would start over. For
+a hosted provider, only three fields need real typed input: agent name, your name, and the API
+key — the provider chip pre-fills the URL and model.
+
+```bash
+source .env.test   # OPENAI_API_KEY, or whichever provider you're testing
+cat > /tmp/script.txt <<EOF
+reset
+launch
+type Orbit
+click .onboarding-next
+type Tester
+click .onboarding-next
+click .onboarding-next
+click-text Brief & direct
+click-text Beginner
+click-text Just tell me what to do
+click-text OpenAI
+click .onboarding-next
+type ${OPENAI_API_KEY}
+click .onboarding-next
+click .onboarding-next
+wait #chat-log
+press Escape
+click #inp
+type Hello, what tools do you have?
+press Enter
+eval (async()=>{for(let i=0;i<40;i++){await new Promise(r=>setTimeout(r,1200));
+  if(!document.querySelector('#inp')?.disabled) break;}
+  return document.querySelector('.turn.assistant:last-child .m')?.textContent;})()
+ss reply
+EOF
+node .claude/skills/run-openorbit/driver.mjs < /tmp/script.txt
+```
+
+The profession/responseStyle/technicalLevel/stuckStyle steps are all optional — `click
+.onboarding-next` (blank text step) or a chip click both advance past them; skipping them
+entirely is fine unless the thing under test specifically depends on one of those answers.
+
 ## Gotchas
 
+- **Chat messages are not persisted across a relaunch.** The live chat log is renderer-only
+  React state, seeded fresh with the static "Online. Tell me what needs doing." greeting on
+  every mount — there is no restore from `chat_history` on load. A second `launch` in a new
+  script (even against the same sandbox, without `reset`) starts a brand-new conversation, not a
+  continuation. If a test needs to inspect a message you just sent, do it inside the *same*
+  batch script that sent it — don't check across two `node driver.mjs` invocations.
+- **Onboarding's last step takes 500ms to actually finish, even once the field is valid.**
+  `finish()` (`OnboardingScreen.tsx`) sets an exit-animation flag and only calls `onComplete` after a
+  `setTimeout(..., 500)`. Checking state (or screenshotting) immediately after the final
+  `click .onboarding-next` reads the still-mid-transition onboarding screen, not the app it
+  becomes — `wait #chat-log` (10s timeout, so it comfortably outlasts the 500ms) rather than
+  checking synchronously.
+- **A chip-selected provider pre-fills the next two onboarding fields with real values, not
+  just placeholders.** Choosing "OpenAI" on the provider step writes the actual base URL and
+  default model straight into `answers.apiUrl`/`answers.model` (`selectChip` in
+  `OnboardingScreen.tsx`) — the API-URL and model steps arrive already filled in, not merely
+  showing a greyed placeholder. `type`ing into them (Playwright's `keyboard.type` appends, it
+  doesn't replace) produces a doubled, broken value
+  (`https://api.openai.com/v1https://api.openai.com/v1`), which then makes every real API call
+  404. For a hosted provider, click `.onboarding-next` directly on those two steps without typing
+  anything; only the API key field is genuinely empty and needs a real `type`.
+- **Onboarding's Enter-to-advance can silently double-skip a step** when the next step is a chip
+  step (its first chip autofocuses) — reproduced consistently, tracked as KI-18 in
+  `0-cowork/memory/known-issues.md`, not fixed. Clicking `.onboarding-next` instead of pressing
+  Enter does not have this problem — prefer clicks over Enter when scripting onboarding.
+- **The feature tour auto-launches right after onboarding completes** (a `driver.js` overlay,
+  "1 of 23"). `press Escape` once before your first real interaction to dismiss it — clicking its
+  visible "×" is riskier: `[aria-label*="Close"]` also matches the window chrome's own close
+  button (see the gotcha below).
+- **`settings`'s `chatApiKeySet` reflects only the legacy `appSettings.chatApiKey` column, not
+  the provider-registry `providers` table.** After onboarding with a registry provider (anything
+  chosen via the provider chip step, e.g. OpenAI), `chatApiKeySet` correctly reads `false` even
+  though the real credential is stored and working — it is not a signal that onboarding or
+  `selectChat` failed. Look for `chatProviderId` being set to the expected id instead.
 - **Don't launch without the sandbox.** See the top of this file. The driver enforces it; a
   hand-rolled `_electron.launch()` does not.
 - **`npm run build` first.** `main` points at `dist-electron/main/index.js`, and the dev script

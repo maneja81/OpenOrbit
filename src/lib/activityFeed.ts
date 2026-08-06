@@ -16,12 +16,28 @@ export interface ActivityRow {
  * synthesises from agent:stream-agent. */
 const TOOL_STEP_TYPES = new Set(["tool_called", "tool_output"]);
 
+/** Step types worth showing in a "Thinking" disclosure (post-hoc or live) — the substantive
+ * record of what the run actually did: hand-offs and tool calls. Generic run bookkeeping
+ * (message_received/interpreting/responding/responded) stays out, since it carries no
+ * information about the work itself and is only meant to drive the live status word/orb
+ * animation, not appear as its own row. */
+export const THINKING_STEP_TYPES = new Set(["handoff_requested", "handoff_occurred", "tool_called", "tool_output"]);
+
 /** Sub-second work reads better in ms than as "0.3s". Returns "" for values that can't be
  * a real elapsed time, so callers can omit the element entirely rather than print garbage. */
 export function formatStepDuration(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return "";
   if (ms < 1000) return `${Math.round(ms)}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
+}
+
+/** Whole-second reading for the "Thinking" toggle's summary line ("Thought for 12s") — that
+ * label is about how long the turn took overall, where formatStepDuration's ms/decimal
+ * precision (built for a single tool call) would read as noise. Floors at 1s so a
+ * sub-second reply doesn't claim to have taken no time at all. */
+export function formatThoughtSeconds(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  return `${Math.max(1, Math.round(ms / 1000))}s`;
 }
 
 /**

@@ -1,14 +1,15 @@
-import { ReactNode, RefObject, useState } from "react";
+import { ReactNode, RefObject, useEffect, useState } from "react";
 import ChatBubble, { MessageRole } from "@/components/atoms/ChatBubble";
 import ChatInputBar, { DirectableAgent } from "@/components/molecules/ChatInputBar";
 import TablerIcon from "@/components/atoms/TablerIcon";
 import { StepEvent } from "@/lib/agents";
-import { buildActivityRows, formatStepDuration } from "@/lib/activityFeed";
+import { buildActivityRows, formatStepDuration, formatThoughtSeconds, THINKING_STEP_TYPES } from "@/lib/activityFeed";
 import { formatMessageTime } from "@/lib/chatTime";
 import { hasCodeFence } from "@/lib/codeFence";
 import MessageCost from "@/components/atoms/MessageCost";
 import { useTraceUsage } from "@/hooks/useTraceUsage";
 import { useScrollToBottom } from "@/hooks/useScrollToBottom";
+import { sliceRecentConversations } from "@/lib/chatVisibility";
 
 export interface ChatMessage {
   id: string;
@@ -18,6 +19,10 @@ export interface ChatMessage {
   // Only set on assistant messages — the hand-off narration captured for that turn
   // (see THINKING_STEP_TYPES in AgentsApp.tsx), shown as a minimal toggle line.
   steps?: StepEvent[];
+  // Also assistant-only: real wall-clock ms from send to this reply landing, set alongside
+  // steps once the turn finishes. Drives the collapsed toggle's "Thought for Ns" label —
+  // undefined while the turn is still in flight (see the separate live indicator below).
+  elapsedMs?: number;
   // Also assistant-only: the run that produced this reply, used to look up what it cost.
   // Absent on the greeting, on bridge-unavailable/error replies, and on any turn whose
   // trace event didn't arrive — MessageCost renders nothing in all of those cases.
@@ -42,15 +47,28 @@ interface ChatPanelProps {
    * in-chat card, no modal mode (unlike approvals, there's no "Ask me with" setting for
    * this). Null when nothing is pending. */
   questionCard?: ReactNode;
-  /** True while an approval or a question is outstanding — blocks sending so a second turn
-   * can't start a concurrent run against a conversation that's mid-approval/mid-question. */
+  /** Epoch ms the in-flight turn started, or null/undefined when nothing is running —
+   * renders the live dots+elapsed-timer indicator in place of the eventual completed
+   * turn's collapsed toggle. Cleared by the caller the moment the run ends. */
+  liveStartedAt?: number | null;
+  /** The in-flight turn's step feed so far, read by the live indicator for its current
+   * status word and (once expanded) its running activity list. */
+  liveSteps?: StepEvent[];
+  /** True while an approval or a question is outstanding, or a run is already in flight —
+   * blocks sending so a second turn can't start a concurrent run against a conversation
+   * that's mid-approval/mid-question/mid-response (a second send while Orbit is still
+   * replying reset the in-progress step feed out from under the first run). */
   sendDisabled?: boolean;
   /** KI-3: which kind blocked it, forwarded to ChatInputBar so its placeholder describes
    * the actual pause instead of always assuming an approval gate. */
-  sendDisabledReason?: "approval" | "question";
+  sendDisabledReason?: "approval" | "question" | "responding";
   /** Opens the full paged archive (ChatHistoryModal) — the log itself only keeps the last
-   * MAX_VISIBLE_MESSAGES turns on screen. */
+   * visibleConversationCount conversations on screen. */
   onShowFullHistory: () => void;
+  /** How many recent conversations (settings.chatVisibleConversations) stay in the live log —
+   * see lib/chatVisibility.ts for what counts as one. Everything older is one click away via
+   * onShowFullHistory. */
+  visibleConversationCount: number;
   /** Forwarded to every bubble — see AgentsSettings.remoteImagesAutoLoad. */
   autoLoadRemoteImages?: boolean;
   onSend: () => void;
@@ -58,35 +76,86 @@ interface ChatPanelProps {
   onStopVoice: () => void;
 }
 
-/** Enough backlog to follow a conversation without the log growing tall enough to bury the
- * orbit behind it. Everything older stays one click away in ChatHistoryModal. */
-const MAX_VISIBLE_MESSAGES = 10;
+/** The expandable body shared by the completed toggle and the live indicator — one row per
+ * substantive step (hand-offs, tool calls), in order. */
+function ActivityRows({ steps }: { steps: StepEvent[] }) {
+  return (
+    <div className="thinking-steps">
+      {buildActivityRows(steps).map((row, i) => {
+        const duration = row.durationMs === undefined ? "" : formatStepDuration(row.durationMs);
+        return (
+          <div key={i} className="thinking-step">
+            {row.agentName && <span className="step-feed-agent">{row.agentName}</span>}
+            <span className="step-feed-label">{row.label}</span>
+            {duration && <span className="step-feed-duration">{duration}</span>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
-/** Minimal text+chevron toggle for a turn's hand-off narration — deliberately not the
- * full WidgetCard glass-panel shell (title bar, padding, border) used elsewhere, since
- * this is meant to read as a small inline disclosure, not another panel. */
-function ThinkingToggle({ steps }: { steps: StepEvent[] }) {
+/** Minimal text+chevron toggle for a finished turn's hand-off narration and how long it
+ * took — deliberately not the full WidgetCard glass-panel shell (title bar, padding,
+ * border) used elsewhere, since this is meant to read as a small inline disclosure, not
+ * another panel. Collapsed by default. Renders as a plain (non-interactive) line, with no
+ * chevron, when there's nothing substantive to expand into — a turn with no tool calls
+ * still took real time, but there's no activity list behind the disclosure arrow. */
+function ThinkingToggle({ steps, elapsedMs }: { steps: StepEvent[]; elapsedMs: number }) {
   const [open, setOpen] = useState(false);
+  const label = `Thought for ${formatThoughtSeconds(elapsedMs)}`;
+  if (steps.length === 0) {
+    return (
+      <div className="thinking-toggle">
+        <span className="thinking-toggle-btn thinking-toggle-static">{label}</span>
+      </div>
+    );
+  }
   return (
     <div className="thinking-toggle">
       <button type="button" className="thinking-toggle-btn" onClick={() => setOpen((o) => !o)}>
         <TablerIcon name={open ? "ti-chevron-down" : "ti-chevron-right"} />
-        <span>Thinking</span>
+        <span>{label}</span>
       </button>
-      {open && (
-        <div className="thinking-steps">
-          {buildActivityRows(steps).map((row, i) => {
-            const duration = row.durationMs === undefined ? "" : formatStepDuration(row.durationMs);
-            return (
-              <div key={i} className="thinking-step">
-                {row.agentName && <span className="step-feed-agent">{row.agentName}</span>}
-                <span className="step-feed-label">{row.label}</span>
-                {duration && <span className="step-feed-duration">{duration}</span>}
-              </div>
-            );
-          })}
-        </div>
-      )}
+      {open && <ActivityRows steps={steps} />}
+    </div>
+  );
+}
+
+/** Shown in place of a turn's eventual ThinkingToggle while it's still running: three
+ * animated dots, a self-ticking elapsed timer (real wall clock, independent of parent
+ * re-renders), and the current status word taken straight from the live step feed's last
+ * entry — same narration the orb's status line already shows, just readable in the log
+ * too. Expands to the substantive steps captured so far, same shape as the finished
+ * toggle's body. */
+function LiveThinking({ startedAt, steps }: { startedAt: number; steps: StepEvent[] }) {
+  const [open, setOpen] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const status = steps.at(-1)?.label || "Thinking…";
+  const activitySteps = steps.filter((s) => THINKING_STEP_TYPES.has(s.type));
+  return (
+    <div className="thinking-toggle">
+      <button
+        type="button"
+        className="thinking-toggle-btn"
+        onClick={() => setOpen((o) => !o)}
+        disabled={activitySteps.length === 0}
+      >
+        {activitySteps.length > 0 && <TablerIcon name={open ? "ti-chevron-down" : "ti-chevron-right"} />}
+        <span className="thinking-dots" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </span>
+        <span>
+          {formatThoughtSeconds(Math.max(0, now - startedAt))} · {status}
+        </span>
+      </button>
+      {open && <ActivityRows steps={activitySteps} />}
     </div>
   );
 }
@@ -101,9 +170,12 @@ export default function ChatPanel({
   agents,
   approvalCard,
   questionCard,
+  liveStartedAt,
+  liveSteps,
   sendDisabled,
   sendDisabledReason,
   onShowFullHistory,
+  visibleConversationCount,
   autoLoadRemoteImages,
   onSend,
   onStartVoice,
@@ -111,9 +183,10 @@ export default function ChatPanel({
 }: ChatPanelProps) {
   const { containerRef, isAtBottom, scrollToBottom } = useScrollToBottom<HTMLDivElement>();
 
-  // The tail of the conversation rather than the whole of it — see MAX_VISIBLE_MESSAGES.
-  const visible = messages.slice(-MAX_VISIBLE_MESSAGES);
-  const hasOlder = messages.length > MAX_VISIBLE_MESSAGES;
+  // The last visibleConversationCount conversations rather than the whole log — see
+  // lib/chatVisibility.ts.
+  const visible = sliceRecentConversations(messages, visibleConversationCount);
+  const hasOlder = visible.length < messages.length;
 
   const usageByTrace = useTraceUsage(visible.map((m) => m.traceId));
   // Only the first costed bubble carries the tour's anchor id — ids must be unique, and
@@ -151,7 +224,9 @@ export default function ChatPanel({
           const handoffTo = message.steps?.filter((s) => s.handoffTo).at(-1)?.handoffTo;
           return (
             <div key={message.id} className={`turn ${message.role}`}>
-              {message.steps && message.steps.length > 0 && <ThinkingToggle steps={message.steps} />}
+              {message.elapsedMs !== undefined && (
+                <ThinkingToggle steps={message.steps ?? []} elapsedMs={message.elapsedMs} />
+              )}
               <div className="turn-row">
                 <span className="dot" />
                 <ChatBubble
@@ -174,6 +249,9 @@ export default function ChatPanel({
             </div>
           );
         })}
+        {liveStartedAt !== null && liveStartedAt !== undefined && (
+          <LiveThinking startedAt={liveStartedAt} steps={liveSteps ?? []} />
+        )}
         {approvalCard}
         {questionCard}
       </div>

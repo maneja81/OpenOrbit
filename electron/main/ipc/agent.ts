@@ -26,16 +26,20 @@ import {
   AgentExport,
 } from "../ai/agents";
 import { closeMcpServers } from "../ai/mcp";
-import { resolveApprovalsAndRun } from "../ai/runLoop";
+import { resolveApprovalsAndRun, MAX_TURNS_PER_RUN } from "../ai/runLoop";
+import { createSerialQueue } from "../ai/serialQueue";
 import { cancelPendingForTrace } from "../db/checklistStore";
-import { guardLeakedChecklistJson } from "../ai/replyGuard";
+import { guardLeakedChecklistReply, toolNamesOf } from "../ai/replyGuard";
 import { NO_ANSWER_TIMEOUT_SENTINEL, type RequestAnswerFn } from "../ai/tools/askUserTools";
+import { createPausableDeadline } from "./pausableDeadline";
 import { extractApprovalMeta, extractRunItemMeta } from "../ai/runItemMeta";
 import { configureChatClient, estimateGenerationCost, providerIdForModel } from "../ai/provider";
 import { insertTokenUsage, updateTokenUsageCost } from "../db/tokenUsageStore";
 import { getRecentMessages, appendMessage, ChatMessageRecord } from "./chatHistory";
 import { readAppSetting } from "../appSettings";
 import { devLog } from "../devLog";
+import { broadcastSettingsUpdate, broadcastConnectorsUpdate, broadcastTasksUpdate } from "../ai/broadcastEvents";
+import { suggestAgentIdentity, AgentIdentitySuggestError } from "../ai/agentIdentitySuggest";
 
 // Best-effort extraction of a tool call's name/arguments (tool_called) or its output
 // (tool_output) from a RunItem — the SDK's item shape varies by item type (function call
@@ -94,44 +98,11 @@ function broadcastTokenUsageUpdate(): void {
   }
 }
 
-// ConfigAgent's update_setting tool (electron/main/ai/agents.ts) writes straight to the
-// settings table, bypassing the settings:update IPC handler entirely — without this,
-// the renderer's cached settings state (fetched once in useSettings.ts) never learns a
-// setting changed from inside an agent run, so the UI silently goes stale even though the
-// agent correctly reports success. Broadcast unconditionally after every run rather than
-// only when update_setting was actually called — cheap (one IPC message + a settings:get
-// round trip) and far simpler than introspecting result.newItems for a specific tool call.
-function broadcastSettingsUpdate(): void {
-  devLog("[agent] broadcasting settings:update to all windows (settings may have changed this run)");
-  for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send("settings:update");
-  }
-}
-
-// ConfigAgent's connect_connector/disconnect_connector/attach_connector_to_agent/
-// detach_connector_from_agent tools (electron/main/ai/agents.ts) write straight to the
-// connectors/agents tables, bypassing the connectors:connect/disconnect IPC handlers
-// entirely — without this, useConnectors.ts's cached state (fetched once on mount) never
-// learns a connector changed mid agent-run. Same broadcast-unconditionally-after-every-run
-// approach as broadcastSettingsUpdate above, for the same reason.
-function broadcastConnectorsUpdate(): void {
-  devLog("[agent] broadcasting connectors:update to all windows (connectors may have changed this run)");
-  for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send("connectors:update");
-  }
-}
-
-// Chrono's create_task/update_task/complete_task/cancel_task/delete_task tools
-// (electron/main/ai/tools/taskAgentTools.ts) write straight to the tasks table, bypassing
-// the tasks:* IPC handlers entirely — same reasoning as broadcastSettingsUpdate/
-// broadcastConnectorsUpdate above, so useTasks.ts's cached state doesn't go stale after a
-// chat conversation with Chrono.
-function broadcastTasksUpdate(): void {
-  devLog("[agent] broadcasting tasks:update to all windows (tasks may have changed this run)");
-  for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send("tasks:update");
-  }
-}
+// broadcastSettingsUpdate/broadcastConnectorsUpdate/broadcastTasksUpdate moved to
+// ../ai/broadcastEvents.ts so update_setting (agents.ts) can call broadcastSettingsUpdate
+// directly at the point of the write, rather than only once at the end of the whole run —
+// see that module's header comment. Kept called unconditionally here too, once per run: it
+// still covers any DB write a tool makes without an immediate call of its own, and is cheap.
 
 // Structural subset of RunResult/StreamedRunResult shared via RunResultBase — kept minimal
 // (rather than importing the concrete generic types) since the two result classes aren't
@@ -210,7 +181,7 @@ function logTokenUsage(result: RunResultLike, traceId: string): void {
 // via a Runner instance's RunConfig); this global toggle is the simpler fit here.
 setTracingDisabled(true);
 
-const DEFAULT_AGENT_RUN_TIMEOUT_SECONDS = 60;
+const DEFAULT_AGENT_RUN_TIMEOUT_SECONDS = 3600;
 
 /** Settings → General lets this be extended for runs expected to take longer (multi-hop
  * handoffs, slow MCP tools, web search) — re-read per run rather than cached so a change
@@ -224,55 +195,6 @@ function getAgentRunTimeoutMs(): number {
  * Deliberately far longer than the run timeout — the run clock is paused while this one
  * runs, so the only thing it bounds is how long a forgotten dialog can pin a run open. */
 const APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;
-
-/**
- * A run deadline that can be paused.
- *
- * A fixed-timer race is right when the only thing that can be slow is the model — but a
- * tool that needs the user's approval blocks on a human, and a human will routinely take
- * longer than the 60s default. Without pausing, enabling the confirmation gate on any tool
- * would make that tool's runs time out almost every time.
- *
- * Only *waiting on a person* pauses the clock. Model latency, tool execution, and network
- * time all still count against it, so a genuinely stuck run still dies on schedule.
- */
-function createPausableDeadline(ms: number, message: string) {
-  let remaining = ms;
-  let startedAt = Date.now();
-  let timer: NodeJS.Timeout | undefined;
-  let rejectFn: ((error: Error) => void) | undefined;
-
-  const promise = new Promise<never>((_, reject) => {
-    rejectFn = reject;
-  });
-  // The rejection is always consumed by the Promise.race below; this keeps a pause/resume
-  // cycle from tripping an unhandled-rejection warning in the window before the race runs.
-  promise.catch(() => {});
-
-  const arm = () => {
-    startedAt = Date.now();
-    timer = setTimeout(() => rejectFn?.(new Error(message)), remaining);
-  };
-  arm();
-
-  return {
-    promise,
-    pause() {
-      if (!timer) return;
-      clearTimeout(timer);
-      timer = undefined;
-      remaining = Math.max(0, remaining - (Date.now() - startedAt));
-    },
-    resume() {
-      if (timer) return;
-      arm();
-    },
-    clear() {
-      if (timer) clearTimeout(timer);
-      timer = undefined;
-    },
-  };
-}
 
 /** Why an approval was resolved by something other than the user answering it. */
 export type ApprovalSettledReason = "timeout" | "abandoned";
@@ -371,7 +293,13 @@ export function registerAgentHandlers() {
   // the same filter toTextStream() applies internally.
   ipcMain.handle(
     "agent:runStream",
-    async (event, input: string, requestId: string, targetAgentName?: string): Promise<string> => {
+    async (
+      event,
+      input: string,
+      requestId: string,
+      targetAgentName?: string,
+      persistInput = true
+    ): Promise<string> => {
       if (typeof input !== "string" || input.length === 0) {
         throw new Error("agent:runStream requires non-empty text input");
       }
@@ -380,7 +308,10 @@ export function registerAgentHandlers() {
       }
       configureChatClient();
       const history = getRecentMessages(undefined, getHistoryMessageLimit());
-      appendMessage({ role: "user", text: input });
+      // persistInput=false is for synthetic, caller-generated prompts (the onboarding
+      // greeting) that must reach the model but never read back as something the user
+      // actually typed — the assistant's reply below is still persisted either way.
+      if (persistInput) appendMessage({ role: "user", text: input });
       // One id per run, generated here so the same value reaches all three places that
       // need to agree: token_usage's rows, the assistant message row, and the renderer.
       // Main-generated rather than reusing the renderer's requestId — requestId is
@@ -400,14 +331,26 @@ export function registerAgentHandlers() {
       const timeoutMs = getAgentRunTimeoutMs();
       const deadline = createPausableDeadline(timeoutMs, `Agent run timed out after ${timeoutMs / 1000}s`);
 
+      /** One card in front of the user at a time, across both mechanisms that produce one.
+       * Parallel tool calls in a single turn, and parallel specialist runs each with their
+       * own approval loop, both put more than one request in flight at once — see
+       * ai/serialQueue.ts. Wrapping here (rather than inside each request function) keeps
+       * the deadline paused across queued time too, so waiting your turn never costs the
+       * run its budget. */
+      const userPromptQueue = createSerialQueue();
+      const askUserSerially = <T,>(request: () => Promise<T>): Promise<T> => {
+        deadline.pause();
+        return userPromptQueue.run(request).finally(() => deadline.resume());
+      };
+
       /** Asks the user to approve one tool call and waits for their answer, with the run
        * clock paused for the duration. Resolves false on timeout or if the run is
        * abandoned, which the caller turns into a rejection the model is told about. */
-      const requestApproval = (item: unknown): Promise<boolean> => {
+      const requestApproval = (item: unknown): Promise<boolean> =>
+        askUserSerially(() => {
         const approvalId = randomUUID();
         const meta = extractApprovalMeta(item);
         devLog(`[agent:runStream] requestId=${requestId} awaiting approval for tool=${meta.toolName ?? "(unknown)"}`);
-        deadline.pause();
         return new Promise<boolean>((resolve) => {
           const timer = setTimeout(() => settleApproval(approvalId, false, "timeout"), APPROVAL_TIMEOUT_MS);
           pendingApprovals.set(approvalId, { requestId, resolve, timer, sender: event.sender });
@@ -431,24 +374,19 @@ export function registerAgentHandlers() {
               }`
             );
             return approved;
-          })
-          .finally(() => {
-            // Resumed here rather than at each call site so an approval that times out or is
-            // abandoned still restarts the clock exactly once.
-            deadline.resume();
           });
-      };
+        });
 
       /** Asks the user a real question via ask_user and waits for their answer, with the run
-       * clock paused for the duration — same shape as requestApproval, but resolves with the
-       * answer text itself rather than a boolean. On timeout, resolves with the field's own
-       * placeholder if it has one, or the fixed NO_ANSWER_TIMEOUT_SENTINEL otherwise, so the
-       * calling agent always gets a real string back and can react instead of hanging. */
-      const requestAnswer: RequestAnswerFn = (agentName, question, field) => {
+       * clock paused across the whole wait by requestAnswer below — same shape as
+       * requestApproval, but resolves with the answer text itself rather than a boolean. On
+       * timeout, resolves with the field's own placeholder if it has one, or the fixed
+       * NO_ANSWER_TIMEOUT_SENTINEL otherwise, so the calling agent always gets a real string
+       * back and can react instead of hanging. */
+      const askOneQuestion: RequestAnswerFn = (agentName, question, field) => {
         const questionId = randomUUID();
         const fallbackAnswer = field.placeholder ?? NO_ANSWER_TIMEOUT_SENTINEL;
         devLog(`[agent:runStream] requestId=${requestId} awaiting answer from ${agentName} for question="${question}"`);
-        deadline.pause();
         return new Promise<string>((resolve) => {
           const timer = setTimeout(() => settleQuestion(questionId, fallbackAnswer, "timeout"), APPROVAL_TIMEOUT_MS);
           pendingQuestions.set(questionId, { requestId, resolve, timer, sender: event.sender, fallbackAnswer });
@@ -466,11 +404,11 @@ export function registerAgentHandlers() {
           .then((answer) => {
             devLog(`[agent:runStream] requestId=${requestId} answered: "${answer}"`);
             return answer;
-          })
-          .finally(() => {
-            deadline.resume();
           });
       };
+
+      const requestAnswer: RequestAnswerFn = (agentName, question, field) =>
+        askUserSerially(() => askOneQuestion(agentName, question, field));
 
       /** Forwards one run segment's stream events to the renderer. Called once per segment:
        * a run interrupted for approval resumes as a new streamed result, and its events
@@ -534,7 +472,10 @@ export function registerAgentHandlers() {
       // one turn even when a specialist tool call is what triggered the resume.
       const runToCompletion = (target: Agent, input: unknown, label: string) => {
         const runOnce = async (segmentInput: unknown) => {
-          const segment = await run(target, segmentInput as Parameters<typeof run>[1], { stream: true });
+          const segment = await run(target, segmentInput as Parameters<typeof run>[1], {
+            stream: true,
+            maxTurns: MAX_TURNS_PER_RUN,
+          });
           await forwardStreamEvents(segment);
           await segment.completed;
           if (!timedOut) logTokenUsage(segment, traceId);
@@ -556,10 +497,16 @@ export function registerAgentHandlers() {
       const runSubAgent = async (agent: Agent, subInput: string, displayName: string): Promise<string> => {
         const result = await runToCompletion(agent, subInput, `specialist=${displayName}`);
         const output = result?.finalOutput ?? "";
-        // KI-6: a specialist can leak its own write_checklist JSON the same way the
+        // KI-6: a specialist can leak its own write_checklist call the same way the
         // top-level run can — catch it here too, so Orbit's own reply never gets built on
         // top of raw JSON it received back from a specialist call.
-        return guardLeakedChecklistJson(output, subInput, agent.model, `requestId=${requestId} specialist=${displayName}`);
+        return guardLeakedChecklistReply(
+          output,
+          subInput,
+          agent.model,
+          `requestId=${requestId} specialist=${displayName}`,
+          toolNamesOf(agent)
+        );
       };
 
       const { agent: orchestrator, mcpServers, allAgents } = await buildOrchestrator(runSubAgent, traceId, requestAnswer);
@@ -585,14 +532,16 @@ export function registerAgentHandlers() {
           devLog(
             `[agent:runStream] requestId=${requestId} lastAgent=${result.lastAgent?.name ?? "none"} finalOutput="${rawFinalOutput}"`
           );
-          // KI-6/KI-1: gpt-4.1-mini sometimes writes write_checklist's own argument JSON as
-          // its reply text instead of calling the tool — never show that raw shape to the
-          // user; repair it into a real reply instead of a generic apology where possible.
-          const finalOutput = await guardLeakedChecklistJson(
+          // KI-6/KI-1: gpt-4.1-mini sometimes reports write_checklist as its reply text
+          // instead of calling the tool — pasting the argument JSON, or narrating the call
+          // ("write_checklist completed"). Never show either to the user; repair it into a
+          // real reply instead of a generic apology where possible.
+          const finalOutput = await guardLeakedChecklistReply(
             rawFinalOutput,
             input,
             runTarget.model,
-            `requestId=${requestId} lastAgent=${result.lastAgent?.name ?? "none"}`
+            `requestId=${requestId} lastAgent=${result.lastAgent?.name ?? "none"}`,
+            toolNamesOf(runTarget)
           );
           appendMessage({
             role: "assistant",
@@ -707,6 +656,20 @@ export function registerAgentHandlers() {
       }
     }
     return createAgent(input);
+  });
+
+  // Settings → Agents → Add Agent's "Suggest" action. A plain one-off completion, not a
+  // chat turn — see agentIdentitySuggest.ts for why this never touches chat_history.
+  ipcMain.handle("agent:suggestIdentity", async (_event, context: string) => {
+    if (typeof context !== "string" || context.trim().length === 0) {
+      throw new Error("agent:suggestIdentity requires a non-empty context string");
+    }
+    try {
+      return await suggestAgentIdentity(context);
+    } catch (err) {
+      if (err instanceof AgentIdentitySuggestError) throw err;
+      throw new Error("Couldn't reach the model to suggest a name — check your provider settings.");
+    }
   });
 
   ipcMain.handle("agent:orchestratorPrompt", (): string => getOrchestratorPromptForEditing());

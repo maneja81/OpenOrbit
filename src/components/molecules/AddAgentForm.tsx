@@ -1,7 +1,10 @@
 import { useState } from "react";
 import Combobox from "@/components/atoms/Combobox";
+import IconButton from "@/components/atoms/IconButton";
+import TablerIcon from "@/components/atoms/TablerIcon";
 import { formatHumanizedError, humanizeError } from "@/lib/humanizeError";
 import { AI_PROVIDERS, findProvider } from "@/lib/providers";
+import { hasAgentsAPI } from "@/lib/agentsApi";
 
 interface AddAgentFormProps {
   defaultModel: string;
@@ -25,10 +28,32 @@ export default function AddAgentForm({ defaultModel, onCreate, onCancel }: AddAg
   const [prompt, setPrompt] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
 
   /** What a blank Model ID would resolve to for the provider currently picked — empty when that
    * provider has no default, which is `local` and only `local`. */
   const fallbackModel = providerId === "" ? defaultModel : (findProvider(providerId)?.defaultChatModel ?? "");
+
+  // Whatever the user has already written about the agent — description first (usually the
+  // more natural free-text answer to "what does this do?"), falling back to the prompt draft
+  // when only that's been filled in. Nothing to suggest from until one of them has content.
+  const suggestContext = description.trim() || prompt.trim();
+
+  const handleSuggest = async () => {
+    if (!suggestContext || suggesting || !hasAgentsAPI()) return;
+    setSuggesting(true);
+    setSuggestError(null);
+    try {
+      const result = await window.agentsAPI.agent.suggestIdentity(suggestContext);
+      setName(result.name);
+      setTagline(result.tagline);
+    } catch (err) {
+      setSuggestError(formatHumanizedError(humanizeError(err)));
+    } finally {
+      setSuggesting(false);
+    }
+  };
 
   /** Moving the provider moves the model with it, the same way the accordion does for an agent
    * that already exists — otherwise the field still holds the Chat slot's id, which the newly
@@ -55,6 +80,7 @@ export default function AddAgentForm({ defaultModel, onCreate, onCancel }: AddAg
       setModel(defaultModel);
       setProviderId("");
       setPrompt("");
+      setSuggestError(null);
       onCancel();
     } catch (err) {
       setError(formatHumanizedError(humanizeError(err)));
@@ -98,6 +124,19 @@ export default function AddAgentForm({ defaultModel, onCreate, onCancel }: AddAg
             rows={3}
           />
         </label>
+        <div className="add-agent-suggest-row">
+          <IconButton
+            className="add-agent-suggest-btn"
+            aria-label="Suggest a name and tagline from the description above"
+            disabled={!suggestContext || suggesting}
+            onClick={handleSuggest}
+          >
+            <TablerIcon name={suggesting ? "ti-loader-2" : "ti-sparkles"} />
+            <span>{suggesting ? "Suggesting…" : "Suggest name & tagline"}</span>
+          </IconButton>
+          {!suggestContext && <small>Describe the agent above to get a suggestion.</small>}
+        </div>
+        {suggestError && <p className="add-agent-form-error">{suggestError}</p>}
         <label className="settings-field">
           <span>Provider</span>
           <Combobox

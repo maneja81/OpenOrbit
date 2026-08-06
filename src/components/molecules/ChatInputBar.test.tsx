@@ -46,6 +46,18 @@ describe("ChatInputBar", () => {
     expect(container.querySelector(".input-toolbar")).not.toBeNull();
   });
 
+  it("keeps the input row centered by default rather than bottom-aligned (KI-20)", () => {
+    // jsdom lays out nothing, so scrollHeight is always 0 — the .multi-line transition
+    // itself can't be exercised here, but the resting default (no class, i.e. centered via
+    // .input-top's own align-items) is real and worth locking in, since that default is
+    // exactly what KI-20 was about: the state the bar sits in almost all the time.
+    const { container } = renderBar();
+    expect(container.querySelector(".input-top")?.classList.contains("multi-line")).toBe(false);
+    const input = container.querySelector("#inp") as HTMLTextAreaElement;
+    fireEvent.input(input, { target: { value: "hello" } });
+    expect(container.querySelector(".input-top")?.classList.contains("multi-line")).toBe(false);
+  });
+
   it("omits the voice button when voice is disabled", () => {
     const { container } = renderBar({ voiceEnabled: false });
     expect(container.querySelector("#vbtn")).toBeNull();

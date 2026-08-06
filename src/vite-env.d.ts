@@ -474,7 +474,7 @@ interface Window {
       setFact: (question: string, answer: string) => Promise<void>;
     };
     agent: {
-      runStream: (input: string, requestId: string, targetAgentName?: string) => Promise<string>;
+      runStream: (input: string, requestId: string, targetAgentName?: string, persistInput?: boolean) => Promise<string>;
       onStreamChunk: (callback: (payload: { requestId: string; chunk: string }) => void) => () => void;
       onStreamAgent: (callback: (payload: { requestId: string; agentName: string }) => void) => () => void;
       onStreamStep: (
@@ -543,6 +543,7 @@ interface Window {
         providerId?: string;
         prompt?: string;
       }) => Promise<AgentRow>;
+      suggestIdentity: (context: string) => Promise<{ name: string; tagline: string }>;
       orchestratorPrompt: () => Promise<string>;
       delete: (id: string) => Promise<void>;
       exportToFile: (ids?: string[]) => Promise<{ canceled: boolean }>;

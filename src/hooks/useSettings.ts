@@ -40,15 +40,23 @@ export function useSettings() {
     return () => window.clearTimeout(task);
   }, [fetchSettings]);
 
+  // Bumped once per confirmed save — either this window's own updateSettings() resolving, or
+  // an external settings:update push (see below) — so SettingsPanel can show a transient
+  // "Saved" indicator without polling or re-deriving it from settings object identity (which
+  // changes on every fetch, not just a real save).
+  const [savedVersion, setSavedVersion] = useState(0);
+
   // A sub-agent's update_setting tool call (e.g. Cipher renaming the orchestrator) writes
   // straight to the DB, bypassing settings:update entirely — without this subscription the
   // UI has no way to learn a setting changed mid agent-run and silently goes stale even
-  // though the agent reports success. See broadcastSettingsUpdate in electron/main/ipc/agent.ts.
+  // though the agent reports success. See broadcastSettingsUpdate in electron/main/ai/broadcastEvents.ts,
+  // now called at the point of the write rather than only once at the end of the run.
   useEffect(() => {
     if (!hasAgentsAPI()) return;
     return window.agentsAPI.settings.onUpdate(() => {
       devLog("[settings] received settings:update push, refetching");
       fetchSettings();
+      setSavedVersion((v) => v + 1);
     });
   }, [fetchSettings]);
 
@@ -69,6 +77,7 @@ export function useSettings() {
         // trusting the optimistic patch forever, so a locked/rejected field doesn't sit
         // showing a value that was never actually persisted until the next unrelated refetch.
         setSettings(mergeWithDefaults(authoritative));
+        setSavedVersion((v) => v + 1);
       },
       (e) => {
         // Optimistic update already applied above — if the main-process write actually
@@ -86,5 +95,5 @@ export function useSettings() {
     setSettings(mergeWithDefaults({}));
   }, []);
 
-  return { settings, updateSettings, resetSettings, loaded };
+  return { settings, updateSettings, resetSettings, loaded, savedVersion };
 }

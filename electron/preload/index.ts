@@ -151,8 +151,8 @@ const agentsAPI = {
   },
 
   agent: {
-    runStream: (input: string, requestId: string, targetAgentName?: string): Promise<string> =>
-      ipcRenderer.invoke("agent:runStream", input, requestId, targetAgentName),
+    runStream: (input: string, requestId: string, targetAgentName?: string, persistInput?: boolean): Promise<string> =>
+      ipcRenderer.invoke("agent:runStream", input, requestId, targetAgentName, persistInput),
     onStreamChunk: (callback: (payload: { requestId: string; chunk: string }) => void): (() => void) =>
       subscribeWithPayload("agent:stream-chunk", callback),
     onStreamAgent: (callback: (payload: { requestId: string; agentName: string }) => void): (() => void) =>
@@ -242,6 +242,10 @@ const agentsAPI = {
       providerId?: string;
       prompt?: string;
     }): Promise<AgentRow> => ipcRenderer.invoke("agent:create", input),
+    /** Settings → Agents → Add Agent's "Suggest" action — a one-off completion from
+     * whatever description/prompt text the user has typed so far, not a chat turn. */
+    suggestIdentity: (context: string): Promise<{ name: string; tagline: string }> =>
+      ipcRenderer.invoke("agent:suggestIdentity", context),
     orchestratorPrompt: (): Promise<string> => ipcRenderer.invoke("agent:orchestratorPrompt"),
     delete: (id: string): Promise<void> => ipcRenderer.invoke("agent:delete", id),
     exportToFile: (ids?: string[]): Promise<{ canceled: boolean }> => ipcRenderer.invoke("agent:exportToFile", ids),

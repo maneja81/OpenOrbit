@@ -792,6 +792,53 @@ svg#oc {
   font-size: 12px;
 }
 
+/* A finished turn with no tool calls — nothing to expand, so no chevron/button semantics,
+   just the plain "Thought for Ns" line at the same size/color as the interactive version. */
+.thinking-toggle-btn.thinking-toggle-static {
+  cursor: default;
+}
+
+.thinking-toggle-btn:disabled {
+  cursor: default;
+}
+
+/* The live indicator's own three dots, independent of ChatBubble's typing indicator (which
+   only appears once text starts streaming) — this is what shows during the silent gap
+   between send and the first token. */
+.thinking-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.thinking-dots span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.35;
+  animation: thinking-dot-pulse 1.2s ease-in-out infinite;
+}
+
+.thinking-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.thinking-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes thinking-dot-pulse {
+  0%,
+  80%,
+  100% {
+    opacity: 0.35;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
 .thinking-steps {
   display: flex;
   flex-direction: column;
@@ -1250,8 +1297,16 @@ svg#oc {
 
 .input-top {
   display: flex;
-  align-items: flex-end;
+  /* Centered by default (the resting single-line state) — flips to flex-end once the
+     textarea has actually grown past one line, so the mic/send buttons stay pinned to the
+     bottom row as it grows instead of floating to a moving vertical center. See KI-20 and
+     the resize() function in ChatInputBar.tsx, which toggles .multi-line. */
+  align-items: center;
   padding: 4px 8px 4px 4px;
+}
+
+.input-top.multi-line {
+  align-items: flex-end;
 }
 
 /* The textarea no longer carries its own chrome — the card owns the border, background and
@@ -2000,6 +2055,44 @@ svg#oc {
   margin: 2px 0 0;
   font-size: 11.5px;
   color: rgba(150, 190, 230, 0.55);
+}
+
+.detail-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+/* Transient confirmation after a save — user-driven or Cipher-driven via settings:update —
+   fades out on its own rather than needing to be dismissed. */
+.settings-saved-pill {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  background: rgba(80, 220, 150, 0.12);
+  border: 0.5px solid rgba(80, 220, 150, 0.3);
+  color: #7ee8b0;
+  font-size: 11.5px;
+  font-weight: 600;
+  animation: settings-saved-fade-in 0.15s ease-out;
+}
+
+.settings-saved-pill i {
+  font-size: 11px;
+}
+
+@keyframes settings-saved-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .window-close {
@@ -4415,6 +4508,42 @@ svg#oc {
   margin: 0;
   font-size: 12px;
   color: #ff8080;
+}
+
+.add-agent-suggest-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: -4px;
+}
+
+.add-agent-suggest-row small {
+  font-size: 11px;
+  color: rgba(150, 190, 230, 0.45);
+}
+
+.add-agent-suggest-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 10px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  background: rgba(167, 139, 250, 0.12);
+  border: 0.5px solid rgba(167, 139, 250, 0.35);
+  color: var(--purple);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.add-agent-suggest-btn:hover:not(:disabled) {
+  background: rgba(167, 139, 250, 0.2);
+}
+
+.add-agent-suggest-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .add-agent-form-actions {
