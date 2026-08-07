@@ -30,8 +30,16 @@ export function removeAllowedRoot(root: string): string[] {
 }
 
 /** Resolves symlinks for `target`. If it doesn't exist yet (e.g. a file about to be created),
- * resolves symlinks on the nearest existing ancestor directory instead. */
+ * resolves symlinks on the nearest existing ancestor directory instead. Requires `target` to
+ * already be absolute: path.resolve() on a relative string silently resolves it against
+ * process.cwd() (the Electron main process's cwd, not any user-granted folder), which let an
+ * agent-supplied relative path like "open-orbit-workspace" pass through here, land outside every
+ * allowed root, and fail assertAllowed's containment check with a misleading "outside all
+ * allowed folders" error instead of a clear "must be absolute" one. */
 async function realpathOrNearestExisting(target: string): Promise<string> {
+  if (!path.isAbsolute(target)) {
+    throw new Error(`Path must be absolute, got: "${target}"`);
+  }
   const resolved = path.resolve(target);
   try {
     return await fs.realpath(resolved);

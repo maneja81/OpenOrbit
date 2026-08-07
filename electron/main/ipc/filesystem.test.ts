@@ -100,6 +100,14 @@ describe("filesystem IPC allowlist (assertAllowed)", () => {
     await expect(readFolderFile(traversal)).rejects.toThrow("Access denied");
   });
 
+  it("rejects a relative path instead of silently resolving it against process.cwd()", async () => {
+    // Regression: a relative path like "open-orbit-workspace" used to resolve via
+    // path.resolve() against process.cwd() (the Electron main process cwd), landing
+    // outside every granted root and throwing a misleading "outside all allowed
+    // folders" error instead of a clear "must be absolute" one.
+    await expect(readFolderFile("note.txt")).rejects.toThrow("Path must be absolute");
+  });
+
   it("denies a symlink inside the allowed root that points outside it", async () => {
     const targetFile = path.join(outsideDir, "secret.txt");
     writeFileSync(targetFile, "nope");
