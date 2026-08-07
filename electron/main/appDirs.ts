@@ -73,6 +73,13 @@ export function getKnowledgeFilesDir(): string {
   return path.join(root(), "knowledge-files");
 }
 
+/** Playwright persistent-context profile for Pilot, the browser-automation agent (see
+ * ai/browserSession.ts) — cookies/localStorage live here on disk so a login survives across
+ * separate chat turns and app restarts, the same way a real browser profile would. */
+export function getBrowserProfileDir(): string {
+  return path.join(root(), "browser-profile");
+}
+
 /** Every app-owned directory, in one place so both ensureAppDirectories() and the rename
  * migration below stay in sync — a directory added here is created *and* migrated. */
 function appDirectories(): string[] {
@@ -84,6 +91,7 @@ function appDirectories(): string[] {
     getUserFilesDir(),
     getKnowledgeFilesDir(),
     getUserInfoDir(),
+    getBrowserProfileDir(),
   ];
 }
 
