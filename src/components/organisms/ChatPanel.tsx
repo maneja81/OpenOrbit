@@ -98,11 +98,14 @@ function ActivityRows({ steps }: { steps: StepEvent[] }) {
 /** Minimal text+chevron toggle for a finished turn's hand-off narration and how long it
  * took — deliberately not the full WidgetCard glass-panel shell (title bar, padding,
  * border) used elsewhere, since this is meant to read as a small inline disclosure, not
- * another panel. Collapsed by default. Renders as a plain (non-interactive) line, with no
+ * another panel. Open by default: this mounts the instant `LiveThinking` unmounts (the
+ * turn just finished), so the activity it shows is the same content the user was already
+ * watching live — starting collapsed made that handoff read as the tool trace vanishing
+ * rather than settling into place. Renders as a plain (non-interactive) line, with no
  * chevron, when there's nothing substantive to expand into — a turn with no tool calls
  * still took real time, but there's no activity list behind the disclosure arrow. */
 function ThinkingToggle({ steps, elapsedMs }: { steps: StepEvent[]; elapsedMs: number }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   const label = `Thought for ${formatThoughtSeconds(elapsedMs)}`;
   if (steps.length === 0) {
     return (
