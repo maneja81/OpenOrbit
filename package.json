@@ -14,7 +14,7 @@
   "main": "dist-electron/main/index.js",
   "scripts": {
     "postinstall": "electron-builder install-app-deps",
-    "dev": "rm -rf dist-electron && electron-vite dev",
+    "dev": "rm -rf dist-electron && electron-vite dev --",
     "dev:web": "rm -rf dist && vite",
     "build": "tsc -b && electron-vite build",
     "build:web": "tsc -b && vite build",
