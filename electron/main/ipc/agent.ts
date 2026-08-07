@@ -26,6 +26,7 @@ import {
   AgentExport,
 } from "../ai/agents";
 import { closeMcpServers } from "../ai/mcp";
+import { closeBrowserSession } from "../ai/browserSession";
 import { resolveApprovalsAndRun, MAX_TURNS_PER_RUN } from "../ai/runLoop";
 import { createSerialQueue } from "../ai/serialQueue";
 import { cancelPendingForTrace } from "../db/checklistStore";
@@ -562,6 +563,9 @@ export function registerAgentHandlers() {
           return finalOutput;
         } finally {
           await closeMcpServers(mcpServers);
+          // No-op when Pilot's browser was never launched this run — same "safe to call
+          // unconditionally" tolerance closeMcpServers already has for an empty server list.
+          await closeBrowserSession();
         }
       })();
 
