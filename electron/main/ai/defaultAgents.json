@@ -42,5 +42,16 @@
     "tools": [],
     "promptKey": "taskAgent",
     "system": true
+  },
+  {
+    "id": "browserAgent",
+    "name": "Pilot",
+    "icon": "ti-world",
+    "tagline": "Browse & Automate",
+    "description": "Controls a real, visible browser to navigate websites, read live pages, fill forms, and click through multi-step flows — including sites you're logged into.",
+    "model": "gpt-4.1-mini",
+    "tools": [],
+    "promptKey": "browserAgent",
+    "system": true
   }
 ]

@@ -754,8 +754,8 @@ describe("groundingRule reaches every agent buildOrchestrator constructs", () =>
   const instructionBlocks = [...source.matchAll(/instructions:\s*([\s\S]*?),\n\s*model:/g)].map((m) => m[1]);
 
   it("finds every agent's instructions in the source", () => {
-    // 4 built-in specialists + custom agents + the orchestrator.
-    expect(instructionBlocks).toHaveLength(6);
+    // 5 built-in specialists (added browserAgent/Pilot) + custom agents + the orchestrator.
+    expect(instructionBlocks).toHaveLength(7);
   });
 
   it("appends the rule to all of them", () => {

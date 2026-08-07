@@ -6,8 +6,19 @@ import configAgentPrompt from "./prompts/configAgent.md?raw";
 import knowledgeAgentPrompt from "./prompts/knowledgeAgent.md?raw";
 import explorerPrompt from "./prompts/explorer.md?raw";
 import taskAgentPrompt from "./prompts/taskAgent.md?raw";
+import browserAgentPrompt from "./prompts/browserAgent.md?raw";
 import { listKnowledgebaseFilesTool, readKnowledgebaseFileTool } from "./tools/knowledgeAgentTools";
 import { webSearchTool, fetchWebContentTool } from "./tools/explorerAgentTools";
+import {
+  browserNavigateTool,
+  browserSnapshotTool,
+  browserClickTool,
+  browserTypeTool,
+  browserScrollTool,
+  browserReadPageTextTool,
+  browserGoBackTool,
+  browserCloseSessionTool,
+} from "./tools/browserAgentTools";
 import { searchHistoryTool } from "./tools/history";
 import { listGrantedFoldersTool, listFolderContentsTool, readFolderFileTool } from "./tools/folderAccessTools";
 import { findSkillTool } from "./tools/skillFinderTool";
@@ -132,6 +143,7 @@ const PROMPTS_BY_KEY: Record<string, string> = {
   knowledgeAgent: knowledgeAgentPrompt,
   explorerAgent: explorerPrompt,
   taskAgent: taskAgentPrompt,
+  browserAgent: browserAgentPrompt,
 };
 
 interface DefaultAgentConfig {
@@ -822,7 +834,7 @@ export interface AgentDisplayRow extends AgentRow {
  * agent is excluded (never wired as a tool), matching buildOrchestrator's own `customRows`
  * query (`... AND enabled = 1`). */
 function assignOrchestratorToolNames(rows: AgentRow[]): Map<string, string> {
-  const BUILTIN_IDS = ["configAgent", "knowledgeAgent", "explorerAgent", "taskAgent"];
+  const BUILTIN_IDS = ["configAgent", "knowledgeAgent", "explorerAgent", "taskAgent", "browserAgent"];
   const byId = new Map(rows.map((r) => [r.id, r]));
   const wired = [
     ...BUILTIN_IDS.map((id) => byId.get(id)).filter((r): r is AgentRow => Boolean(r)),
@@ -1227,6 +1239,21 @@ export function getBuiltinToolNamesForRole(row: AgentRow): string[] {
       createAskUserTool(row.name, NOOP_REQUEST_ANSWER),
     ].map((t) => t.name);
   }
+  if (row.id === "browserAgent") {
+    return [
+      browserNavigateTool,
+      browserSnapshotTool,
+      browserClickTool,
+      browserTypeTool,
+      browserScrollTool,
+      browserReadPageTextTool,
+      browserGoBackTool,
+      browserCloseSessionTool,
+      createSaveUserInfoTool(row.name),
+      createWriteChecklistTool(row.name, ""),
+      createAskUserTool(row.name, NOOP_REQUEST_ANSWER),
+    ].map((t) => t.name);
+  }
   return [
     createSaveUserInfoTool(row.name),
     createWriteChecklistTool(row.name, ""),
@@ -1492,9 +1519,38 @@ export async function buildOrchestrator(
     mcpServers: await connectForRow(taskAgentRow),
   });
 
+  const BROWSER_AGENT_TOOL_DESCRIPTION =
+    "Controls a real, visible browser to interact with live websites: navigating, reading dynamic pages, filling forms, and clicking through flows — including services the user is already logged into.";
+  const browserAgentRow = db.prepare("SELECT * FROM agents WHERE id = ?").get("browserAgent") as AgentRow;
+  const browserAgent = new Agent({
+    name: browserAgentRow.name,
+    instructions:
+      renderPrompt(browserAgentRow.prompt, promptVars) +
+      httpToolsPromptForRow(browserAgentRow) +
+      groundingRule +
+      userInfoBlock,
+    model: modelForAgent(browserAgentRow),
+    tools: [
+      browserNavigateTool,
+      browserSnapshotTool,
+      browserClickTool,
+      browserTypeTool,
+      browserScrollTool,
+      browserReadPageTextTool,
+      browserGoBackTool,
+      browserCloseSessionTool,
+      createSaveUserInfoTool(browserAgentRow.name),
+      createWriteChecklistTool(browserAgentRow.name, traceId),
+      createAskUserTool(browserAgentRow.name, requestAnswer),
+      ...attachConnectorsForRow(browserAgentRow),
+      ...attachHttpToolsForRow(browserAgentRow),
+    ],
+    mcpServers: await connectForRow(browserAgentRow),
+  });
+
   const customRows = db
     .prepare(
-      "SELECT * FROM agents WHERE id NOT IN ('configAgent', 'knowledgeAgent', 'explorerAgent', 'taskAgent') AND enabled = 1"
+      "SELECT * FROM agents WHERE id NOT IN ('configAgent', 'knowledgeAgent', 'explorerAgent', 'taskAgent', 'browserAgent') AND enabled = 1"
     )
     .all() as AgentRow[];
   const customAgents = await Promise.all(
@@ -1538,7 +1594,14 @@ export async function buildOrchestrator(
   // "atlas", …) alone — the exact names orchestrator.md's prompt hardcodes — and only a
   // custom agent colliding with one of those (or with another custom agent's name) gets
   // suffixed.
-  const specialistRows = [configAgentRow, knowledgeAgentRow, explorerAgentRow, taskAgentRow, ...customRows];
+  const specialistRows = [
+    configAgentRow,
+    knowledgeAgentRow,
+    explorerAgentRow,
+    taskAgentRow,
+    browserAgentRow,
+    ...customRows,
+  ];
   const toolNames = dedupeToolNames(specialistRows);
   const specialistTools = [
     agentAsTool(configAgentRow, configAgent, CONFIG_AGENT_TOOL_DESCRIPTION, toolNames.get(configAgentRow.id)!, runSubAgent),
@@ -1557,6 +1620,13 @@ export async function buildOrchestrator(
       runSubAgent
     ),
     agentAsTool(taskAgentRow, taskAgent, TASK_AGENT_TOOL_DESCRIPTION, toolNames.get(taskAgentRow.id)!, runSubAgent),
+    agentAsTool(
+      browserAgentRow,
+      browserAgent,
+      BROWSER_AGENT_TOOL_DESCRIPTION,
+      toolNames.get(browserAgentRow.id)!,
+      runSubAgent
+    ),
     ...customRows.map((row, i) =>
       agentAsTool(
         row,
@@ -1592,6 +1662,6 @@ export async function buildOrchestrator(
   return {
     agent: orchestrator,
     mcpServers: allConnected,
-    allAgents: [configAgent, knowledgeAgent, explorerAgent, taskAgent, ...customAgents],
+    allAgents: [configAgent, knowledgeAgent, explorerAgent, taskAgent, browserAgent, ...customAgents],
   };
 }
