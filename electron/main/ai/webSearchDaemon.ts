@@ -7,10 +7,10 @@
 
 import { ChildProcess, spawn } from "node:child_process";
 import { createServer } from "node:net";
-import { existsSync } from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { devLog } from "../devLog";
+import { resolveBrowserExecutable, resolvePlaywrightModulePath } from "./browserExecutable";
 
 const require = createRequire(import.meta.url);
 
@@ -31,50 +31,14 @@ const OPEN_WEBSEARCH_BIN = path.join(
  * which is exactly the behaviour before this was wired up. Same log-and-degrade precedent
  * as connectMcpServersForAgent skipping a server that won't start.
  */
-function resolvePlaywrightModulePath(): string | null {
-  try {
-    return path.dirname(require.resolve("playwright-core/package.json"));
-  } catch {
-    return null;
-  }
-}
-
 const PLAYWRIGHT_MODULE_PATH = resolvePlaywrightModulePath();
 
 /**
- * Candidate paths for an already-installed Chromium-based browser, per platform.
- *
- * open-websearch has an equivalent list internally, but its default `chromium.launch()` passes
- * `executablePath: config.playwrightExecutablePath` with no fallback to it, and the function is
- * not exported — so without PLAYWRIGHT_EXECUTABLE_PATH, Playwright looks for its own bundled
- * browser and every browser retry dies with "Executable doesn't exist at
- * ~/Library/Caches/ms-playwright/…". Pointing it at the user's existing browser is what keeps
- * this app from having to download or ship a ~150 MB Chromium of its own.
+ * Already-installed Chromium-based browser executable (Chrome/Edge), or null when the user has
+ * none — in which case the env var is omitted below and the daemon stays on its request-only
+ * path rather than failing every browser retry. Resolution logic lives in browserExecutable.ts,
+ * shared with browserSession.ts's headed Pilot browser.
  */
-const BROWSER_CANDIDATES: Record<string, string[]> = {
-  darwin: [
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-  ],
-  win32: [
-    `${process.env.PROGRAMFILES ?? "C:\\Program Files"}\\Google\\Chrome\\Application\\chrome.exe`,
-    `${process.env["PROGRAMFILES(X86)"] ?? "C:\\Program Files (x86)"}\\Google\\Chrome\\Application\\chrome.exe`,
-    `${process.env.LOCALAPPDATA ?? ""}\\Google\\Chrome\\Application\\chrome.exe`,
-    `${process.env.PROGRAMFILES ?? "C:\\Program Files"}\\Microsoft\\Edge\\Application\\msedge.exe`,
-    `${process.env["PROGRAMFILES(X86)"] ?? "C:\\Program Files (x86)"}\\Microsoft\\Edge\\Application\\msedge.exe`,
-  ],
-  linux: ["/usr/bin/google-chrome", "/usr/bin/chromium-browser", "/usr/bin/chromium", "/usr/bin/microsoft-edge"],
-};
-
-/** First installed browser found, or null when the user has none — in which case the env var is
- * omitted and the daemon stays on its request-only path rather than failing every browser retry. */
-function resolveBrowserExecutable(): string | null {
-  for (const candidate of BROWSER_CANDIDATES[process.platform] ?? []) {
-    if (candidate && existsSync(candidate)) return candidate;
-  }
-  return null;
-}
-
 const BROWSER_EXECUTABLE = resolveBrowserExecutable();
 
 const HEALTH_CHECK_INTERVAL_MS = 300;
