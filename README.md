@@ -120,6 +120,46 @@ npm run lint      # eslint
 On first run you'll be asked to name the orchestrator, introduce yourself, and enter an
 API key. Nothing else is required — there are no environment variables to set.
 
+### Skipping onboarding for faster dev loops
+
+`npm run dev` accepts extra flags after `--`:
+
+```bash
+npm run dev -- --user-data-dir=/tmp/openorbit-dev --env=.env.dev
+```
+
+- `--user-data-dir=<path>` points the app at a throwaway profile instead of your real
+  `~/Library/Application Support/OpenOrbit` (or platform equivalent) — a plain Electron/Chromium
+  flag, nothing OpenOrbit-specific.
+- `--env=<path>` seeds that profile's Settings from a `KEY=VALUE` file before the window opens,
+  so you don't have to click through onboarding by hand on every throwaway profile. Dev-only —
+  compiled out of packaged builds — and it never overwrites a profile that has already
+  completed onboarding or already has connector settings saved.
+
+```bash
+# .env.dev — gitignored (.env.* is ignored except .env.example)
+agentName=Orbit
+userName=Dev Tester
+onboardingDone=true
+
+# Either a registry provider id (goes through the providers table)...
+chatProviderId=openrouter
+chatApiKey=sk-or-...
+chatApiUrl=https://openrouter.ai/api/v1
+
+# ...or the legacy pair alone, leaving chatProviderId unset
+
+# Google connectors (Gmail/Calendar/Drive/Contacts share one Client ID/Secret)
+googleClientId=...
+googleClientSecret=...
+```
+
+Any key in [`SETTINGS_SCHEMA`](electron/main/settingsSchema.ts) can go in the file — booleans
+and numbers are coerced from their string form, everything else is validated exactly like a
+Settings UI save. Seeding the Google connector only pre-fills the Client ID/Secret fields — a
+real OAuth connection still needs one manual click per service, since consent happens in your
+system browser and nothing in the dev process can drive that.
+
 ## End-to-end tests
 
 `e2e/` holds Playwright specs that drive the real Electron app — currently onboarding, with
