@@ -79,7 +79,6 @@ export default function AgentsApp() {
   const orchestratorRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const agentRefs = useRef<Record<AgentId, HTMLDivElement | null>>({});
-  const resetStepsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Wall-clock start of the turn currently in flight, read by the live "thinking" indicator
    * (via ChatPanel's liveStartedAt prop) to tick its own elapsed timer. handleSend's own
    * closure keeps its own `startedAt` local for computing elapsedMs — this state exists only
@@ -522,12 +521,6 @@ export default function AgentsApp() {
       setThinking(true);
       setOrchestratorResponding(true);
 
-      // A new send supersedes any pending "back to waiting" reset from a prior run.
-      if (resetStepsTimerRef.current) {
-        clearTimeout(resetStepsTimerRef.current);
-        resetStepsTimerRef.current = null;
-      }
-
       if (!hasAgentsAPI()) {
         setTimeout(() => {
           setOrchestratorResponding(false);
@@ -706,11 +699,11 @@ export default function AgentsApp() {
           } else {
             revealMessage();
           }
-          // Hold the "responded" entry for 10s, then return the feed to its idle state.
-          resetStepsTimerRef.current = setTimeout(() => {
-            setSteps([{ type: "waiting", label: "Waiting for message…" }]);
-            resetStepsTimerRef.current = null;
-          }, 10000);
+          // The feed stays on the turn's final state ("... responded") until the next send
+          // overwrites it at the top of this handler — no timed reset back to idle. A timed
+          // reset here previously wiped the just-shown tool activity out from under the user
+          // a few seconds after it appeared, which read as the response disappearing rather
+          // than the feed going idle.
           // Cipher's create_agent tool (and any future agent-mutating tool) writes
           // directly to the agents table from the main process — this hook's local
           // state has no other way to learn a row appeared, so resync after every run.
@@ -755,12 +748,6 @@ export default function AgentsApp() {
       startTour,
     ]
   );
-
-  useEffect(() => {
-    return () => {
-      if (resetStepsTimerRef.current) clearTimeout(resetStepsTimerRef.current);
-    };
-  }, []);
 
   // A tool marked "ask before running" pauses its agent run in the main process and waits
   // here. Queued rather than kept as a single value: one turn can interrupt on several

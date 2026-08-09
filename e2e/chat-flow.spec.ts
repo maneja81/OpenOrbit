@@ -94,5 +94,14 @@ test.describe("Core chat flow", () => {
     checklistDb.close();
 
     expect(checklistRows.length, "no checklist_items row was written for this turn's trace_id").toBeGreaterThan(0);
+
+    // Reuses the same turn again — no second billed call. This turn's write_checklist call
+    // gives it a real tool-call step, so its assistant bubble renders an expandable
+    // ThinkingToggle (not the plain static duration line). Asserting the toggle starts open
+    // is the structural, model-wording-independent check for the "thinking trace shown then
+    // collapsed/disappeared" fix: it must render its activity rows immediately, not require a
+    // click to reveal them.
+    const toggle = page.locator(".thinking-toggle").last();
+    await expect(toggle.locator(".thinking-steps")).toBeVisible();
   });
 });
