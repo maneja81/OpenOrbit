@@ -1,6 +1,6 @@
 import { test, expect, type ElectronApplication, type Page } from "@playwright/test";
 import { resolveE2EProvider } from "./providerConfig";
-import { launchSandboxedApp, launchApp, completeOnboarding, typeIntoField, openDb, pollUntil } from "./helpers";
+import { launchSandboxedApp, launchApp, completeOnboarding, typeIntoField, clickSelector, openDb, pollUntil } from "./helpers";
 
 // The only spec in this suite that makes a real, billed AI provider call — see
 // 0-cowork/plans/active/e2e-full-coverage.md Phase 4. Cost is whatever E2E_PROVIDER/.env.test
@@ -115,12 +115,18 @@ test.describe("Core chat flow", () => {
 
     const stopButton = page.locator("#sbtn");
     await expect(stopButton).toHaveAttribute("aria-label", /^Stop /, { timeout: 15_000 });
-    await stopButton.click();
+    // Locator clicks time out on "element is not stable" against this app's continuous
+    // framer-motion animation (and a driver.js tour overlay can intercept pointer events
+    // entirely) — see helpers.ts's clickSelector comment.
+    await clickSelector(page, "#sbtn");
 
     // The run resolves (not rejects) on a user-initiated stop — see agent:runStream's catch
-    // handler in electron/main/ipc/agent.ts — so the send button/textarea return to their
-    // idle state well before the app's own agentRunTimeoutSeconds would have forced it.
+    // handler in electron/main/ipc/agent.ts — so the textarea returns to its idle state well
+    // before the app's own agentRunTimeoutSeconds would have forced it. #sbtn itself
+    // disappears rather than reverting to "Send" — the field's text was already cleared when
+    // the turn was sent, and ChatInputBar only renders the button while responding or while
+    // there's text to send.
     await expect(page.locator("#inp")).toBeEnabled({ timeout: 20_000 });
-    await expect(stopButton).not.toHaveAttribute("aria-label", /^Stop /);
+    await expect(stopButton).toHaveCount(0);
   });
 });
