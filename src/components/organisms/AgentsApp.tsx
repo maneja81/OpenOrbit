@@ -103,6 +103,12 @@ export default function AgentsApp() {
   // handleSend's own .finally() alongside orchestratorResponding, so it never outlives the
   // run it names.
   const activeRequestIdRef = useRef<string | null>(null);
+  // Set by handleStop, read by handleSend's runStream resolution to tell "the user stopped
+  // this" apart from "the model genuinely returned nothing" — main resolves both the same
+  // way (empty string), since it has no notion of the user-facing copy either case should
+  // show. Not cleared on the next send: handleSend's own .then() clears it once read, so a
+  // stale value can only ever match its own requestId.
+  const cancelledRequestIdRef = useRef<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSection | undefined>(undefined);
   const [kbModalOpen, setKbModalOpen] = useState(false);
@@ -667,10 +673,15 @@ export default function AgentsApp() {
       window.agentsAPI.agent
         .runStream(directedAgent?.rest ?? value, requestId, directedAgent?.agent.name)
         .then((result) => {
+          const wasCancelled = cancelledRequestIdRef.current === requestId;
+          if (wasCancelled) cancelledRequestIdRef.current = null;
           // finalOutput is authoritative (covers handoffs/tool calls where the streamed
           // deltas might not perfectly equal the final text) — falls back to whatever
-          // streamed in if it's somehow empty.
-          const finalText = result || streamedText || "(no response)";
+          // streamed in if it's somehow empty. A user-initiated stop resolves the same way a
+          // genuinely empty reply does (both "" from main — see agent:runStream's catch
+          // handler), so the fallback copy has to come from wasCancelled, not from result
+          // itself.
+          const finalText = result || streamedText || (wasCancelled ? "Stopped." : "(no response)");
           turnSteps = [...turnSteps, { type: "responded", label: `${settings.agentName} responded` }];
           setSteps(turnSteps);
           // The live orbit-scene feed already shows the generic bookkeeping steps
@@ -759,6 +770,7 @@ export default function AgentsApp() {
   const handleStop = useCallback(() => {
     const requestId = activeRequestIdRef.current;
     if (!requestId || !hasAgentsAPI()) return;
+    cancelledRequestIdRef.current = requestId;
     window.agentsAPI.agent.stop(requestId);
   }, []);
 

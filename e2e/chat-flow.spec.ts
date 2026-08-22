@@ -128,5 +128,18 @@ test.describe("Core chat flow", () => {
     // there's text to send.
     await expect(page.locator("#inp")).toBeEnabled({ timeout: 20_000 });
     await expect(stopButton).toHaveCount(0);
+
+    // The stopped turn must never fall back to "(no response)" — that copy is for a genuine
+    // empty reply, and reads as a bug when what actually happened is the user stopped it.
+    // Not asserting the exact "Stopped." text: if a chunk or two streamed before the click
+    // landed, finalText falls back to that partial text instead (see AgentsApp.tsx's
+    // finalText derivation) — real, model-timing-dependent, and not something this test
+    // should pin down to an exact string.
+    const db = openDb(userData);
+    const lastAssistant = db
+      .prepare("SELECT text FROM messages WHERE role = 'assistant' ORDER BY id DESC LIMIT 1")
+      .get() as { text: string } | undefined;
+    db.close();
+    expect(lastAssistant?.text).not.toBe("(no response)");
   });
 });
