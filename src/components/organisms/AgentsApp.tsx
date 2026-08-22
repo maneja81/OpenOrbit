@@ -98,6 +98,11 @@ export default function AgentsApp() {
   const communicatingClearTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const [steps, setSteps] = useState<StepEvent[]>([{ type: "waiting", label: "Waiting for message…" }]);
   const [orchestratorResponding, setOrchestratorResponding] = useState(false);
+  // The requestId of the run currently in flight, if any — read by handleStop, which has no
+  // other way to reach the requestId scoped inside handleSend's closure. Cleared in
+  // handleSend's own .finally() alongside orchestratorResponding, so it never outlives the
+  // run it names.
+  const activeRequestIdRef = useRef<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSection | undefined>(undefined);
   const [kbModalOpen, setKbModalOpen] = useState(false);
@@ -532,6 +537,7 @@ export default function AgentsApp() {
       }
 
       const requestId = crypto.randomUUID();
+      activeRequestIdRef.current = requestId;
       let streamedText = "";
       let respondingLogged = false;
       let assistantMessageId: string | null = null;
@@ -728,6 +734,7 @@ export default function AgentsApp() {
           setOrchestratorResponding(false);
           setThinking(false);
           setRunStartedAt(null);
+          if (activeRequestIdRef.current === requestId) activeRequestIdRef.current = null;
           playSfx("complete");
         });
     },
@@ -748,6 +755,12 @@ export default function AgentsApp() {
       startTour,
     ]
   );
+
+  const handleStop = useCallback(() => {
+    const requestId = activeRequestIdRef.current;
+    if (!requestId || !hasAgentsAPI()) return;
+    window.agentsAPI.agent.stop(requestId);
+  }, []);
 
   // A tool marked "ask before running" pauses its agent run in the main process and waits
   // here. Queued rather than kept as a single value: one turn can interrupt on several
@@ -1150,10 +1163,12 @@ export default function AgentsApp() {
                   ? "responding"
                   : undefined
           }
+          responding={orchestratorResponding}
           onShowFullHistory={() => setChatHistoryOpen(true)}
           visibleConversationCount={settings.chatVisibleConversations}
           autoLoadRemoteImages={settings.remoteImagesAutoLoad}
           onSend={() => handleSend()}
+          onStop={handleStop}
           onStartVoice={startVoice}
           onStopVoice={stopVoice}
         />

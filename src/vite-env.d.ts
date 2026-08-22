@@ -475,6 +475,7 @@ interface Window {
     };
     agent: {
       runStream: (input: string, requestId: string, targetAgentName?: string, persistInput?: boolean) => Promise<string>;
+      stop: (requestId: string) => Promise<void>;
       onStreamChunk: (callback: (payload: { requestId: string; chunk: string }) => void) => () => void;
       onStreamAgent: (callback: (payload: { requestId: string; agentName: string }) => void) => () => void;
       onStreamStep: (

@@ -21,6 +21,7 @@ function renderBar(overrides: Partial<Parameters<typeof ChatInputBar>[0]> = {}) 
     voiceEnabled: true,
     agents: [],
     onSend: vi.fn(),
+    onStop: vi.fn(),
     onStartVoice: vi.fn(),
     onStopVoice: vi.fn(),
     ...overrides,

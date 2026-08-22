@@ -49,6 +49,7 @@ function renderPanel(messages: ChatMessage[], overrides = {}) {
       // below (written for that flat cap) still assert against.
       visibleConversationCount={5}
       onSend={vi.fn()}
+      onStop={vi.fn()}
       onStartVoice={vi.fn()}
       onStopVoice={vi.fn()}
       {...overrides}

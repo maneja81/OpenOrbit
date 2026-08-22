@@ -104,4 +104,23 @@ test.describe("Core chat flow", () => {
     const toggle = page.locator(".thinking-toggle").last();
     await expect(toggle.locator(".thinking-steps")).toBeVisible();
   });
+
+  test("stop button cancels an in-flight run", async () => {
+    // Real, billed call (a run has to actually be in flight to cancel) — kept minimal:
+    // stopped as soon as the button appears, so this bills only the tokens generated before
+    // abort, not a full reply. A prompt nudging a slower/longer reply gives the click a
+    // realistic window to land before the run would have finished on its own anyway.
+    await typeIntoField(page, "#inp", "Count from 1 to 20, one number per line, nothing else.");
+    await page.keyboard.press("Enter");
+
+    const stopButton = page.locator("#sbtn");
+    await expect(stopButton).toHaveAttribute("aria-label", /^Stop /, { timeout: 15_000 });
+    await stopButton.click();
+
+    // The run resolves (not rejects) on a user-initiated stop — see agent:runStream's catch
+    // handler in electron/main/ipc/agent.ts — so the send button/textarea return to their
+    // idle state well before the app's own agentRunTimeoutSeconds would have forced it.
+    await expect(page.locator("#inp")).toBeEnabled({ timeout: 20_000 });
+    await expect(stopButton).not.toHaveAttribute("aria-label", /^Stop /);
+  });
 });
