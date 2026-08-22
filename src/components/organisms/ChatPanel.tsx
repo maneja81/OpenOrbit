@@ -62,6 +62,9 @@ interface ChatPanelProps {
   /** KI-3: which kind blocked it, forwarded to ChatInputBar so its placeholder describes
    * the actual pause instead of always assuming an approval gate. */
   sendDisabledReason?: "approval" | "question" | "responding";
+  /** True for the whole span of an in-flight run — forwarded to ChatInputBar so it can swap
+   * the send button for a Stop button. */
+  responding?: boolean;
   /** Opens the full paged archive (ChatHistoryModal) — the log itself only keeps the last
    * visibleConversationCount conversations on screen. */
   onShowFullHistory: () => void;
@@ -72,6 +75,7 @@ interface ChatPanelProps {
   /** Forwarded to every bubble — see AgentsSettings.remoteImagesAutoLoad. */
   autoLoadRemoteImages?: boolean;
   onSend: () => void;
+  onStop: () => void;
   onStartVoice: () => void;
   onStopVoice: () => void;
 }
@@ -177,10 +181,12 @@ export default function ChatPanel({
   liveSteps,
   sendDisabled,
   sendDisabledReason,
+  responding,
   onShowFullHistory,
   visibleConversationCount,
   autoLoadRemoteImages,
   onSend,
+  onStop,
   onStartVoice,
   onStopVoice,
 }: ChatPanelProps) {
@@ -278,7 +284,9 @@ export default function ChatPanel({
         agents={agents}
         sendDisabled={sendDisabled}
         sendDisabledReason={sendDisabledReason}
+        responding={responding}
         onSend={onSend}
+        onStop={onStop}
         onStartVoice={onStartVoice}
         onStopVoice={onStopVoice}
       />

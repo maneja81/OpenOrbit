@@ -153,6 +153,10 @@ const agentsAPI = {
   agent: {
     runStream: (input: string, requestId: string, targetAgentName?: string, persistInput?: boolean): Promise<string> =>
       ipcRenderer.invoke("agent:runStream", input, requestId, targetAgentName, persistInput),
+    /** Aborts an in-flight run started by runStream, identified by the same requestId. The
+     * runStream call still resolves normally afterward (with whatever text had streamed so
+     * far, or "" if none) rather than rejecting — see agent:stop's handler comment. */
+    stop: (requestId: string): Promise<void> => ipcRenderer.invoke("agent:stop", requestId),
     onStreamChunk: (callback: (payload: { requestId: string; chunk: string }) => void): (() => void) =>
       subscribeWithPayload("agent:stream-chunk", callback),
     onStreamAgent: (callback: (payload: { requestId: string; agentName: string }) => void): (() => void) =>
