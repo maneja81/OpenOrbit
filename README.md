@@ -24,12 +24,12 @@ SmartScreen warning on Windows the first time you run one.
 
 | Platform | Download |
 | --- | --- |
-| macOS (Apple Silicon) | [OpenOrbit-0.1.2-arm64.dmg](https://github.com/maneja81/OpenOrbit/releases/download/v0.1.2/OpenOrbit-0.1.2-arm64.dmg) |
-| macOS (Intel) | [OpenOrbit-0.1.2-x64.dmg](https://github.com/maneja81/OpenOrbit/releases/download/v0.1.2/OpenOrbit-0.1.2-x64.dmg) |
-| Windows | [OpenOrbit.Setup.0.1.2.exe](https://github.com/maneja81/OpenOrbit/releases/download/v0.1.2/OpenOrbit.Setup.0.1.2.exe) |
-| Linux | [OpenOrbit-0.1.2.AppImage](https://github.com/maneja81/OpenOrbit/releases/download/v0.1.2/OpenOrbit-0.1.2.AppImage) |
+| macOS (Apple Silicon) | [OpenOrbit-0.1.3-arm64.dmg](https://github.com/maneja81/OpenOrbit/releases/download/v0.1.3/OpenOrbit-0.1.3-arm64.dmg) |
+| macOS (Intel) | [OpenOrbit-0.1.3-x64.dmg](https://github.com/maneja81/OpenOrbit/releases/download/v0.1.3/OpenOrbit-0.1.3-x64.dmg) |
+| Windows | [OpenOrbit.Setup.0.1.3.exe](https://github.com/maneja81/OpenOrbit/releases/download/v0.1.3/OpenOrbit.Setup.0.1.3.exe) |
+| Linux | [OpenOrbit-0.1.3.AppImage](https://github.com/maneja81/OpenOrbit/releases/download/v0.1.3/OpenOrbit-0.1.3.AppImage) |
 
-These links are for **v0.1.2** specifically — the filenames carry the version, so they'll
+These links are for **v0.1.3** specifically — the filenames carry the version, so they'll
 change on the next release. [Releases](https://github.com/maneja81/OpenOrbit/releases)
 always has the current set.
 

@@ -1,7 +1,7 @@
 {
   "name": "openorbit",
   "productName": "OpenOrbit",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "OpenOrbit — a multi-agent orchestrator desktop app",
   "author": "Mohit Aneja",
   "license": "MIT",

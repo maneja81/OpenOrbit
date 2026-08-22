@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] — 2026-08-22
+
+### Added
+
+- **A Stop button on the chat input** — an in-flight agent run had no cancel
+  mechanism anywhere in the pipeline, only the configured run timeout (up to an
+  hour by default). The send button now swaps to Stop for the run's whole
+  duration, including any tool-approval or `ask_user` pause, and aborting
+  settles those the same way an abandoned run already did.
+
+### Fixed
+
+- A cancelled run showed "(no response)" when nothing had streamed yet; it now
+  shows "Stopped." instead.
+
 ## [0.1.2] — 2026-08-06
 
 ### Added
@@ -491,7 +506,8 @@ build from source.
   low), `fast-csv` (denial of service, low), and `exceljs` 3.4.0 → 3.10.0.
   ([#5](https://github.com/maneja81/OpenOrbit/pull/5))
 
-[Unreleased]: https://github.com/maneja81/OpenOrbit/compare/v0.1.2...develop
+[Unreleased]: https://github.com/maneja81/OpenOrbit/compare/v0.1.3...develop
+[0.1.3]: https://github.com/maneja81/OpenOrbit/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/maneja81/OpenOrbit/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/maneja81/OpenOrbit/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/maneja81/OpenOrbit/releases/tag/v0.1.0
