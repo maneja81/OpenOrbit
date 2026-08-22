@@ -277,6 +277,13 @@ function abandonQuestionsFor(requestId: string): void {
   }
 }
 
+/** Aborters for every run currently in flight, keyed by the renderer-supplied requestId —
+ * how agent:stop reaches into a specific run to cancel it. `cancel` both flips the run's own
+ * `cancelled` closure flag (so its catch handler can resolve "" instead of rethrowing) and
+ * aborts the signal passed into the SDK's run() call. Entries are removed once the run
+ * settles (Promise.race's finally below), so a stale requestId is a harmless no-op. */
+const activeRuns = new Map<string, { cancel: () => void }>();
+
 export function registerAgentHandlers() {
   // The non-streaming "agent:run" channel was unreachable from the renderer — no hook or
   // component called it, ChatInputBar/AgentsApp only ever use agent:runStream below — and
@@ -329,6 +336,18 @@ export function registerAgentHandlers() {
       // settles. Instead `timedOut` lets the background run notice it lost the race and
       // skip all of that, closing MCP servers itself exactly once when it actually stops.
       let timedOut = false;
+      // Set by agent:stop below. Distinct from timedOut (a different reason a run stops
+      // early) so the eventual return value can tell the two apart: a stop returns "" and
+      // lets the renderer keep whatever text had already streamed, while a timeout still
+      // rejects the runStream promise the way it always has.
+      let cancelled = false;
+      const abortController = new AbortController();
+      activeRuns.set(requestId, {
+        cancel: () => {
+          cancelled = true;
+          abortController.abort();
+        },
+      });
       const timeoutMs = getAgentRunTimeoutMs();
       const deadline = createPausableDeadline(timeoutMs, `Agent run timed out after ${timeoutMs / 1000}s`);
 
@@ -416,7 +435,7 @@ export function registerAgentHandlers() {
        * have to reach the same subscriptions. */
       const forwardStreamEvents = async (segment: AsyncIterable<RunStreamEvent>): Promise<void> => {
         for await (const ev of segment) {
-          if (timedOut) break;
+          if (timedOut || cancelled) break;
           if (ev.type === "raw_model_stream_event") {
             const e = ev as RunRawModelStreamEvent;
             if (e.data.type === "output_text_delta") {
@@ -476,14 +495,15 @@ export function registerAgentHandlers() {
           const segment = await run(target, segmentInput as Parameters<typeof run>[1], {
             stream: true,
             maxTurns: MAX_TURNS_PER_RUN,
+            signal: abortController.signal,
           });
           await forwardStreamEvents(segment);
           await segment.completed;
-          if (!timedOut) logTokenUsage(segment, traceId);
+          if (!timedOut && !cancelled) logTokenUsage(segment, traceId);
           return segment;
         };
         devLog(`[agent:runStream] requestId=${requestId} running ${label}`);
-        return resolveApprovalsAndRun(runOnce, input, requestApproval, () => timedOut);
+        return resolveApprovalsAndRun(runOnce, input, requestApproval, () => timedOut || cancelled);
       };
 
       // Passed into buildOrchestrator so every specialist agent gets wrapped as a tool the
@@ -569,7 +589,6 @@ export function registerAgentHandlers() {
       // an approval pause — see its class comment.
       return await Promise.race([runPromise, deadline.promise])
         .catch((err) => {
-          timedOut = true;
           // A dialog waiting on a run that just died would otherwise hang until its own
           // 5-minute timeout.
           abandonApprovalsFor(requestId);
@@ -578,11 +597,36 @@ export function registerAgentHandlers() {
           // Same reasoning, for the checklist widget: a run that dies mid-plan must not
           // leave an item stuck showing "in progress" forever.
           cancelPendingForTrace(traceId);
+          // A user-initiated stop resolves rather than rejects — the caller (AgentsApp)
+          // falls back to whatever text had already streamed instead of showing an error
+          // toast for something the user asked for. A genuine timeout/failure still throws.
+          if (cancelled) return "";
+          timedOut = true;
           throw err;
         })
-        .finally(() => deadline.clear());
+        .finally(() => {
+          deadline.clear();
+          activeRuns.delete(requestId);
+        });
     }
   );
+
+  /** Cancels an in-flight run by requestId. Unknown/already-settled requestId is a silent
+   * no-op — same reasoning as agent:approveTool: a double-click, or a stop that lands just
+   * after the run finished on its own, must not surface as an error to the user. Aborting
+   * the SDK's run() only stops a segment actually in flight — a run paused waiting on an
+   * approval or ask_user answer isn't inside run() at all, so its pending prompt is settled
+   * here too (same "abandoned" path a timed-out run already uses), which is what actually
+   * unblocks resolveApprovalsAndRun's isAborted check and lets the run's catch handler see
+   * `cancelled` and resolve "" instead of hanging until the 5-minute approval timeout. */
+  ipcMain.handle("agent:stop", (_event, requestId: string) => {
+    if (typeof requestId !== "string" || requestId.length === 0) {
+      throw new Error("agent:stop requires a non-empty requestId");
+    }
+    activeRuns.get(requestId)?.cancel();
+    abandonApprovalsFor(requestId);
+    abandonQuestionsFor(requestId);
+  });
 
   /** The renderer's answer to an agent:stream-approval prompt. An unknown or already-settled
    * approvalId is a no-op rather than an error — a double-click on Approve, or a reply that

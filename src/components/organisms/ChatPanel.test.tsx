@@ -49,6 +49,7 @@ function renderPanel(messages: ChatMessage[], overrides = {}) {
       // below (written for that flat cap) still assert against.
       visibleConversationCount={5}
       onSend={vi.fn()}
+      onStop={vi.fn()}
       onStartVoice={vi.fn()}
       onStopVoice={vi.fn()}
       {...overrides}
@@ -223,15 +224,17 @@ describe("ChatPanel", () => {
     expect(container.querySelector(".thinking-toggle button")).toBeNull();
   });
 
-  it("shows an expandable duration toggle once a finished turn has tool-call steps", () => {
+  it("shows an expandable duration toggle open by default once a finished turn has tool-call steps", () => {
     const { container } = renderPanel([
       msg(1, { elapsedMs: 12000, steps: [{ type: "tool_called", label: "get_settings" }] }),
     ]);
     const btn = container.querySelector(".thinking-toggle-btn") as HTMLButtonElement;
     expect(btn.textContent).toBe("Thought for 12s");
-    expect(container.querySelector(".thinking-steps")).toBeNull();
-    fireEvent.click(btn);
+    // Open by default — this mounts right as the live indicator it replaces unmounts, so
+    // the activity trace stays visible instead of collapsing the instant the turn finishes.
     expect(container.querySelector(".thinking-steps")?.textContent).toContain("get_settings");
+    fireEvent.click(btn);
+    expect(container.querySelector(".thinking-steps")).toBeNull();
   });
 
   it("renders the live indicator while a turn is in flight, not a completed toggle", () => {

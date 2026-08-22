@@ -1,6 +1,6 @@
 import { test, expect, type ElectronApplication, type Page } from "@playwright/test";
 import { resolveE2EProvider } from "./providerConfig";
-import { launchSandboxedApp, launchApp, completeOnboarding, typeIntoField, openDb, pollUntil } from "./helpers";
+import { launchSandboxedApp, launchApp, completeOnboarding, typeIntoField, clickSelector, openDb, pollUntil } from "./helpers";
 
 // The only spec in this suite that makes a real, billed AI provider call — see
 // 0-cowork/plans/active/e2e-full-coverage.md Phase 4. Cost is whatever E2E_PROVIDER/.env.test
@@ -94,5 +94,52 @@ test.describe("Core chat flow", () => {
     checklistDb.close();
 
     expect(checklistRows.length, "no checklist_items row was written for this turn's trace_id").toBeGreaterThan(0);
+
+    // Reuses the same turn again — no second billed call. This turn's write_checklist call
+    // gives it a real tool-call step, so its assistant bubble renders an expandable
+    // ThinkingToggle (not the plain static duration line). Asserting the toggle starts open
+    // is the structural, model-wording-independent check for the "thinking trace shown then
+    // collapsed/disappeared" fix: it must render its activity rows immediately, not require a
+    // click to reveal them.
+    const toggle = page.locator(".thinking-toggle").last();
+    await expect(toggle.locator(".thinking-steps")).toBeVisible();
+  });
+
+  test("stop button cancels an in-flight run", async () => {
+    // Real, billed call (a run has to actually be in flight to cancel) — kept minimal:
+    // stopped as soon as the button appears, so this bills only the tokens generated before
+    // abort, not a full reply. A prompt nudging a slower/longer reply gives the click a
+    // realistic window to land before the run would have finished on its own anyway.
+    await typeIntoField(page, "#inp", "Count from 1 to 20, one number per line, nothing else.");
+    await page.keyboard.press("Enter");
+
+    const stopButton = page.locator("#sbtn");
+    await expect(stopButton).toHaveAttribute("aria-label", /^Stop /, { timeout: 15_000 });
+    // Locator clicks time out on "element is not stable" against this app's continuous
+    // framer-motion animation (and a driver.js tour overlay can intercept pointer events
+    // entirely) — see helpers.ts's clickSelector comment.
+    await clickSelector(page, "#sbtn");
+
+    // The run resolves (not rejects) on a user-initiated stop — see agent:runStream's catch
+    // handler in electron/main/ipc/agent.ts — so the textarea returns to its idle state well
+    // before the app's own agentRunTimeoutSeconds would have forced it. #sbtn itself
+    // disappears rather than reverting to "Send" — the field's text was already cleared when
+    // the turn was sent, and ChatInputBar only renders the button while responding or while
+    // there's text to send.
+    await expect(page.locator("#inp")).toBeEnabled({ timeout: 20_000 });
+    await expect(stopButton).toHaveCount(0);
+
+    // The stopped turn must never fall back to "(no response)" — that copy is for a genuine
+    // empty reply, and reads as a bug when what actually happened is the user stopped it.
+    // Not asserting the exact "Stopped." text: if a chunk or two streamed before the click
+    // landed, finalText falls back to that partial text instead (see AgentsApp.tsx's
+    // finalText derivation) — real, model-timing-dependent, and not something this test
+    // should pin down to an exact string.
+    const db = openDb(userData);
+    const lastAssistant = db
+      .prepare("SELECT text FROM messages WHERE role = 'assistant' ORDER BY id DESC LIMIT 1")
+      .get() as { text: string } | undefined;
+    db.close();
+    expect(lastAssistant?.text).not.toBe("(no response)");
   });
 });

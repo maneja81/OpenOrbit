@@ -79,7 +79,6 @@ export default function AgentsApp() {
   const orchestratorRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const agentRefs = useRef<Record<AgentId, HTMLDivElement | null>>({});
-  const resetStepsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Wall-clock start of the turn currently in flight, read by the live "thinking" indicator
    * (via ChatPanel's liveStartedAt prop) to tick its own elapsed timer. handleSend's own
    * closure keeps its own `startedAt` local for computing elapsedMs — this state exists only
@@ -99,6 +98,17 @@ export default function AgentsApp() {
   const communicatingClearTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const [steps, setSteps] = useState<StepEvent[]>([{ type: "waiting", label: "Waiting for message…" }]);
   const [orchestratorResponding, setOrchestratorResponding] = useState(false);
+  // The requestId of the run currently in flight, if any — read by handleStop, which has no
+  // other way to reach the requestId scoped inside handleSend's closure. Cleared in
+  // handleSend's own .finally() alongside orchestratorResponding, so it never outlives the
+  // run it names.
+  const activeRequestIdRef = useRef<string | null>(null);
+  // Set by handleStop, read by handleSend's runStream resolution to tell "the user stopped
+  // this" apart from "the model genuinely returned nothing" — main resolves both the same
+  // way (empty string), since it has no notion of the user-facing copy either case should
+  // show. Not cleared on the next send: handleSend's own .then() clears it once read, so a
+  // stale value can only ever match its own requestId.
+  const cancelledRequestIdRef = useRef<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSection | undefined>(undefined);
   const [kbModalOpen, setKbModalOpen] = useState(false);
@@ -522,12 +532,6 @@ export default function AgentsApp() {
       setThinking(true);
       setOrchestratorResponding(true);
 
-      // A new send supersedes any pending "back to waiting" reset from a prior run.
-      if (resetStepsTimerRef.current) {
-        clearTimeout(resetStepsTimerRef.current);
-        resetStepsTimerRef.current = null;
-      }
-
       if (!hasAgentsAPI()) {
         setTimeout(() => {
           setOrchestratorResponding(false);
@@ -539,6 +543,7 @@ export default function AgentsApp() {
       }
 
       const requestId = crypto.randomUUID();
+      activeRequestIdRef.current = requestId;
       let streamedText = "";
       let respondingLogged = false;
       let assistantMessageId: string | null = null;
@@ -668,10 +673,15 @@ export default function AgentsApp() {
       window.agentsAPI.agent
         .runStream(directedAgent?.rest ?? value, requestId, directedAgent?.agent.name)
         .then((result) => {
+          const wasCancelled = cancelledRequestIdRef.current === requestId;
+          if (wasCancelled) cancelledRequestIdRef.current = null;
           // finalOutput is authoritative (covers handoffs/tool calls where the streamed
           // deltas might not perfectly equal the final text) — falls back to whatever
-          // streamed in if it's somehow empty.
-          const finalText = result || streamedText || "(no response)";
+          // streamed in if it's somehow empty. A user-initiated stop resolves the same way a
+          // genuinely empty reply does (both "" from main — see agent:runStream's catch
+          // handler), so the fallback copy has to come from wasCancelled, not from result
+          // itself.
+          const finalText = result || streamedText || (wasCancelled ? "Stopped." : "(no response)");
           turnSteps = [...turnSteps, { type: "responded", label: `${settings.agentName} responded` }];
           setSteps(turnSteps);
           // The live orbit-scene feed already shows the generic bookkeeping steps
@@ -706,11 +716,11 @@ export default function AgentsApp() {
           } else {
             revealMessage();
           }
-          // Hold the "responded" entry for 10s, then return the feed to its idle state.
-          resetStepsTimerRef.current = setTimeout(() => {
-            setSteps([{ type: "waiting", label: "Waiting for message…" }]);
-            resetStepsTimerRef.current = null;
-          }, 10000);
+          // The feed stays on the turn's final state ("... responded") until the next send
+          // overwrites it at the top of this handler — no timed reset back to idle. A timed
+          // reset here previously wiped the just-shown tool activity out from under the user
+          // a few seconds after it appeared, which read as the response disappearing rather
+          // than the feed going idle.
           // Cipher's create_agent tool (and any future agent-mutating tool) writes
           // directly to the agents table from the main process — this hook's local
           // state has no other way to learn a row appeared, so resync after every run.
@@ -735,6 +745,7 @@ export default function AgentsApp() {
           setOrchestratorResponding(false);
           setThinking(false);
           setRunStartedAt(null);
+          if (activeRequestIdRef.current === requestId) activeRequestIdRef.current = null;
           playSfx("complete");
         });
     },
@@ -756,10 +767,11 @@ export default function AgentsApp() {
     ]
   );
 
-  useEffect(() => {
-    return () => {
-      if (resetStepsTimerRef.current) clearTimeout(resetStepsTimerRef.current);
-    };
+  const handleStop = useCallback(() => {
+    const requestId = activeRequestIdRef.current;
+    if (!requestId || !hasAgentsAPI()) return;
+    cancelledRequestIdRef.current = requestId;
+    window.agentsAPI.agent.stop(requestId);
   }, []);
 
   // A tool marked "ask before running" pauses its agent run in the main process and waits
@@ -1163,10 +1175,12 @@ export default function AgentsApp() {
                   ? "responding"
                   : undefined
           }
+          responding={orchestratorResponding}
           onShowFullHistory={() => setChatHistoryOpen(true)}
           visibleConversationCount={settings.chatVisibleConversations}
           autoLoadRemoteImages={settings.remoteImagesAutoLoad}
           onSend={() => handleSend()}
+          onStop={handleStop}
           onStartVoice={startVoice}
           onStopVoice={stopVoice}
         />

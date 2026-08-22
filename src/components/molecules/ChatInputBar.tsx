@@ -34,7 +34,12 @@ interface ChatInputBarProps {
    * thing — "approve or decline" is wrong (and was shown, misleadingly) while an ask_user
    * card is actually what's waiting for input. Ignored when sendDisabled is false. */
   sendDisabledReason?: "approval" | "question" | "responding";
+  /** True for the whole span of an in-flight run, including its approval/question pauses —
+   * swaps the send button for a Stop button so a run can be cancelled mid-response instead
+   * of only ever waited out. */
+  responding?: boolean;
   onSend: () => void;
+  onStop: () => void;
   onStartVoice: () => void;
   onStopVoice: () => void;
 }
@@ -68,7 +73,9 @@ export default function ChatInputBar({
   agents,
   sendDisabled,
   sendDisabledReason,
+  responding,
   onSend,
+  onStop,
   onStartVoice,
   onStopVoice,
 }: ChatInputBarProps) {
@@ -358,21 +365,21 @@ export default function ChatInputBar({
                   <TablerIcon name={transcribing ? "ti-loader-2" : "ti-microphone"} />
                 </IconButton>
               )}
-              {hasText && (
-                <IconButton
-                  id="sbtn"
-                  aria-label={
-                    sendDisabled
-                      ? sendDisabledReason === "responding"
-                        ? `Waiting for ${agentName} to finish`
-                        : "Waiting for your approval"
-                      : "Send"
-                  }
-                  disabled={sendDisabled}
-                  onClick={handleSendClick}
-                >
-                  <TablerIcon name="ti-arrow-up" />
+              {responding ? (
+                <IconButton id="sbtn" aria-label={`Stop ${agentName}`} onClick={onStop}>
+                  <TablerIcon name="ti-player-stop" />
                 </IconButton>
+              ) : (
+                hasText && (
+                  <IconButton
+                    id="sbtn"
+                    aria-label={sendDisabled ? "Waiting for your approval" : "Send"}
+                    disabled={sendDisabled}
+                    onClick={handleSendClick}
+                  >
+                    <TablerIcon name="ti-arrow-up" />
+                  </IconButton>
+                )
               )}
             </div>
           </div>

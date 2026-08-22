@@ -27,6 +27,7 @@ import { registerUserInfoHandlers } from "./ipc/userInfo";
 import { registerAppInfoHandlers } from "./ipc/appInfo";
 import { registerUpdateCheckHandlers } from "./ipc/updateCheck";
 import { ensureAppDirectories, migrateLegacyUserData } from "./appDirs";
+import { applyDevEnvSeed } from "./devSeed";
 import { startExplorerDaemon, stopExplorerDaemon } from "./ai/webSearchDaemon";
 import { startTaskScheduler, stopTaskScheduler, waitForInFlightPoll } from "./tasks/scheduler";
 
@@ -102,6 +103,9 @@ app.whenReady().then(() => {
   // Before ensureAppDirectories(): empty directories at the new root would block the move.
   migrateLegacyUserData();
   ensureAppDirectories();
+  // Before the IPC handlers below: it writes settings/providers rows directly, the same way
+  // onboarding would, so anything reading settings afterward sees the seeded values.
+  if (is.dev) applyDevEnvSeed(process.argv);
   registerAppPingHandler();
   registerProviderHandlers();
   registerFilesystemHandlers();
