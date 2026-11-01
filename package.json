@@ -97,7 +97,7 @@
     "remark-gfm": "^4.0.1",
     "word-extractor": "^1.0.4",
     "xml2js": "^0.6.2",
-    "zod": "^4.4.3"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@electron-toolkit/utils": "^4.0.0",
